@@ -103,15 +103,21 @@ export default function CzUploadTab({ projectId }: Props) {
     } finally { setRegenerating(false); }
   }
 
-  async function deleteBatch(id: string) {
-    if (!confirm('Удалить эту партию ЧЗ? Это действие необратимо.')) return;
+  async function deleteBatch(id: string, force = false) {
+    const batch = batches.find((b) => b.id === id);
+    const usedCount = batch?.used ?? 0;
+    const msg = usedCount > 0
+      ? `В этой партии ${usedCount} использованных кодов. Удаление сделает напечатанные этикетки невалидируемыми. Точно удалить?`
+      : 'Удалить эту партию ЧЗ? Это действие необратимо.';
+    if (!confirm(msg)) return;
     setError('');
     try {
-      const res = await fetch(`/api/projects/${projectId}/cz/${id}`, {
+      const url = `/api/projects/${projectId}/cz/${id}${force || usedCount > 0 ? '?force=1' : ''}`;
+      const res = await fetch(url, {
         method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      if (!res.ok) throw new Error(data.message ?? data.error ?? `HTTP ${res.status}`);
       if (czBatchId === id) { setCzBatchId(null); setPreviews([]); }
       await loadAll();
     } catch (err: any) { setError(err.message); }
@@ -214,11 +220,13 @@ export default function CzUploadTab({ projectId }: Props) {
                   <td className="py-2">{b.used}</td>
                   <td className="py-2 text-right space-x-3">
                     <button onClick={() => regenerate(b.id)} className="text-blue-600 hover:underline">Превью</button>
-                    {b.used === 0 ? (
-                      <button onClick={() => deleteBatch(b.id)} className="text-red-600 hover:underline">Удалить</button>
-                    ) : (
-                      <span className="text-gray-400 text-xs">в работе</span>
-                    )}
+                    <button
+                      onClick={() => deleteBatch(b.id)}
+                      className={b.used > 0 ? 'text-orange-600 hover:underline' : 'text-red-600 hover:underline'}
+                      title={b.used > 0 ? 'В партии есть использованные коды — будут удалены принудительно' : ''}
+                    >
+                      Удалить
+                    </button>
                   </td>
                 </tr>
               ))}

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
 interface AuthUser {
   id: string;
@@ -13,9 +14,18 @@ interface AuthState {
   clearAuth: () => void;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
-  accessToken: null,
-  user: null,
-  setAuth: (accessToken, user) => set({ accessToken, user }),
-  clearAuth: () => set({ accessToken: null, user: null }),
-}));
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set) => ({
+      accessToken: null,
+      user: null,
+      setAuth: (accessToken, user) => set({ accessToken, user }),
+      clearAuth: () => set({ accessToken: null, user: null }),
+    }),
+    {
+      name: 'labelstudio-auth',
+      storage: createJSONStorage(() => localStorage),
+      partialize: (s) => ({ accessToken: s.accessToken, user: s.user }),
+    }
+  )
+);

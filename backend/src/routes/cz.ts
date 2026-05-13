@@ -147,21 +147,26 @@ router.get('/:id/cz/batches', async (req: AuthRequest, res: Response): Promise<v
   res.json(enriched);
 });
 
-// DELETE /api/projects/:id/cz/:czBatchId
+// DELETE /api/projects/:id/cz/:czBatchId?force=1
 router.delete('/:id/cz/:czBatchId', async (req: AuthRequest, res: Response): Promise<void> => {
   if (!(await getProjectOrFail(req.params.id, req, res))) return;
+  const force = req.query.force === '1' || req.query.force === 'true';
   const czBatch = await prisma.czBatch.findUnique({
     where: { id: req.params.czBatchId },
     include: { _count: { select: { codes: { where: { status: 'USED' } } } } },
   });
   if (!czBatch || czBatch.projectId !== req.params.id) { res.status(404).json({ error: 'Not found' }); return; }
-  if (czBatch._count.codes > 0) {
-    res.status(409).json({ error: 'Нельзя удалить: в партии есть использованные коды' });
+  if (czBatch._count.codes > 0 && !force) {
+    res.status(409).json({
+      error: 'in_use',
+      message: 'В партии есть использованные коды. Передайте force=1 для принудительного удаления.',
+      usedCount: czBatch._count.codes,
+    });
     return;
   }
   await prisma.czCode.deleteMany({ where: { czBatchId: czBatch.id } });
   await prisma.czBatch.delete({ where: { id: czBatch.id } });
-  res.json({ ok: true });
+  res.json({ ok: true, forced: force && czBatch._count.codes > 0 });
 });
 
 // GET /api/projects/:id/cz/stats
