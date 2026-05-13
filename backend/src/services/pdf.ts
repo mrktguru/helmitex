@@ -23,28 +23,37 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 }
 
 async function trimWhitespace(buf: Buffer, threshold: number): Promise<Buffer> {
-  // Custom bbox detection: find the tightest rectangle containing any pixel
-  // darker than `threshold`. This is far more aggressive than sharp.trim,
-  // which stops at the first non-white pixel and is fooled by thin gray
-  // borders on label sheets.
+  // Two-stage trim:
+  //  1) Build a "thick-content mask" by heavy-blurring the page and thresholding.
+  //     Thin frame lines (1-2 px) vanish after blur, while solid DataMatrix
+  //     blocks and dense text rows survive. The bbox is computed on the mask.
+  //  2) Crop the *original* (still high-resolution) image to that bbox and
+  //     binarize for crisp output.
   try {
-    const img = sharp(buf).ensureAlpha();
-    const meta = await img.metadata();
+    const base = sharp(buf).ensureAlpha();
+    const meta = await base.metadata();
     const w = meta.width ?? 0;
     const h = meta.height ?? 0;
     if (!w || !h) return buf;
 
-    const { data } = await img.raw().toBuffer({ resolveWithObject: true });
-    // RGBA, 4 bytes per pixel
-    let minX = w, minY = h, maxX = -1, maxY = -1;
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = (y * w + x) * 4;
-        const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
-        if (a < 16) continue;
-        // Luminance — only react to *really* dark pixels (DataMatrix, glyphs).
-        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-        if (lum < threshold) {
+    // Blur sigma proportional to page size — kills hairlines reliably.
+    const sigma = Math.max(2, Math.round(Math.min(w, h) * 0.004));
+    // Mask: 1 channel (grayscale), heavy blur, threshold to a binary image.
+    const maskRaw = await sharp(buf)
+      .grayscale()
+      .blur(sigma)
+      .threshold(threshold)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const mask = maskRaw.data;
+    const mw = maskRaw.info.width;
+    const mh = maskRaw.info.height;
+
+    let minX = mw, minY = mh, maxX = -1, maxY = -1;
+    for (let y = 0; y < mh; y++) {
+      for (let x = 0; x < mw; x++) {
+        // sharp.threshold inverts: pixels darker than threshold become 0 (black).
+        if (mask[y * mw + x] === 0) {
           if (x < minX) minX = x;
           if (y < minY) minY = y;
           if (x > maxX) maxX = x;
@@ -53,10 +62,10 @@ async function trimWhitespace(buf: Buffer, threshold: number): Promise<Buffer> {
       }
     }
 
-    if (maxX < 0 || maxY < 0) return buf; // empty page
+    if (maxX < 0 || maxY < 0) return buf;
 
-    // Small padding around content (1.5% of min dimension, min 4 px).
-    const pad = Math.max(4, Math.round(Math.min(w, h) * 0.015));
+    // Mask was computed at original resolution; map directly.
+    const pad = Math.max(4, Math.round(Math.min(w, h) * 0.01));
     const left = Math.max(0, minX - pad);
     const top = Math.max(0, minY - pad);
     const right = Math.min(w, maxX + pad + 1);
@@ -67,8 +76,6 @@ async function trimWhitespace(buf: Buffer, threshold: number): Promise<Buffer> {
 
     const out = await sharp(buf)
       .extract({ left, top, width: cropW, height: cropH })
-      // Crisp binarization keeps DataMatrix cells readable after any later
-      // resampling (pdf-lib draws at exact area size, viewers further scale).
       .threshold(160)
       .png({ compressionLevel: 9 })
       .toBuffer();
