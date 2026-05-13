@@ -129,7 +129,7 @@ const worker = new Worker<JobData>(
       for (let i = 0; i < codes.length; i++) {
         const code = codes[i];
         const t0 = Date.now();
-        const cacheKey = `cache/cz-png-v9/${code.czBatchId}/page-${code.pageIndex}.png`;
+        const cacheKey = `cache/cz-png-v10/${code.czBatchId}/page-${code.pageIndex}.png`;
 
         // Try cache first; fall back to converting and write to cache.
         let czPng: Buffer;

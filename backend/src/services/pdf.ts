@@ -23,79 +23,27 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 }
 
 async function trimWhitespace(buf: Buffer, _threshold: number): Promise<Buffer> {
-  // Step 1: precise bbox via sharp.trim() — anything not pure-white is content.
-  // Honest Sign source PDFs have a clean white page, so this gives a tight
-  // box around (DataMatrix + caption text).
-  // Step 2: scan rows on the trimmed image and locate the horizontal white
-  // gap that separates DM from caption. Crop above the gap.
-  // Step 3: pad to square so czArea letterbox keeps 1:1 ratio.
+  // Minimal & robust:
+  //  1) sharp.trim() — strip white margins precisely.
+  //  2) Pad to square — preserves DataMatrix 1:1 aspect when later
+  //     letterboxed into a non-square czArea.
+  // The human-readable caption stays attached; it does not interfere with
+  // scanning and removes the only source of crop-height ambiguity.
   try {
     const trimmed = await sharp(buf)
       .trim({ background: '#ffffff', threshold: 10 })
       .toBuffer();
-
     const meta = await sharp(trimmed).metadata();
-    const W = meta.width ?? 0;
-    const H = meta.height ?? 0;
-    if (!W || !H) return buf;
-
-    // Row darkness on the trimmed image.
-    const grayRaw = await sharp(trimmed)
-      .grayscale()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    const g = grayRaw.data;
-
-    const rowDark = new Int32Array(H);
-    for (let y = 0; y < H; y++) {
-      let c = 0;
-      const off = y * W;
-      for (let x = 0; x < W; x++) {
-        if (g[off + x] < 200) c++;
-      }
-      rowDark[y] = c;
-    }
-    let densest = 0, densestRow = 0;
-    for (let y = 0; y < H; y++) {
-      if (rowDark[y] > densest) { densest = rowDark[y]; densestRow = y; }
-    }
-
-    // Search below the densest row for a run of nearly-empty rows
-    // (≥1.5% of content height of rows with <1% dark pixels).
-    const gapMin = Math.max(6, Math.round(H * 0.015));
-    const rowEmptyThresh = Math.max(1, Math.round(W * 0.01));
-    let cutY = H;
-    let run = 0;
-    for (let y = densestRow + 1; y < H; y++) {
-      if (rowDark[y] <= rowEmptyThresh) {
-        run++;
-        if (run >= gapMin) { cutY = y - run + 1; break; }
-      } else {
-        run = 0;
-      }
-    }
-
-    // Crop original-trimmed image above the cut.
-    const cropH = Math.max(1, cutY);
-    let cropped = trimmed;
-    if (cropH < H) {
-      cropped = await sharp(trimmed)
-        .extract({ left: 0, top: 0, width: W, height: cropH })
-        .toBuffer();
-    }
-
-    const finalMeta = await sharp(cropped).metadata();
-    const fw = finalMeta.width ?? W;
-    const fh = finalMeta.height ?? cropH;
-    const side = Math.max(fw, fh);
-
-    const out = await sharp(cropped)
-      .threshold(180)
+    const w = meta.width ?? 0;
+    const h = meta.height ?? 0;
+    if (!w || !h) return buf;
+    const side = Math.max(w, h);
+    const out = await sharp(trimmed)
       .extend({
-        top:    Math.floor((side - fh) / 2),
-        bottom: Math.ceil((side - fh) / 2),
-        left:   Math.floor((side - fw) / 2),
-        right:  Math.ceil((side - fw) / 2),
+        top:    Math.floor((side - h) / 2),
+        bottom: Math.ceil((side - h) / 2),
+        left:   Math.floor((side - w) / 2),
+        right:  Math.ceil((side - w) / 2),
         background: { r: 255, g: 255, b: 255, alpha: 1 },
       })
       .png({ compressionLevel: 9 })
