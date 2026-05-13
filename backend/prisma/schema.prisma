@@ -51,8 +51,11 @@ model CzBatch {
   project    Project   @relation(fields: [projectId], references: [id])
   s3Key      String
   totalCount Int
+  fileHash   String?
   uploadedAt DateTime  @default(now())
   codes      CzCode[]
+
+  @@unique([projectId, fileHash])
 }
 
 model CzCode {

@@ -2,10 +2,11 @@ import { Router, Response } from 'express';
 import multer from 'multer';
 import { PDFDocument } from 'pdf-lib';
 import { z } from 'zod';
+import crypto from 'crypto';
 import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { getProjectOrFail } from './projects';
-import { uploadFile, getSignedUrl } from '../services/s3';
+import { uploadFile } from '../services/s3';
 
 const router = Router();
 router.use(authMiddleware);
@@ -41,6 +42,22 @@ router.post('/:id/cz', upload.single('file'), async (req: AuthRequest, res: Resp
   }
 
   const totalCount = parsed.data.totalCount ?? pageCount;
+
+  // Deduplicate by file hash within the project
+  const fileHash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
+  const existing = await prisma.czBatch.findFirst({
+    where: { projectId: req.params.id, fileHash },
+  });
+  if (existing) {
+    res.status(409).json({
+      error: 'duplicate',
+      message: 'Этот PDF уже был загружен ранее',
+      czBatchId: existing.id,
+      uploadedAt: existing.uploadedAt,
+    });
+    return;
+  }
+
   const s3Key = `cz/${req.params.id}/${Date.now()}.pdf`;
   await uploadFile(s3Key, req.file.buffer, 'application/pdf');
 
@@ -49,6 +66,7 @@ router.post('/:id/cz', upload.single('file'), async (req: AuthRequest, res: Resp
       projectId: req.params.id,
       s3Key,
       totalCount,
+      fileHash,
       codes: {
         createMany: {
           data: Array.from({ length: pageCount }, (_, i) => ({ pageIndex: i + 1 })),
@@ -57,23 +75,23 @@ router.post('/:id/cz', upload.single('file'), async (req: AuthRequest, res: Resp
     },
   });
 
-  // Generate preview URLs for first 3 pages (low-DPI, best-effort)
-  const previewUrls: string[] = [];
+  // Generate inline base64 previews for first 3 pages (no S3 signed URLs needed)
+  const previews: string[] = [];
   const previewErrors: string[] = [];
   for (let i = 1; i <= Math.min(3, pageCount); i++) {
-    const previewKey = `previews/${czBatch.id}/page-${i}.png`;
     try {
       const { convertPdfPageToPngPreview } = await import('../services/pdf');
       const pngBuffer = await convertPdfPageToPngPreview(req.file.buffer, i);
-      await uploadFile(previewKey, pngBuffer, 'image/png');
-      previewUrls.push(await getSignedUrl(previewKey, 3600));
+      // Also persist for the regenerate endpoint as a warm cache
+      await uploadFile(`previews/${czBatch.id}/page-${i}.png`, pngBuffer, 'image/png').catch(() => {});
+      previews.push(`data:image/png;base64,${pngBuffer.toString('base64')}`);
     } catch (err: any) {
       console.error(`[cz preview] batch=${czBatch.id} page=${i} failed:`, err?.message ?? err);
       previewErrors.push(`page ${i}: ${err?.message ?? 'unknown'}`);
     }
   }
 
-  res.status(201).json({ czBatchId: czBatch.id, totalCount, pageCount, previewUrls, previewErrors });
+  res.status(201).json({ czBatchId: czBatch.id, totalCount, pageCount, previews, previewErrors });
 });
 
 // POST /api/projects/:id/cz/:czBatchId/regenerate-previews
@@ -93,20 +111,57 @@ router.post('/:id/cz/:czBatchId/regenerate-previews', async (req: AuthRequest, r
   try { pageCount = (await PDFDocument.load(pdfBuffer)).getPageCount(); }
   catch { res.status(500).json({ error: 'Cached PDF unreadable' }); return; }
 
-  const previewUrls: string[] = [];
+  const previews: string[] = [];
   const previewErrors: string[] = [];
   for (let i = 1; i <= Math.min(3, pageCount); i++) {
-    const previewKey = `previews/${czBatch.id}/page-${i}.png`;
     try {
       const pngBuffer = await convertPdfPageToPngPreview(pdfBuffer, i);
-      await uploadFile(previewKey, pngBuffer, 'image/png');
-      previewUrls.push(await getSignedUrl(previewKey, 3600));
+      await uploadFile(`previews/${czBatch.id}/page-${i}.png`, pngBuffer, 'image/png').catch(() => {});
+      previews.push(`data:image/png;base64,${pngBuffer.toString('base64')}`);
     } catch (err: any) {
       console.error(`[cz preview regen] batch=${czBatch.id} page=${i} failed:`, err?.message ?? err);
       previewErrors.push(`page ${i}: ${err?.message ?? 'unknown'}`);
     }
   }
-  res.json({ previewUrls, previewErrors });
+  res.json({ previews, previewErrors });
+});
+
+// GET /api/projects/:id/cz/batches
+router.get('/:id/cz/batches', async (req: AuthRequest, res: Response): Promise<void> => {
+  if (!(await getProjectOrFail(req.params.id, req, res))) return;
+  const batches = await prisma.czBatch.findMany({
+    where: { projectId: req.params.id },
+    orderBy: { uploadedAt: 'desc' },
+    include: { _count: { select: { codes: true } } },
+  });
+  const enriched = await Promise.all(batches.map(async (b) => {
+    const used = await prisma.czCode.count({ where: { czBatchId: b.id, status: 'USED' } });
+    return {
+      id: b.id,
+      uploadedAt: b.uploadedAt,
+      totalCount: b.totalCount,
+      pageCount: b._count.codes,
+      used,
+    };
+  }));
+  res.json(enriched);
+});
+
+// DELETE /api/projects/:id/cz/:czBatchId
+router.delete('/:id/cz/:czBatchId', async (req: AuthRequest, res: Response): Promise<void> => {
+  if (!(await getProjectOrFail(req.params.id, req, res))) return;
+  const czBatch = await prisma.czBatch.findUnique({
+    where: { id: req.params.czBatchId },
+    include: { _count: { select: { codes: { where: { status: 'USED' } } } } },
+  });
+  if (!czBatch || czBatch.projectId !== req.params.id) { res.status(404).json({ error: 'Not found' }); return; }
+  if (czBatch._count.codes > 0) {
+    res.status(409).json({ error: 'Нельзя удалить: в партии есть использованные коды' });
+    return;
+  }
+  await prisma.czCode.deleteMany({ where: { czBatchId: czBatch.id } });
+  await prisma.czBatch.delete({ where: { id: czBatch.id } });
+  res.json({ ok: true });
 });
 
 // GET /api/projects/:id/cz/stats

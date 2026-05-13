@@ -3,7 +3,7 @@ import { z } from 'zod';
 import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { getProjectOrFail } from './projects';
-import { getSignedUrl } from '../services/s3';
+import { downloadFile } from '../services/s3';
 import { pdfQueue } from '../workers/pdfQueue';
 
 const router = Router();
@@ -21,15 +21,17 @@ router.post('/projects/:id/batches', async (req: AuthRequest, res: Response): Pr
 
   const { batchSize } = parsed.data;
 
-  // Get pending codes with locking (raw query)
+  // Get pending codes (lock to prevent two concurrent batch creations from claiming the same codes).
+  // CzCode has no projectId column directly — join via CzBatch.
   const codes = await prisma.$queryRaw<{ id: string; pageIndex: number; czBatchId: string }[]>`
-    SELECT id, "pageIndex", "czBatchId"
-    FROM "CzCode"
-    WHERE "projectId" = (SELECT id FROM "Project" WHERE id = ${req.params.id})
-      AND status = 'PENDING'
-    ORDER BY "pageIndex" ASC
+    SELECT c.id, c."pageIndex", c."czBatchId"
+    FROM "CzCode" c
+    JOIN "CzBatch" b ON b.id = c."czBatchId"
+    WHERE b."projectId" = ${req.params.id}
+      AND c.status = 'PENDING'
+    ORDER BY b."uploadedAt" ASC, c."pageIndex" ASC
     LIMIT ${batchSize}
-    FOR UPDATE SKIP LOCKED
+    FOR UPDATE OF c SKIP LOCKED
   `;
 
   if (codes.length === 0) {
@@ -87,21 +89,29 @@ router.get('/batches/:id/status', async (req: AuthRequest, res: Response): Promi
 
   let downloadUrl: string | undefined;
   if (batch.jobStatus === 'done' && batch.s3Key) {
-    downloadUrl = await getSignedUrl(batch.s3Key, 3600);
+    downloadUrl = `/api/batches/${batch.id}/download`;
   }
   res.json({ status: batch.jobStatus, downloadUrl });
 });
 
-// GET /api/batches/:id/download
+// GET /api/batches/:id/download  — streams the PDF through the API (no signed S3 URLs)
 router.get('/batches/:id/download', async (req: AuthRequest, res: Response): Promise<void> => {
   const batch = await prisma.outputBatch.findUnique({ where: { id: req.params.id } });
-  if (!batch || batch.jobStatus !== 'done') { res.status(404).json({ error: 'Not ready' }); return; }
+  if (!batch || batch.jobStatus !== 'done' || !batch.s3Key) { res.status(404).json({ error: 'Not ready' }); return; }
   if (req.user!.role !== 'ADMIN') {
     const project = await prisma.project.findUnique({ where: { id: batch.projectId } });
     if (project?.userId !== req.user!.id) { res.status(403).json({ error: 'Forbidden' }); return; }
   }
-  const url = await getSignedUrl(batch.s3Key, 3600);
-  res.redirect(url);
+  try {
+    const buf = await downloadFile(batch.s3Key);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="batch-${batch.fromIndex}-${batch.toIndex}.pdf"`);
+    res.setHeader('Content-Length', String(buf.length));
+    res.end(buf);
+  } catch (err: any) {
+    console.error('[batch download] failed:', err?.message ?? err);
+    res.status(500).json({ error: 'Download failed' });
+  }
 });
 
 export default router;

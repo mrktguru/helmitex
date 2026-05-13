@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
+import { useAuthStore } from '../store/useAuthStore';
 
 interface Props { projectId: string; }
 
@@ -24,6 +25,27 @@ export default function ExportTab({ projectId }: Props) {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [error, setError] = useState('');
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const token = useAuthStore((s) => s.accessToken);
+
+  async function downloadBatch(batchId: string, filename = 'batch.pdf') {
+    try {
+      const res = await fetch(`/api/batches/${batchId}/download`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err: any) {
+      setError(`Ошибка скачивания: ${err.message}`);
+    }
+  }
 
   async function load() {
     const [b, s] = await Promise.all([api.getBatches(projectId), api.getCzStats(projectId).catch(() => null)]);
@@ -100,15 +122,13 @@ export default function ExportTab({ projectId }: Props) {
         </div>
       )}
 
-      {downloadUrl && (
-        <a
-          href={downloadUrl}
-          target="_blank"
-          rel="noreferrer"
+      {downloadUrl && activeBatchId && (
+        <button
+          onClick={() => downloadBatch(activeBatchId, `batch-${activeBatchId}.pdf`)}
           className="inline-block bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg font-medium text-sm"
         >
           Скачать PDF
-        </a>
+        </button>
       )}
 
       {error && <p className="text-red-500 text-sm">{error}</p>}
@@ -138,7 +158,10 @@ export default function ExportTab({ projectId }: Props) {
                   </td>
                   <td className="py-2">
                     {b.jobStatus === 'done' && (
-                      <a href={`/api/batches/${b.id}/download`} className="text-blue-600 hover:underline">Скачать</a>
+                      <button
+                        onClick={() => downloadBatch(b.id, `batch-${b.fromIndex}-${b.toIndex}.pdf`)}
+                        className="text-blue-600 hover:underline"
+                      >Скачать</button>
                     )}
                   </td>
                 </tr>

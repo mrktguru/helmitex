@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import { api } from '../api/client';
 
@@ -6,11 +6,20 @@ interface Props { projectId: string; }
 
 interface Stats { total: number; used: number; pending: number; }
 
+interface CzBatchInfo {
+  id: string;
+  uploadedAt: string;
+  totalCount: number;
+  pageCount: number;
+  used: number;
+}
+
 export default function CzUploadTab({ projectId }: Props) {
   const [stats, setStats] = useState<Stats | null>(null);
+  const [batches, setBatches] = useState<CzBatchInfo[]>([]);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
   const [previewErrors, setPreviewErrors] = useState<string[]>([]);
   const [czBatchId, setCzBatchId] = useState<string | null>(null);
   const [regenerating, setRegenerating] = useState(false);
@@ -18,25 +27,29 @@ export default function CzUploadTab({ projectId }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const token = useAuthStore((s) => s.accessToken);
 
-  async function loadStats() {
+  const loadAll = useCallback(async () => {
+    try { setStats(await api.getCzStats(projectId)); } catch { /* ignore */ }
     try {
-      const s = await api.getCzStats(projectId);
-      setStats(s);
-    } catch { /* first upload hasn't happened yet */ }
-  }
+      const res = await fetch(`/api/projects/${projectId}/cz/batches`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setBatches(await res.json());
+    } catch { /* ignore */ }
+  }, [projectId, token]);
 
-  useEffect(() => { loadStats(); }, [projectId]);
+  useEffect(() => { loadAll(); }, [loadAll]);
 
   async function handleUpload(file: File) {
     setError('');
     setUploading(true);
     setProgress(0);
+    setPreviews([]);
+    setPreviewErrors([]);
     try {
       const formData = new FormData();
       formData.append('file', file);
 
-      // XHR for progress tracking
-      const result = await new Promise<{ czBatchId: string; totalCount: number; previewUrls: string[]; previewErrors?: string[] }>(
+      const result = await new Promise<{ czBatchId: string; totalCount: number; pageCount: number; previews: string[]; previewErrors?: string[] }>(
         (resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('POST', `/api/projects/${projectId}/cz`);
@@ -48,8 +61,10 @@ export default function CzUploadTab({ projectId }: Props) {
             if (xhr.status >= 200 && xhr.status < 300) {
               resolve(JSON.parse(xhr.responseText));
             } else {
-              const body = JSON.parse(xhr.responseText || '{}');
-              reject(new Error(body.error ?? `HTTP ${xhr.status}`));
+              let body: any = {};
+              try { body = JSON.parse(xhr.responseText || '{}'); } catch { /* ignore */ }
+              const msg = body.message ?? (typeof body.error === 'string' ? body.error : null) ?? `HTTP ${xhr.status}`;
+              reject(new Error(msg));
             }
           };
           xhr.onerror = () => reject(new Error('Upload failed'));
@@ -58,15 +73,46 @@ export default function CzUploadTab({ projectId }: Props) {
       );
 
       setCzBatchId(result.czBatchId);
-      setPreviewUrls(result.previewUrls ?? []);
+      setPreviews(result.previews ?? []);
       setPreviewErrors(result.previewErrors ?? []);
-      await loadStats();
+      await loadAll();
     } catch (err: any) {
       setError(err.message);
     } finally {
       setUploading(false);
       setProgress(0);
     }
+  }
+
+  async function regenerate() {
+    if (!czBatchId) return;
+    setRegenerating(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/projects/${projectId}/cz/${czBatchId}/regenerate-previews`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setPreviews(data.previews ?? []);
+      setPreviewErrors(data.previewErrors ?? []);
+    } catch (err: any) {
+      setError(err.message);
+    } finally { setRegenerating(false); }
+  }
+
+  async function deleteBatch(id: string) {
+    if (!confirm('Удалить эту партию ЧЗ? Это действие необратимо.')) return;
+    setError('');
+    try {
+      const res = await fetch(`/api/projects/${projectId}/cz/${id}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      if (czBatchId === id) { setCzBatchId(null); setPreviews([]); }
+      await loadAll();
+    } catch (err: any) { setError(err.message); }
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -83,7 +129,6 @@ export default function CzUploadTab({ projectId }: Props) {
 
   return (
     <div className="bg-white rounded-xl border p-6 space-y-6">
-      {/* Stats */}
       {stats && (
         <div className="flex gap-6">
           <Stat label="Всего" value={stats.total} />
@@ -92,7 +137,6 @@ export default function CzUploadTab({ projectId }: Props) {
         </div>
       )}
 
-      {/* Drop zone */}
       <div
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleDrop}
@@ -102,7 +146,7 @@ export default function CzUploadTab({ projectId }: Props) {
         <p className="text-gray-500">
           {uploading ? 'Загрузка...' : 'Перетащите PDF с кодами ЧЗ или нажмите для выбора'}
         </p>
-        <p className="text-xs text-gray-400 mt-1">Максимум 50 МБ</p>
+        <p className="text-xs text-gray-400 mt-1">Максимум 50 МБ · дубликат отклоняется автоматически</p>
         <input ref={fileRef} type="file" accept="application/pdf" className="hidden" onChange={handleFileInput} />
       </div>
 
@@ -114,48 +158,60 @@ export default function CzUploadTab({ projectId }: Props) {
 
       {error && <p className="text-red-500 text-sm">{error}</p>}
 
-      {previewUrls.length > 0 && (
+      {previews.length > 0 && (
         <div>
           <p className="text-sm font-medium mb-2">Предпросмотр первых кодов:</p>
           <div className="flex gap-3">
-            {previewUrls.map((url, i) => (
-              <img key={i} src={url} alt={`ЧЗ код ${i + 1}`} className="w-24 h-24 object-contain border rounded" />
+            {previews.map((src, i) => (
+              <img key={i} src={src} alt={`ЧЗ код ${i + 1}`} className="w-24 h-24 object-contain border rounded bg-white" />
             ))}
           </div>
         </div>
       )}
 
-      {previewUrls.length === 0 && czBatchId && (
+      {previews.length === 0 && czBatchId && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm space-y-2">
-          <p className="text-amber-800">
-            Не удалось сгенерировать предпросмотр (PDF загружен, коды доступны).
-          </p>
+          <p className="text-amber-800">Не удалось сгенерировать предпросмотр (PDF загружен, коды доступны).</p>
           {previewErrors.length > 0 && (
             <ul className="text-xs text-amber-700 list-disc list-inside">
               {previewErrors.map((e, i) => <li key={i}>{e}</li>)}
             </ul>
           )}
-          <button
-            onClick={async () => {
-              if (!czBatchId) return;
-              setRegenerating(true);
-              try {
-                const res = await fetch(`/api/projects/${projectId}/cz/${czBatchId}/regenerate-previews`, {
-                  method: 'POST', headers: { Authorization: `Bearer ${token}` },
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-                setPreviewUrls(data.previewUrls ?? []);
-                setPreviewErrors(data.previewErrors ?? []);
-              } catch (err: any) {
-                setError(err.message);
-              } finally { setRegenerating(false); }
-            }}
-            disabled={regenerating}
-            className="text-amber-900 underline text-sm disabled:opacity-50"
-          >
+          <button onClick={regenerate} disabled={regenerating} className="text-amber-900 underline text-sm disabled:opacity-50">
             {regenerating ? 'Генерация…' : 'Попробовать ещё раз'}
           </button>
+        </div>
+      )}
+
+      {batches.length > 0 && (
+        <div>
+          <h3 className="font-medium mb-2 text-sm">Загруженные партии ЧЗ</h3>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-400 border-b">
+                <th className="pb-2 font-normal">Дата</th>
+                <th className="pb-2 font-normal">Кодов</th>
+                <th className="pb-2 font-normal">Использовано</th>
+                <th className="pb-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {batches.map((b) => (
+                <tr key={b.id} className="border-b last:border-0">
+                  <td className="py-2">{new Date(b.uploadedAt).toLocaleString('ru')}</td>
+                  <td className="py-2">{b.pageCount}</td>
+                  <td className="py-2">{b.used}</td>
+                  <td className="py-2 text-right">
+                    {b.used === 0 ? (
+                      <button onClick={() => deleteBatch(b.id)} className="text-red-600 hover:underline">Удалить</button>
+                    ) : (
+                      <span className="text-gray-400 text-xs">в работе</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
