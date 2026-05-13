@@ -1,7 +1,9 @@
 import 'dotenv/config';
+import fs from 'fs';
 import { Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import { PDFDocument, rgb, StandardFonts, PDFFont } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
 import prisma from '../prisma/client';
 import { downloadFile, uploadFile, objectExists } from '../services/s3';
 import { convertPdfPageToPng } from '../services/pdf';
@@ -94,8 +96,35 @@ const worker = new Worker<JobData>(
       const assetCache = new Map<string, Buffer>();
 
       const outputDoc = await PDFDocument.create();
-      const regularFont = await outputDoc.embedFont(StandardFonts.Helvetica);
-      const boldFont = await outputDoc.embedFont(StandardFonts.HelveticaBold);
+      outputDoc.registerFontkit(fontkit);
+
+      // Try Unicode TTFs (Cyrillic support); fall back to Helvetica if missing.
+      const ttfCandidates = [
+        process.env.PDF_FONT_REGULAR,
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
+      ].filter(Boolean) as string[];
+      const ttfBoldCandidates = [
+        process.env.PDF_FONT_BOLD,
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+        '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf',
+      ].filter(Boolean) as string[];
+
+      async function loadFont(paths: string[], fallback: StandardFonts): Promise<PDFFont> {
+        for (const p of paths) {
+          try {
+            if (fs.existsSync(p)) {
+              const bytes = fs.readFileSync(p);
+              return await outputDoc.embedFont(bytes, { subset: true });
+            }
+          } catch (e) { console.warn('[worker] font load failed:', p, e); }
+        }
+        console.warn('[worker] no Unicode TTF found, falling back to', fallback);
+        return await outputDoc.embedFont(fallback);
+      }
+
+      const regularFont = await loadFont(ttfCandidates, StandardFonts.Helvetica);
+      const boldFont = await loadFont(ttfBoldCandidates, StandardFonts.HelveticaBold);
 
       for (let i = 0; i < codes.length; i++) {
         const code = codes[i];
@@ -199,6 +228,15 @@ const worker = new Worker<JobData>(
         data: { jobStatus: 'done', s3Key },
       });
     } catch (err) {
+      // Release codes back to PENDING so the user can retry without losing them.
+      try {
+        await prisma.czCode.updateMany({
+          where: { outputBatchId },
+          data: { status: 'PENDING', outputBatchId: null },
+        });
+      } catch (rollbackErr) {
+        console.error('[worker] failed to release codes:', rollbackErr);
+      }
       await prisma.outputBatch.update({
         where: { id: outputBatchId },
         data: { jobStatus: 'error' },
