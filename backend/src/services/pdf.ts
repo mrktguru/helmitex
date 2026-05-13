@@ -106,9 +106,23 @@ async function trimWhitespace(buf: Buffer, threshold: number): Promise<Buffer> {
     const out = await sharp(buf)
       .extract({ left, top, width: cropW, height: cropH })
       .threshold(160)
+      .toBuffer();
+
+    // Pad to a square so the DataMatrix keeps its 1:1 aspect ratio when later
+    // letterboxed into the (possibly non-square) czArea. Honest Sign DM codes
+    // are always square — any rectangular crop here is detection slack.
+    const side = Math.max(cropW, cropH);
+    const finalPng = await sharp(out)
+      .extend({
+        top:    Math.floor((side - cropH) / 2),
+        bottom: Math.ceil((side - cropH) / 2),
+        left:   Math.floor((side - cropW) / 2),
+        right:  Math.ceil((side - cropW) / 2),
+        background: { r: 255, g: 255, b: 255, alpha: 1 },
+      })
       .png({ compressionLevel: 9 })
       .toBuffer();
-    return Buffer.from(out);
+    return Buffer.from(finalPng);
   } catch (e) {
     console.warn('[pdf] trimWhitespace failed:', e);
     return buf;
