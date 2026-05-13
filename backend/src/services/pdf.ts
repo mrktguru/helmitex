@@ -2,12 +2,17 @@ import { fromPath } from 'pdf2pic';
 import { writeFileSync, readFileSync, unlinkSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
+import sharp from 'sharp';
 
 export interface ConvertOptions {
   density?: number;
   width?: number;
   height?: number;
   timeoutMs?: number;
+  /** Auto-crop near-white margins so only the actual artwork remains. Default: true. */
+  trim?: boolean;
+  /** Pixels considered "white" — anything >= threshold (0-255). Default: 245. */
+  trimThreshold?: number;
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
@@ -15,6 +20,16 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
     const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
     p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
   });
+}
+
+async function trimWhitespace(buf: Buffer, threshold: number): Promise<Buffer> {
+  // sharp >= 0.32: trim accepts {background, threshold}; older accepts number.
+  try {
+    return await sharp(buf).trim({ background: '#ffffff', threshold: 255 - threshold }).png().toBuffer();
+  } catch {
+    try { return await sharp(buf).trim(255 - threshold).png().toBuffer(); }
+    catch { return buf; }
+  }
 }
 
 export async function convertPdfPageToPng(
@@ -26,6 +41,8 @@ export async function convertPdfPageToPng(
   const width = opts.width ?? 1200;
   const height = opts.height ?? 1200;
   const timeoutMs = opts.timeoutMs ?? 45_000;
+  const doTrim = opts.trim ?? true;
+  const threshold = opts.trimThreshold ?? 245;
 
   const tmpDir = mkdtempSync(path.join(tmpdir(), 'cz-'));
   const pdfPath = path.join(tmpDir, 'input.pdf');
@@ -43,8 +60,9 @@ export async function convertPdfPageToPng(
 
     const result = await withTimeout(converter(pageIndex), timeoutMs, `pdf2pic page ${pageIndex}`);
     if (!result.path) throw new Error('Conversion produced no output');
-    const pngBuffer = readFileSync(result.path);
+    let pngBuffer = readFileSync(result.path);
     unlinkSync(result.path);
+    if (doTrim) pngBuffer = await trimWhitespace(pngBuffer, threshold);
     return pngBuffer;
   } finally {
     try { unlinkSync(pdfPath); } catch { /* ignore */ }
