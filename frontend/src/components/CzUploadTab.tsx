@@ -84,12 +84,14 @@ export default function CzUploadTab({ projectId }: Props) {
     }
   }
 
-  async function regenerate() {
-    if (!czBatchId) return;
+  async function regenerate(targetId?: string) {
+    const id = targetId ?? czBatchId;
+    if (!id) return;
     setRegenerating(true);
     setError('');
+    if (targetId) setCzBatchId(targetId);
     try {
-      const res = await fetch(`/api/projects/${projectId}/cz/${czBatchId}/regenerate-previews`, {
+      const res = await fetch(`/api/projects/${projectId}/cz/${id}/regenerate-previews`, {
         method: 'POST', headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -160,7 +162,16 @@ export default function CzUploadTab({ projectId }: Props) {
 
       {previews.length > 0 && (
         <div>
-          <p className="text-sm font-medium mb-2">Предпросмотр первых кодов:</p>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm font-medium">Предпросмотр первых кодов:</p>
+            {czBatchId && (
+              <button
+                onClick={() => regenerate()}
+                disabled={regenerating}
+                className="text-xs text-blue-600 hover:underline disabled:opacity-50"
+              >{regenerating ? 'Обновление…' : 'Обновить превью'}</button>
+            )}
+          </div>
           <div className="flex gap-3">
             {previews.map((src, i) => (
               <img key={i} src={src} alt={`ЧЗ код ${i + 1}`} className="w-24 h-24 object-contain border rounded bg-white" />
@@ -177,7 +188,7 @@ export default function CzUploadTab({ projectId }: Props) {
               {previewErrors.map((e, i) => <li key={i}>{e}</li>)}
             </ul>
           )}
-          <button onClick={regenerate} disabled={regenerating} className="text-amber-900 underline text-sm disabled:opacity-50">
+          <button onClick={() => regenerate()} disabled={regenerating} className="text-amber-900 underline text-sm disabled:opacity-50">
             {regenerating ? 'Генерация…' : 'Попробовать ещё раз'}
           </button>
         </div>
@@ -201,7 +212,8 @@ export default function CzUploadTab({ projectId }: Props) {
                   <td className="py-2">{new Date(b.uploadedAt).toLocaleString('ru')}</td>
                   <td className="py-2">{b.pageCount}</td>
                   <td className="py-2">{b.used}</td>
-                  <td className="py-2 text-right">
+                  <td className="py-2 text-right space-x-3">
+                    <button onClick={() => regenerate(b.id)} className="text-blue-600 hover:underline">Превью</button>
                     {b.used === 0 ? (
                       <button onClick={() => deleteBatch(b.id)} className="text-red-600 hover:underline">Удалить</button>
                     ) : (

@@ -129,7 +129,7 @@ const worker = new Worker<JobData>(
       for (let i = 0; i < codes.length; i++) {
         const code = codes[i];
         const t0 = Date.now();
-        const cacheKey = `cache/cz-png-v2/${code.czBatchId}/page-${code.pageIndex}.png`;
+        const cacheKey = `cache/cz-png-v3/${code.czBatchId}/page-${code.pageIndex}.png`;
 
         // Try cache first; fall back to converting and write to cache.
         let czPng: Buffer;
@@ -208,11 +208,27 @@ const worker = new Worker<JobData>(
 
         // Embed CZ code as rasterized PNG (critical — never copy vector content)
         const czImage = await outputDoc.embedPng(czPng);
+        // Fit into czArea preserving aspect ratio (letterbox / center).
+        const areaWpt = czArea.widthMm * MM_TO_PT;
+        const areaHpt = czArea.heightMm * MM_TO_PT;
+        const imgRatio = czImage.width / czImage.height;
+        const areaRatio = areaWpt / areaHpt;
+        let drawWpt: number;
+        let drawHpt: number;
+        if (imgRatio > areaRatio) {
+          drawWpt = areaWpt;
+          drawHpt = areaWpt / imgRatio;
+        } else {
+          drawHpt = areaHpt;
+          drawWpt = areaHpt * imgRatio;
+        }
+        const offsetX = (areaWpt - drawWpt) / 2;
+        const offsetY = (areaHpt - drawHpt) / 2;
         page.drawImage(czImage, {
-          x: toX(czArea.xMm),
-          y: toY(czArea.yMm, czArea.heightMm),
-          width: czArea.widthMm * MM_TO_PT,
-          height: czArea.heightMm * MM_TO_PT,
+          x: toX(czArea.xMm) + offsetX,
+          y: toY(czArea.yMm, czArea.heightMm) + offsetY,
+          width: drawWpt,
+          height: drawHpt,
         });
 
         await job.updateProgress(Math.round(((i + 1) / codes.length) * 100));
