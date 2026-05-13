@@ -2,6 +2,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl as awsGetSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -40,4 +41,15 @@ export async function downloadFile(key: string): Promise<Buffer> {
 
 export async function getSignedUrl(key: string, expiresIn: number): Promise<string> {
   return awsGetSignedUrl(s3, new GetObjectCommand({ Bucket: BUCKET, Key: key }), { expiresIn });
+}
+
+export async function objectExists(key: string): Promise<boolean> {
+  try {
+    await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }));
+    return true;
+  } catch (err: any) {
+    if (err?.$metadata?.httpStatusCode === 404 || err?.name === 'NotFound' || err?.Code === 'NotFound') return false;
+    if (err?.$metadata?.httpStatusCode === 403) return false; // MinIO sometimes returns 403 for missing
+    throw err;
+  }
 }

@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
 import ElementProperties from '../components/ElementProperties';
 import LayerList from '../components/LayerList';
+import { genId } from '../lib/uuid';
 
 const SCALE = 3.7795 * 3;
 const SNAP = 0.5;
@@ -34,7 +35,31 @@ function ean13Checksum(d: number[]): number {
   return (10 - (s % 10)) % 10;
 }
 
+function isValidEan13Input(value: string): boolean {
+  const digits = (value || '').replace(/\D/g, '');
+  return digits.length === 12 || digits.length === 13;
+}
+
+function drawInvalidBarcode(canvas: HTMLCanvasElement, msg: string) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.fillStyle = '#fef2f2';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = '#fca5a5';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, canvas.width - 1, canvas.height - 1);
+  ctx.fillStyle = '#b91c1c';
+  ctx.font = `${Math.max(9, Math.min(14, canvas.height * 0.22))}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(msg, canvas.width / 2, canvas.height / 2);
+}
+
 function drawEan13(canvas: HTMLCanvasElement, value: string) {
+  if (!isValidEan13Input(value)) {
+    drawInvalidBarcode(canvas, 'EAN-13: нужно 12 или 13 цифр');
+    return;
+  }
   const raw = value.replace(/\D/g, '').padEnd(12, '0').slice(0, 12);
   const digits = raw.split('').map(Number);
   const check = ean13Checksum(digits);
@@ -81,11 +106,19 @@ function BarcodeCanvas({ value, width, height }: { value: string; width: number;
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     if (!ref.current) return;
-    ref.current.width = Math.round(width);
-    ref.current.height = Math.round(height);
-    drawEan13(ref.current, value);
+    const w = Math.max(1, Math.round(width));
+    const h = Math.max(1, Math.round(height));
+    ref.current.width = w;
+    ref.current.height = h;
+    if (width <= 0 || height <= 0) return;
+    try {
+      drawEan13(ref.current, value);
+    } catch (err) {
+      console.error('drawEan13 failed:', err);
+      drawInvalidBarcode(ref.current, 'Ошибка отрисовки');
+    }
   }, [value, width, height]);
-  return <canvas ref={ref} style={{ width, height, display: 'block' }} />;
+  return <canvas ref={ref} style={{ width: Math.max(1, width), height: Math.max(1, height), display: 'block' }} />;
 }
 
 export default function Editor() {
@@ -138,8 +171,8 @@ export default function Editor() {
   }
 
   function addBarcode() {
-    const id = crypto.randomUUID();
-    store.addElement({ id, type: 'barcode', xMm: 5, yMm: 5, widthMm: 35, heightMm: 12, value: '460000000000', label: 'Штрихкод' } as any);
+    const id = genId();
+    store.addElement({ id, type: 'barcode', xMm: 5, yMm: 5, widthMm: 35, heightMm: 12, value: '4600000000006', label: 'Штрихкод' } as any);
     store.selectElement(id);
     setDrawMode('select');
   }
@@ -153,7 +186,7 @@ export default function Editor() {
       method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form,
     });
     const data = await res.json();
-    const id = crypto.randomUUID();
+    const id = genId();
     store.addElement({ id, type: 'image', xMm: 5, yMm: 5, widthMm: 20, heightMm: 20, s3Key: data.s3Key, filename: file.name, label: file.name } as any);
     store.selectElement(id);
   }
@@ -179,7 +212,7 @@ export default function Editor() {
     if (e.button !== 0 || drawMode === 'select') return;
     const mm = toMm(e);
     if (!mm) return;
-    const newId = crypto.randomUUID();
+    const newId = genId();
     drawing.current = { startXmm: mm.xMm, startYmm: mm.yMm, newId };
     setDrawRect({ x: mm.xMm * SCALE, y: mm.yMm * SCALE, w: 0, h: 0 });
   }, [drawMode]);

@@ -3,7 +3,7 @@ import { Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import { PDFDocument, rgb, StandardFonts, PDFFont } from 'pdf-lib';
 import prisma from '../prisma/client';
-import { downloadFile, uploadFile } from '../services/s3';
+import { downloadFile, uploadFile, objectExists } from '../services/s3';
 import { convertPdfPageToPng } from '../services/pdf';
 import { generateEan13Png } from '../services/barcode';
 
@@ -99,10 +99,23 @@ const worker = new Worker<JobData>(
 
       for (let i = 0; i < codes.length; i++) {
         const code = codes[i];
-        const czPdfBuffer = batchPdfs.get(code.czBatchId)!;
+        const t0 = Date.now();
+        const cacheKey = `cache/cz-png/${code.czBatchId}/page-${code.pageIndex}.png`;
 
-        // Convert CZ page to PNG at 300 DPI (critical: preserve DataMatrix integrity)
-        const czPng = await convertPdfPageToPng(czPdfBuffer, code.pageIndex);
+        // Try cache first; fall back to converting and write to cache.
+        let czPng: Buffer;
+        try {
+          if (await objectExists(cacheKey)) {
+            czPng = await downloadFile(cacheKey);
+          } else {
+            const czPdfBuffer = batchPdfs.get(code.czBatchId)!;
+            czPng = await convertPdfPageToPng(czPdfBuffer, code.pageIndex, { timeoutMs: 45_000 });
+            try { await uploadFile(cacheKey, czPng, 'image/png'); } catch (e) { console.warn('[worker] cache write failed:', e); }
+          }
+        } catch (err: any) {
+          console.error(`[worker] batch=${outputBatchId} page=${code.pageIndex} convert failed:`, err?.message ?? err);
+          throw err;
+        }
 
         const page = outputDoc.addPage([widthPt, heightPt]);
         const { height } = page.getSize();
@@ -174,6 +187,7 @@ const worker = new Worker<JobData>(
         });
 
         await job.updateProgress(Math.round(((i + 1) / codes.length) * 100));
+        console.log(`[worker] batch=${outputBatchId} ${i + 1}/${codes.length} page=${code.pageIndex} in ${Date.now() - t0}ms`);
       }
 
       const pdfBytes = await outputDoc.save();

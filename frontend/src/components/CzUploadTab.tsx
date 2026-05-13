@@ -11,6 +11,9 @@ export default function CzUploadTab({ projectId }: Props) {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+  const [previewErrors, setPreviewErrors] = useState<string[]>([]);
+  const [czBatchId, setCzBatchId] = useState<string | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const token = useAuthStore((s) => s.accessToken);
@@ -33,7 +36,7 @@ export default function CzUploadTab({ projectId }: Props) {
       formData.append('file', file);
 
       // XHR for progress tracking
-      const result = await new Promise<{ czBatchId: string; totalCount: number; previewUrls: string[] }>(
+      const result = await new Promise<{ czBatchId: string; totalCount: number; previewUrls: string[]; previewErrors?: string[] }>(
         (resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('POST', `/api/projects/${projectId}/cz`);
@@ -54,7 +57,9 @@ export default function CzUploadTab({ projectId }: Props) {
         }
       );
 
+      setCzBatchId(result.czBatchId);
       setPreviewUrls(result.previewUrls ?? []);
+      setPreviewErrors(result.previewErrors ?? []);
       await loadStats();
     } catch (err: any) {
       setError(err.message);
@@ -117,6 +122,40 @@ export default function CzUploadTab({ projectId }: Props) {
               <img key={i} src={url} alt={`ЧЗ код ${i + 1}`} className="w-24 h-24 object-contain border rounded" />
             ))}
           </div>
+        </div>
+      )}
+
+      {previewUrls.length === 0 && czBatchId && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm space-y-2">
+          <p className="text-amber-800">
+            Не удалось сгенерировать предпросмотр (PDF загружен, коды доступны).
+          </p>
+          {previewErrors.length > 0 && (
+            <ul className="text-xs text-amber-700 list-disc list-inside">
+              {previewErrors.map((e, i) => <li key={i}>{e}</li>)}
+            </ul>
+          )}
+          <button
+            onClick={async () => {
+              if (!czBatchId) return;
+              setRegenerating(true);
+              try {
+                const res = await fetch(`/api/projects/${projectId}/cz/${czBatchId}/regenerate-previews`, {
+                  method: 'POST', headers: { Authorization: `Bearer ${token}` },
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+                setPreviewUrls(data.previewUrls ?? []);
+                setPreviewErrors(data.previewErrors ?? []);
+              } catch (err: any) {
+                setError(err.message);
+              } finally { setRegenerating(false); }
+            }}
+            disabled={regenerating}
+            className="text-amber-900 underline text-sm disabled:opacity-50"
+          >
+            {regenerating ? 'Генерация…' : 'Попробовать ещё раз'}
+          </button>
         </div>
       )}
     </div>
