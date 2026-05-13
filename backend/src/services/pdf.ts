@@ -36,7 +36,11 @@ async function trimWhitespace(buf: Buffer, threshold: number): Promise<Buffer> {
     const h = meta.height ?? 0;
     if (!w || !h) return buf;
 
-    const sigma = Math.max(2, Math.round(Math.min(w, h) * 0.004));
+    // Mild blur is enough to erase hairline frames (1-2 px → mid-gray, above
+    // threshold) while preserving the structure of the DataMatrix where cells
+    // are 5+ px wide at 450 DPI. A heavy blur erodes the timing/sparse rows
+    // of the DM and produces a squashed crop.
+    const sigma = 1.5;
     const maskRaw = await sharp(buf)
       .grayscale()
       .blur(sigma)
@@ -61,17 +65,33 @@ async function trimWhitespace(buf: Buffer, threshold: number): Promise<Buffer> {
     if (maxX < 0 || maxY < 0) return buf;
 
     const contentW = maxX - minX + 1;
+    const contentH = maxY - minY + 1;
 
-    // Strip text rows from bottom: text characters have sparse coverage (<8%),
-    // DataMatrix cells form solid bands (≥8%). Scan bottom→top and stop at
-    // the first dense row → that's the real bottom of the DataMatrix.
-    let dmBottom = maxY;
-    for (let y = maxY; y >= minY; y--) {
-      let dark = 0;
+    // Strip the human-readable caption: search for an empty horizontal gap
+    // (≥ ~2% of content height of pure-white rows) starting just below the
+    // densest row of the page. The first such gap separates DataMatrix from
+    // the caption below it. If no clear gap exists, keep full bbox.
+    let densestRow = minY, densestCount = 0;
+    const rowCounts = new Int32Array(mh);
+    for (let y = minY; y <= maxY; y++) {
+      let c = 0;
       for (let x = minX; x <= maxX; x++) {
-        if (mask[y * mw + x] === 0) dark++;
+        if (mask[y * mw + x] === 0) c++;
       }
-      if (dark / contentW >= 0.08) { dmBottom = y; break; }
+      rowCounts[y] = c;
+      if (c > densestCount) { densestCount = c; densestRow = y; }
+    }
+
+    let dmBottom = maxY;
+    const gapNeeded = Math.max(4, Math.round(contentH * 0.02));
+    let gapRun = 0;
+    for (let y = densestRow + 1; y <= maxY; y++) {
+      if (rowCounts[y] === 0) {
+        gapRun++;
+        if (gapRun >= gapNeeded) { dmBottom = y - gapRun; break; }
+      } else {
+        gapRun = 0;
+      }
     }
 
     const pad = Math.max(4, Math.round(Math.min(w, h) * 0.01));
