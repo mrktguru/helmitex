@@ -1,0 +1,201 @@
+import 'dotenv/config';
+import { Worker } from 'bullmq';
+import IORedis from 'ioredis';
+import { PDFDocument, rgb, StandardFonts, PDFFont } from 'pdf-lib';
+import prisma from '../prisma/client';
+import { downloadFile, uploadFile } from '../services/s3';
+import { convertPdfPageToPng } from '../services/pdf';
+import { generateEan13Png } from '../services/barcode';
+
+const MM_TO_PT = 2.8346;
+
+interface JobData {
+  outputBatchId: string;
+  projectId: string;
+  codeIds: string[];
+}
+
+interface LabelElement {
+  id: string;
+  type: 'text' | 'barcode' | 'image' | 'rect';
+  xMm: number;
+  yMm: number;
+  widthMm?: number;
+  heightMm?: number;
+  text?: string;
+  fontSizePt?: number;
+  bold?: boolean;
+  color?: string;
+  value?: string;
+  s3Key?: string;
+  strokeColor?: string;
+  fillColor?: string | null;
+  strokeWidthPt?: number;
+}
+
+interface CzArea {
+  xMm: number;
+  yMm: number;
+  widthMm: number;
+  heightMm: number;
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const clean = hex.replace('#', '');
+  const num = parseInt(clean, 16);
+  return {
+    r: ((num >> 16) & 255) / 255,
+    g: ((num >> 8) & 255) / 255,
+    b: (num & 255) / 255,
+  };
+}
+
+const connection = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', {
+  maxRetriesPerRequest: null,
+});
+
+const worker = new Worker<JobData>(
+  'pdf-generation',
+  async (job) => {
+    const { outputBatchId, projectId } = job.data;
+
+    await prisma.outputBatch.update({
+      where: { id: outputBatchId },
+      data: { jobStatus: 'processing' },
+    });
+
+    try {
+      // Load template
+      const template = await prisma.labelTemplate.findUnique({ where: { projectId } });
+      if (!template) throw new Error('Template not found');
+
+      const elements = template.elements as unknown as LabelElement[];
+      const czArea = template.czArea as unknown as CzArea;
+      const widthPt = template.widthMm * MM_TO_PT;
+      const heightPt = template.heightMm * MM_TO_PT;
+
+      // Load all CZ codes for this batch
+      const codes = await prisma.czCode.findMany({
+        where: { outputBatchId },
+        include: { czBatch: true },
+        orderBy: { pageIndex: 'asc' },
+      });
+
+      // Group codes by czBatch to avoid downloading same PDF multiple times
+      const batchPdfs = new Map<string, Buffer>();
+      for (const code of codes) {
+        if (!batchPdfs.has(code.czBatchId)) {
+          const buf = await downloadFile(code.czBatch.s3Key);
+          batchPdfs.set(code.czBatchId, buf);
+        }
+      }
+
+      // Asset cache to avoid redundant S3 downloads
+      const assetCache = new Map<string, Buffer>();
+
+      const outputDoc = await PDFDocument.create();
+      const regularFont = await outputDoc.embedFont(StandardFonts.Helvetica);
+      const boldFont = await outputDoc.embedFont(StandardFonts.HelveticaBold);
+
+      for (let i = 0; i < codes.length; i++) {
+        const code = codes[i];
+        const czPdfBuffer = batchPdfs.get(code.czBatchId)!;
+
+        // Convert CZ page to PNG at 300 DPI (critical: preserve DataMatrix integrity)
+        const czPng = await convertPdfPageToPng(czPdfBuffer, code.pageIndex);
+
+        const page = outputDoc.addPage([widthPt, heightPt]);
+        const { height } = page.getSize();
+
+        // pdf-lib Y axis is bottom-up; convert top-down mm to bottom-up pt
+        const toX = (xMm: number) => xMm * MM_TO_PT;
+        const toY = (yMm: number, hMm = 0) => height - (yMm + hMm) * MM_TO_PT;
+
+        // Render template elements
+        for (const el of elements) {
+          if (el.type === 'rect') {
+            const { r, g, b } = hexToRgb(el.strokeColor ?? '#000000');
+            const fillRgb = el.fillColor ? hexToRgb(el.fillColor) : null;
+            page.drawRectangle({
+              x: toX(el.xMm),
+              y: toY(el.yMm, el.heightMm ?? 0),
+              width: (el.widthMm ?? 0) * MM_TO_PT,
+              height: (el.heightMm ?? 0) * MM_TO_PT,
+              borderColor: rgb(r, g, b),
+              borderWidth: el.strokeWidthPt ?? 1,
+              color: fillRgb ? rgb(fillRgb.r, fillRgb.g, fillRgb.b) : undefined,
+              opacity: fillRgb ? 1 : 0,
+            });
+          } else if (el.type === 'text') {
+            const { r, g, b } = hexToRgb(el.color ?? '#000000');
+            const font: PDFFont = el.bold ? boldFont : regularFont;
+            page.drawText(el.text ?? '', {
+              x: toX(el.xMm),
+              y: toY(el.yMm),
+              size: el.fontSizePt ?? 10,
+              font,
+              color: rgb(r, g, b),
+            });
+          } else if (el.type === 'barcode' && el.value) {
+            const barPng = await generateEan13Png(el.value);
+            const barImage = await outputDoc.embedPng(barPng);
+            page.drawImage(barImage, {
+              x: toX(el.xMm),
+              y: toY(el.yMm, el.heightMm ?? 0),
+              width: (el.widthMm ?? 20) * MM_TO_PT,
+              height: (el.heightMm ?? 10) * MM_TO_PT,
+            });
+          } else if (el.type === 'image' && el.s3Key) {
+            if (!assetCache.has(el.s3Key)) {
+              const buf = await downloadFile(el.s3Key);
+              assetCache.set(el.s3Key, buf);
+            }
+            const imgBuf = assetCache.get(el.s3Key)!;
+            const ext = el.s3Key.split('.').pop()?.toLowerCase();
+            const embeddedImg = ext === 'png'
+              ? await outputDoc.embedPng(imgBuf)
+              : await outputDoc.embedJpg(imgBuf);
+            page.drawImage(embeddedImg, {
+              x: toX(el.xMm),
+              y: toY(el.yMm, el.heightMm ?? 0),
+              width: (el.widthMm ?? 20) * MM_TO_PT,
+              height: (el.heightMm ?? 20) * MM_TO_PT,
+            });
+          }
+        }
+
+        // Embed CZ code as rasterized PNG (critical — never copy vector content)
+        const czImage = await outputDoc.embedPng(czPng);
+        page.drawImage(czImage, {
+          x: toX(czArea.xMm),
+          y: toY(czArea.yMm, czArea.heightMm),
+          width: czArea.widthMm * MM_TO_PT,
+          height: czArea.heightMm * MM_TO_PT,
+        });
+
+        await job.updateProgress(Math.round(((i + 1) / codes.length) * 100));
+      }
+
+      const pdfBytes = await outputDoc.save();
+      const s3Key = `output/${outputBatchId}.pdf`;
+      await uploadFile(s3Key, Buffer.from(pdfBytes), 'application/pdf');
+
+      await prisma.outputBatch.update({
+        where: { id: outputBatchId },
+        data: { jobStatus: 'done', s3Key },
+      });
+    } catch (err) {
+      await prisma.outputBatch.update({
+        where: { id: outputBatchId },
+        data: { jobStatus: 'error' },
+      });
+      throw err;
+    }
+  },
+  { connection, concurrency: 2 }
+);
+
+worker.on('completed', (job) => console.log(`Job ${job.id} completed`));
+worker.on('failed', (job, err) => console.error(`Job ${job?.id} failed:`, err));
+
+console.log('PDF generation worker started');

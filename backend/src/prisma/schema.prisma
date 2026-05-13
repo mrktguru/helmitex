@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  role         Role      @default(OPERATOR)
+  createdAt    DateTime  @default(now())
+  projects     Project[]
+}
+
+enum Role {
+  ADMIN
+  OPERATOR
+}
+
+model Project {
+  id            String         @id @default(uuid())
+  userId        String
+  user          User           @relation(fields: [userId], references: [id])
+  name          String
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  template      LabelTemplate?
+  czBatches     CzBatch[]
+  outputBatches OutputBatch[]
+}
+
+model LabelTemplate {
+  id           String   @id @default(uuid())
+  projectId    String   @unique
+  project      Project  @relation(fields: [projectId], references: [id])
+  widthMm      Float
+  heightMm     Float
+  elements     Json     // array of LabelElement objects
+  czArea       Json     // { xMm, yMm, widthMm, heightMm }
+  barcodeValue String?
+  updatedAt    DateTime @updatedAt
+}
+
+model CzBatch {
+  id         String    @id @default(uuid())
+  projectId  String
+  project    Project   @relation(fields: [projectId], references: [id])
+  s3Key      String
+  totalCount Int
+  uploadedAt DateTime  @default(now())
+  codes      CzCode[]
+}
+
+model CzCode {
+  id            String       @id @default(uuid())
+  czBatchId     String
+  czBatch       CzBatch      @relation(fields: [czBatchId], references: [id])
+  pageIndex     Int
+  status        CodeStatus   @default(PENDING)
+  usedAt        DateTime?
+  outputBatchId String?
+  outputBatch   OutputBatch? @relation(fields: [outputBatchId], references: [id])
+}
+
+enum CodeStatus {
+  PENDING
+  USED
+}
+
+model OutputBatch {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id])
+  s3Key     String   @default("")
+  jobStatus String   @default("pending")
+  fromIndex Int
+  toIndex   Int
+  count     Int
+  createdAt DateTime @default(now())
+  codes     CzCode[]
+}
