@@ -7,6 +7,7 @@ export interface BaseElement {
   type: ElementType;
   xMm: number;
   yMm: number;
+  label?: string;
 }
 
 export interface TextElement extends BaseElement {
