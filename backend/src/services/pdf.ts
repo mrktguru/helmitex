@@ -23,12 +23,15 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 }
 
 async function trimWhitespace(buf: Buffer, threshold: number): Promise<Buffer> {
-  // sharp >= 0.32: trim accepts {background, threshold}; older accepts number.
   try {
-    return await sharp(buf).trim({ background: '#ffffff', threshold: 255 - threshold }).png().toBuffer();
+    const out = await sharp(buf).trim({ background: '#ffffff', threshold: 255 - threshold }).png().toBuffer();
+    return Buffer.from(out);
   } catch {
-    try { return await sharp(buf).trim(255 - threshold).png().toBuffer(); }
-    catch { return buf; }
+    try {
+      // @ts-expect-error legacy numeric signature on older sharp versions
+      const out = await sharp(buf).trim(255 - threshold).png().toBuffer();
+      return Buffer.from(out);
+    } catch { return buf; }
   }
 }
 
@@ -60,7 +63,7 @@ export async function convertPdfPageToPng(
 
     const result = await withTimeout(converter(pageIndex), timeoutMs, `pdf2pic page ${pageIndex}`);
     if (!result.path) throw new Error('Conversion produced no output');
-    let pngBuffer = readFileSync(result.path);
+    let pngBuffer: Buffer = readFileSync(result.path);
     unlinkSync(result.path);
     if (doTrim) pngBuffer = await trimWhitespace(pngBuffer, threshold);
     return pngBuffer;
