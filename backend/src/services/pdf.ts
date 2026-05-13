@@ -67,7 +67,10 @@ async function trimWhitespace(buf: Buffer, threshold: number): Promise<Buffer> {
 
     const out = await sharp(buf)
       .extract({ left, top, width: cropW, height: cropH })
-      .png()
+      // Crisp binarization keeps DataMatrix cells readable after any later
+      // resampling (pdf-lib draws at exact area size, viewers further scale).
+      .threshold(160)
+      .png({ compressionLevel: 9 })
       .toBuffer();
     return Buffer.from(out);
   } catch (e) {
@@ -81,10 +84,13 @@ export async function convertPdfPageToPng(
   pageIndex: number,
   opts: ConvertOptions = {},
 ): Promise<Buffer> {
-  const density = opts.density ?? 300;
-  const width = opts.width ?? 1200;
-  const height = opts.height ?? 1200;
-  const timeoutMs = opts.timeoutMs ?? 45_000;
+  const density = opts.density ?? 450;
+  // No hard width/height cap by default — at 450 DPI an A4 page is ~3700px wide
+  // which is required for crisp DataMatrix after cropping. Callers that need
+  // small previews should pass explicit width/height.
+  const width = opts.width;
+  const height = opts.height;
+  const timeoutMs = opts.timeoutMs ?? 60_000;
   const doTrim = opts.trim ?? true;
   const threshold = opts.trimThreshold ?? 110;
 
@@ -98,8 +104,8 @@ export async function convertPdfPageToPng(
       saveFilename: 'page',
       savePath: tmpDir,
       format: 'png',
-      width,
-      height,
+      ...(width ? { width } : {}),
+      ...(height ? { height } : {}),
     });
 
     const result = await withTimeout(converter(pageIndex), timeoutMs, `pdf2pic page ${pageIndex}`);
@@ -115,5 +121,5 @@ export async function convertPdfPageToPng(
 
 // Lower-density variant for screen previews (faster, smaller files).
 export function convertPdfPageToPngPreview(pdfBuffer: Buffer, pageIndex: number): Promise<Buffer> {
-  return convertPdfPageToPng(pdfBuffer, pageIndex, { density: 120, width: 600, height: 600, timeoutMs: 20_000 });
+  return convertPdfPageToPng(pdfBuffer, pageIndex, { density: 200, timeoutMs: 25_000 });
 }

@@ -129,7 +129,7 @@ const worker = new Worker<JobData>(
       for (let i = 0; i < codes.length; i++) {
         const code = codes[i];
         const t0 = Date.now();
-        const cacheKey = `cache/cz-png-v3/${code.czBatchId}/page-${code.pageIndex}.png`;
+        const cacheKey = `cache/cz-png-v4/${code.czBatchId}/page-${code.pageIndex}.png`;
 
         // Try cache first; fall back to converting and write to cache.
         let czPng: Buffer;
@@ -138,7 +138,7 @@ const worker = new Worker<JobData>(
             czPng = await downloadFile(cacheKey);
           } else {
             const czPdfBuffer = batchPdfs.get(code.czBatchId)!;
-            czPng = await convertPdfPageToPng(czPdfBuffer, code.pageIndex, { timeoutMs: 45_000 });
+            czPng = await convertPdfPageToPng(czPdfBuffer, code.pageIndex, { timeoutMs: 60_000 });
             try { await uploadFile(cacheKey, czPng, 'image/png'); } catch (e) { console.warn('[worker] cache write failed:', e); }
           }
         } catch (err: any) {
