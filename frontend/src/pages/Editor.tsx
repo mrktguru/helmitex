@@ -22,10 +22,12 @@ export default function Editor() {
 
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
+  const [czSelected, setCzSelected] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
 
   // Drag state
   const dragging = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
+  const czDragging = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
@@ -118,7 +120,30 @@ export default function Editor() {
     dragging.current = { id, startX: e.clientX, startY: e.clientY, origX: el.xMm, origY: el.yMm };
   }, [store]);
 
+  const onCzMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    store.selectElement(null);
+    setCzSelected(true);
+    czDragging.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: store.czArea.xMm,
+      origY: store.czArea.yMm,
+    };
+  }, [store]);
+
   const onMouseMove = useCallback((e: React.MouseEvent) => {
+    if (czDragging.current) {
+      const dx = (e.clientX - czDragging.current.startX) / SCALE;
+      const dy = (e.clientY - czDragging.current.startY) / SCALE;
+      store.moveCzArea({
+        ...store.czArea,
+        xMm: snapToGrid(Math.max(0, czDragging.current.origX + dx)),
+        yMm: snapToGrid(Math.max(0, czDragging.current.origY + dy)),
+      });
+      return;
+    }
     if (!dragging.current) return;
     const dx = (e.clientX - dragging.current.startX) / SCALE;
     const dy = (e.clientY - dragging.current.startY) / SCALE;
@@ -128,7 +153,13 @@ export default function Editor() {
     } as any);
   }, [store]);
 
-  const onMouseUp = useCallback(() => { dragging.current = null; }, []);
+  const onMouseUp = useCallback(() => {
+    if (czDragging.current) {
+      czDragging.current = null;
+      store.setCzArea(store.czArea); // commit to history
+    }
+    dragging.current = null;
+  }, [store]);
 
   const canvasW = store.widthMm * SCALE;
   const canvasH = store.heightMm * SCALE;
@@ -198,14 +229,14 @@ export default function Editor() {
           onMouseMove={onMouseMove}
           onMouseUp={onMouseUp}
           onMouseLeave={onMouseUp}
-          onClick={() => store.selectElement(null)}
+          onClick={() => { store.selectElement(null); setCzSelected(false); }}
         >
           <div
             ref={canvasRef}
             style={{ width: canvasW, height: canvasH, position: 'relative' }}
             className="bg-white shadow-xl border border-gray-300"
           >
-            {/* CZ area — always visible, orange dashed */}
+            {/* CZ area — draggable, orange dashed */}
             <div
               style={{
                 position: 'absolute',
@@ -213,13 +244,16 @@ export default function Editor() {
                 top: store.czArea.yMm * SCALE,
                 width: store.czArea.widthMm * SCALE,
                 height: store.czArea.heightMm * SCALE,
-                border: '2px dashed #f97316',
+                border: czSelected ? '2px solid #f97316' : '2px dashed #f97316',
                 boxSizing: 'border-box',
-                pointerEvents: 'none',
+                cursor: 'move',
                 zIndex: 10,
+                userSelect: 'none',
+                boxShadow: czSelected ? '0 0 0 1px #f97316' : undefined,
               }}
+              onMouseDown={onCzMouseDown}
             >
-              <span style={{ fontSize: 10, color: '#f97316', padding: '1px 3px' }}>ЧЗ</span>
+              <span style={{ fontSize: 10, color: '#f97316', padding: '1px 3px', pointerEvents: 'none' }}>ЧЗ</span>
             </div>
 
             {/* Elements */}

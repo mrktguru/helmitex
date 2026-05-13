@@ -74,6 +74,7 @@ interface EditorState {
   selectElement: (id: string | null) => void;
   reorderElements: (newOrder: LabelElement[]) => void;
   setCzArea: (area: CzArea) => void;
+  moveCzArea: (area: CzArea) => void;
   setBarcodeValue: (v: string) => void;
   loadTemplate: (data: {
     widthMm: number; heightMm: number;
@@ -133,6 +134,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().pushHistory();
     set({ czArea: area });
   },
+
+  moveCzArea: (area) => set({ czArea: area }),
 
   setBarcodeValue: (v) => set({ barcodeValue: v }),
 
