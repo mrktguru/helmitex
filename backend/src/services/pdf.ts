@@ -23,22 +23,20 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 }
 
 async function trimWhitespace(buf: Buffer, threshold: number): Promise<Buffer> {
-  // Two-stage trim:
-  //  1) Build a "thick-content mask" by heavy-blurring the page and thresholding.
-  //     Thin frame lines (1-2 px) vanish after blur, while solid DataMatrix
-  //     blocks and dense text rows survive. The bbox is computed on the mask.
-  //  2) Crop the *original* (still high-resolution) image to that bbox and
-  //     binarize for crisp output.
+  // Strategy:
+  //  1) Build a blurred mask — thin frame lines vanish, DataMatrix block survives.
+  //  2) Find content bbox on the mask.
+  //  3) Strip the human-readable text below the DataMatrix by scanning rows
+  //     from the bottom and stopping at the first "dense" row (≥8% dark pixels
+  //     spanning the width), which is the DataMatrix bottom border.
+  //  4) Crop original, then binarize for crispness.
   try {
-    const base = sharp(buf).ensureAlpha();
-    const meta = await base.metadata();
+    const meta = await sharp(buf).metadata();
     const w = meta.width ?? 0;
     const h = meta.height ?? 0;
     if (!w || !h) return buf;
 
-    // Blur sigma proportional to page size — kills hairlines reliably.
     const sigma = Math.max(2, Math.round(Math.min(w, h) * 0.004));
-    // Mask: 1 channel (grayscale), heavy blur, threshold to a binary image.
     const maskRaw = await sharp(buf)
       .grayscale()
       .blur(sigma)
@@ -52,7 +50,6 @@ async function trimWhitespace(buf: Buffer, threshold: number): Promise<Buffer> {
     let minX = mw, minY = mh, maxX = -1, maxY = -1;
     for (let y = 0; y < mh; y++) {
       for (let x = 0; x < mw; x++) {
-        // sharp.threshold inverts: pixels darker than threshold become 0 (black).
         if (mask[y * mw + x] === 0) {
           if (x < minX) minX = x;
           if (y < minY) minY = y;
@@ -61,17 +58,29 @@ async function trimWhitespace(buf: Buffer, threshold: number): Promise<Buffer> {
         }
       }
     }
-
     if (maxX < 0 || maxY < 0) return buf;
 
-    // Mask was computed at original resolution; map directly.
+    const contentW = maxX - minX + 1;
+
+    // Strip text rows from bottom: text characters have sparse coverage (<8%),
+    // DataMatrix cells form solid bands (≥8%). Scan bottom→top and stop at
+    // the first dense row → that's the real bottom of the DataMatrix.
+    let dmBottom = maxY;
+    for (let y = maxY; y >= minY; y--) {
+      let dark = 0;
+      for (let x = minX; x <= maxX; x++) {
+        if (mask[y * mw + x] === 0) dark++;
+      }
+      if (dark / contentW >= 0.08) { dmBottom = y; break; }
+    }
+
     const pad = Math.max(4, Math.round(Math.min(w, h) * 0.01));
-    const left = Math.max(0, minX - pad);
-    const top = Math.max(0, minY - pad);
-    const right = Math.min(w, maxX + pad + 1);
-    const bottom = Math.min(h, maxY + pad + 1);
-    const cropW = right - left;
-    const cropH = bottom - top;
+    const left   = Math.max(0, minX - pad);
+    const top    = Math.max(0, minY - pad);
+    const right  = Math.min(w, maxX + pad + 1);
+    const bottom = Math.min(h, dmBottom + pad + 1);
+    const cropW  = right - left;
+    const cropH  = bottom - top;
     if (cropW <= 0 || cropH <= 0) return buf;
 
     const out = await sharp(buf)
