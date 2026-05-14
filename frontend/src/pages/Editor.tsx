@@ -651,7 +651,7 @@ function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTe
       color: t.color,
       lineHeight: 1.3,
       textAlign: (t.align ?? 'left') as React.CSSProperties['textAlign'],
-      padding: 2,
+      padding: 0,
     };
     if (editing) {
       return (
@@ -669,12 +669,14 @@ function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTe
     }
     return (
       <div
-        style={{ ...base, ...textStyle, width: w, height: h, overflow: 'hidden', whiteSpace: 'pre-wrap' }}
+        style={{ ...base, ...textStyle, width: w, height: h, overflow: 'hidden', whiteSpace: 'pre', wordBreak: 'keep-all' }}
         onMouseDown={(e) => onMouseDown(e, el.id)}
         onDoubleClick={() => onDoubleClick(el.id)}
         onClick={(e) => e.stopPropagation()}
       >
-        {t.text || <span style={{ color: '#bbb', fontStyle: 'italic' }}>Текст...</span>}
+        {t.text
+          ? (w ? browserWrapText(t.text, t.bold, fontSizePx, w) : [t.text]).join('\n')
+          : <span style={{ color: '#bbb', fontStyle: 'italic' }}>Текст...</span>}
         {selected && canResize && !editing && <ResizeHandles id={el.id} onResizeStart={onResizeStart} />}
       </div>
     );
