@@ -75,15 +75,14 @@ router.post('/:id/cz', upload.single('file'), async (req: AuthRequest, res: Resp
     },
   });
 
-  // Generate inline base64 previews for first 3 pages (no S3 signed URLs needed)
+  // Generate inline base64 previews for first 3 pages — decode + re-encode
+  // pipeline produces a perfectly clean square DataMatrix per page.
   const previews: string[] = [];
   const previewErrors: string[] = [];
   for (let i = 1; i <= Math.min(3, pageCount); i++) {
     try {
-      const { convertPdfPageToPngPreview } = await import('../services/pdf');
-      const pngBuffer = await convertPdfPageToPngPreview(req.file.buffer, i);
-      // Also persist for the regenerate endpoint as a warm cache
-      await uploadFile(`previews/${czBatch.id}/page-${i}.png`, pngBuffer, 'image/png').catch(() => {});
+      const { getCleanCzPng } = await import('../services/czRender');
+      const pngBuffer = await getCleanCzPng(czBatch.id, i, req.file.buffer);
       previews.push(`data:image/png;base64,${pngBuffer.toString('base64')}`);
     } catch (err: any) {
       console.error(`[cz preview] batch=${czBatch.id} page=${i} failed:`, err?.message ?? err);
@@ -101,7 +100,7 @@ router.post('/:id/cz/:czBatchId/regenerate-previews', async (req: AuthRequest, r
   if (!czBatch || czBatch.projectId !== req.params.id) { res.status(404).json({ error: 'Not found' }); return; }
 
   const { downloadFile } = await import('../services/s3');
-  const { convertPdfPageToPngPreview } = await import('../services/pdf');
+  const { getCleanCzPng } = await import('../services/czRender');
 
   let pdfBuffer: Buffer;
   try { pdfBuffer = await downloadFile(czBatch.s3Key); }
@@ -115,8 +114,7 @@ router.post('/:id/cz/:czBatchId/regenerate-previews', async (req: AuthRequest, r
   const previewErrors: string[] = [];
   for (let i = 1; i <= Math.min(3, pageCount); i++) {
     try {
-      const pngBuffer = await convertPdfPageToPngPreview(pdfBuffer, i);
-      await uploadFile(`previews/${czBatch.id}/page-${i}.png`, pngBuffer, 'image/png').catch(() => {});
+      const pngBuffer = await getCleanCzPng(czBatch.id, i, pdfBuffer);
       previews.push(`data:image/png;base64,${pngBuffer.toString('base64')}`);
     } catch (err: any) {
       console.error(`[cz preview regen] batch=${czBatch.id} page=${i} failed:`, err?.message ?? err);

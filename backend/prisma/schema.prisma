@@ -63,6 +63,7 @@ model CzCode {
   czBatchId     String
   czBatch       CzBatch      @relation(fields: [czBatchId], references: [id])
   pageIndex     Int
+  code          String?
   status        CodeStatus   @default(PENDING)
   usedAt        DateTime?
   outputBatchId String?

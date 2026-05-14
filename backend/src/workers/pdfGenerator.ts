@@ -5,8 +5,8 @@ import IORedis from 'ioredis';
 import { PDFDocument, rgb, StandardFonts, PDFFont } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import prisma from '../prisma/client';
-import { downloadFile, uploadFile, objectExists } from '../services/s3';
-import { convertPdfPageToPng } from '../services/pdf';
+import { downloadFile, uploadFile } from '../services/s3';
+import { getCleanCzPng } from '../services/czRender';
 import { generateEan13Png } from '../services/barcode';
 
 const MM_TO_PT = 2.8346;
@@ -129,20 +129,14 @@ const worker = new Worker<JobData>(
       for (let i = 0; i < codes.length; i++) {
         const code = codes[i];
         const t0 = Date.now();
-        const cacheKey = `cache/cz-png-v10/${code.czBatchId}/page-${code.pageIndex}.png`;
 
-        // Try cache first; fall back to converting and write to cache.
+        // Decode-on-first-use + cache. Always yields a clean square DataMatrix.
         let czPng: Buffer;
         try {
-          if (await objectExists(cacheKey)) {
-            czPng = await downloadFile(cacheKey);
-          } else {
-            const czPdfBuffer = batchPdfs.get(code.czBatchId)!;
-            czPng = await convertPdfPageToPng(czPdfBuffer, code.pageIndex, { timeoutMs: 60_000 });
-            try { await uploadFile(cacheKey, czPng, 'image/png'); } catch (e) { console.warn('[worker] cache write failed:', e); }
-          }
+          const czPdfBuffer = batchPdfs.get(code.czBatchId)!;
+          czPng = await getCleanCzPng(code.czBatchId, code.pageIndex, czPdfBuffer);
         } catch (err: any) {
-          console.error(`[worker] batch=${outputBatchId} page=${code.pageIndex} convert failed:`, err?.message ?? err);
+          console.error(`[worker] batch=${outputBatchId} page=${code.pageIndex} render failed:`, err?.message ?? err);
           throw err;
         }
 
