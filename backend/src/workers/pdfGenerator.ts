@@ -54,12 +54,17 @@ function wrapParagraph(text: string, font: PDFFont, size: number, maxWidthPt: nu
 
 /** Split text on \n then word-wrap each paragraph to maxWidthPt. */
 function wrapText(rawText: string, font: PDFFont, size: number, maxWidthPt: number): string[] {
+  // Apply a correction factor: browser-rendered PT Sans is ~4% wider than
+  // what pdf-lib measures from TTF advance widths, causing PDF to fit more
+  // words per line than the browser shows. Reducing effective blockW by 4%
+  // makes PDF wrapping match the browser layout.
+  const effectiveWidth = maxWidthPt * 0.96;
   const paragraphs = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  if (maxWidthPt <= 0) return paragraphs;
+  if (effectiveWidth <= 0) return paragraphs;
   const result: string[] = [];
   for (const para of paragraphs) {
     if (!para.trim()) { result.push(''); continue; }
-    for (const line of wrapParagraph(para, font, size, maxWidthPt)) result.push(line);
+    for (const line of wrapParagraph(para, font, size, effectiveWidth)) result.push(line);
   }
   return result;
 }
