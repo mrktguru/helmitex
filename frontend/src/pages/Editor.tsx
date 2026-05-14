@@ -167,7 +167,7 @@ export default function Editor() {
 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'pending' | 'saving' | 'saved' | 'error'>('idle');
   const [saveError, setSaveError] = useState('');
-  const hasLoaded = useRef(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [czSelected, setCzSelected] = useState(false);
   const [drawMode, setDrawMode] = useState<DrawMode>('select');
@@ -183,13 +183,13 @@ export default function Editor() {
   useEffect(() => {
     if (!projectId) return;
     api.getTemplate(projectId)
-      .then((t) => { store.loadTemplate(t); setTimeout(() => { hasLoaded.current = true; }, 50); })
-      .catch(() => { hasLoaded.current = true; });
+      .then((t) => { store.loadTemplate(t); setTimeout(() => setHasLoaded(true), 50); })
+      .catch(() => setHasLoaded(true));
   }, [projectId]);
 
   // Auto-save: debounce 1 s after any content change
   useEffect(() => {
-    if (!hasLoaded.current || !projectId) return;
+    if (!hasLoaded || !projectId) return;
     setSaveStatus('pending');
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     autoSaveTimer.current = setTimeout(async () => {
@@ -220,7 +220,7 @@ export default function Editor() {
       }
     }, 1000);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store.elements, store.czArea, store.widthMm, store.heightMm, store.printMargins, store.barcodeValue]);
+  }, [store.elements, store.czArea, store.widthMm, store.heightMm, store.printMargins, store.barcodeValue, hasLoaded]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
