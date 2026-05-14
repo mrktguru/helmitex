@@ -9,13 +9,21 @@ type Tab = 'template' | 'cz' | 'export';
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const [project, setProject] = useState<any>(null);
+  const [loadError, setLoadError] = useState('');
   const [tab, setTab] = useState<Tab>('template');
   const navigate = useNavigate();
 
   useEffect(() => {
     if (!id) return;
-    api.getProject(id).then(setProject);
+    api.getProject(id).then(setProject).catch((err) => setLoadError(err.message ?? 'Ошибка загрузки'));
   }, [id]);
+
+  if (loadError) return (
+    <div className="flex flex-col items-center justify-center h-screen gap-3">
+      <p className="text-red-500">{loadError}</p>
+      <button onClick={() => navigate('/projects')} className="text-blue-600 hover:underline text-sm">← К списку проектов</button>
+    </div>
+  );
 
   if (!project) return <div className="flex items-center justify-center h-screen">Загрузка...</div>;
 
