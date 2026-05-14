@@ -262,9 +262,15 @@ const worker = new Worker<JobData>(
             const lines = wrapText(rawText, font, size, blockW);
             const lineHeight = size * 1.3;
             const startY = toY(el.yMm) - size * 0.75;
+            // blockBottom (in pt, bottom-up): lines whose baseline falls below this are clipped.
+            // baseline of line li = startY - li * lineHeight
+            // block bottom = toY(el.yMm, el.heightMm) = height - (el.yMm + el.heightMm)*MM_TO_PT
+            // clip when: startY - li*lineHeight < toY(el.yMm, el.heightMm)
+            //   => li * lineHeight > startY - toY(el.yMm, el.heightMm)
+            //   => li * lineHeight > blockH - size * 0.75
+            const clipThreshold = blockH > 0 ? blockH - size * 0.75 : Infinity;
             lines.forEach((line, li) => {
-              // Don't render lines below the block bottom
-              if (blockH > 0 && li * lineHeight > blockH + size * 0.5) return;
+              if (li * lineHeight > clipThreshold) return;
               const lineW = font.widthOfTextAtSize(line || ' ', size);
               let x = toX(el.xMm);
               if (el.align === 'center' && blockW) x = toX(el.xMm) + (blockW - lineW) / 2;
