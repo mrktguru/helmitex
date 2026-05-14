@@ -26,8 +26,6 @@ async function renderEacPng(color: string, widthPx: number, heightPx: number): P
     .toBuffer();
 }
 
-const MM_TO_PT = 2.8346;
-
 interface JobData {
   outputBatchId: string;
   projectId: string;
@@ -195,7 +193,7 @@ const worker = new Worker<JobData>(
             // Render EAC SVG → PNG at 3× resolution for crispness
             const scale = 3;
             const pngBuf = await renderEacPng(el.color ?? '#000000', Math.round(markW * scale), Math.round(markH * scale));
-            const embeddedImg = await pdfDoc.embedPng(pngBuf);
+            const embeddedImg = await outputDoc.embedPng(pngBuf);
             page.drawImage(embeddedImg, {
               x: toX(el.xMm),
               y: toY(el.yMm, el.heightMm ?? 0),
