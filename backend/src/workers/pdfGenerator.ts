@@ -174,7 +174,7 @@ const worker = new Worker<JobData>(
           try {
             if (fs.existsSync(p)) {
               const bytes = fs.readFileSync(p);
-              return await outputDoc.embedFont(bytes, { subset: true });
+              return await outputDoc.embedFont(bytes, { subset: false });
             }
           } catch (e) { console.warn('[worker] font load failed:', p, e); }
         }
