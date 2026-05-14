@@ -40,10 +40,12 @@ router.put('/:id/template', async (req: AuthRequest, res: Response): Promise<voi
   if (!(await getProjectOrFail(req.params.id, req, res))) return;
   const parsed = templateSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
+  const { printMargins, ...rest } = parsed.data;
+  const data = { ...rest, ...(printMargins != null ? { printMargins } : {}) };
   const template = await prisma.labelTemplate.upsert({
     where: { projectId: req.params.id },
-    update: parsed.data,
-    create: { ...parsed.data, projectId: req.params.id },
+    update: data,
+    create: { ...data, projectId: req.params.id },
   });
   res.json(template);
 });
