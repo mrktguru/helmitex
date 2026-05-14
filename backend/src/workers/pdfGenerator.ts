@@ -24,8 +24,12 @@ async function renderEacPng(color: string, widthPx: number, heightPx: number): P
   if (color !== '#000000' && color !== '#000') {
     svgText = svgText.replace(/fill:#000000/g, `fill:${color}`);
   }
+  // Flatten on white to eliminate semi-transparent edge pixels that PDF viewers
+  // render as a gray halo. The SVG already has a white background rect, so this
+  // does not change the visible appearance.
   return sharp(Buffer.from(svgText))
-    .png()
+    .flatten({ background: '#ffffff' })
+    .png({ compressionLevel: 9 })
     .toBuffer();
 }
 
@@ -241,8 +245,8 @@ const worker = new Worker<JobData>(
           } else if (el.type === 'eac') {
             const markW = (el.widthMm ?? 15) * MM_TO_PT;
             const markH = (el.heightMm ?? 9) * MM_TO_PT;
-            // Render EAC SVG → PNG at 3× resolution for crispness
-            const scale = 3;
+            // Render EAC SVG → PNG at 8× resolution for crisp anti-aliasing
+            const scale = 8;
             const pngBuf = await renderEacPng(el.color ?? '#000000', Math.round(markW * scale), Math.round(markH * scale));
             const embeddedImg = await outputDoc.embedPng(pngBuf);
             page.drawImage(embeddedImg, {
