@@ -18,6 +18,31 @@ const LABEL_FONT = "'PT Sans', sans-serif";
 
 // Canvas context for measuring text — created once, reused
 let _mctx: CanvasRenderingContext2D | null = null;
+
+/** Browser-side word wrap — returns lines exactly as the browser renders them. */
+function browserWrapText(text: string, bold: boolean, fontSizePx: number, blockWidthPx: number): string[] {
+  if (!_mctx) _mctx = document.createElement('canvas').getContext('2d')!;
+  _mctx.font = `${bold ? 'bold ' : ''}${fontSizePx}px ${LABEL_FONT}`;
+  const paragraphs = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const result: string[] = [];
+  for (const para of paragraphs) {
+    if (!para.trim()) { result.push(''); continue; }
+    const words = para.split(' ');
+    let cur = '';
+    for (const word of words) {
+      const candidate = cur ? `${cur} ${word}` : word;
+      if (_mctx.measureText(candidate).width <= blockWidthPx - 2) {
+        cur = candidate;
+      } else {
+        if (cur) result.push(cur);
+        cur = word;
+      }
+    }
+    if (cur) result.push(cur);
+  }
+  return result.length > 0 ? result : [text];
+}
+
 function getFitFontSizePx(text: string, bold: boolean, widthPx: number, heightPx: number): number {
   if (!text.trim()) return 12;
   if (!_mctx) _mctx = document.createElement('canvas').getContext('2d')!;
@@ -170,9 +195,22 @@ export default function Editor() {
     autoSaveTimer.current = setTimeout(async () => {
       setSaveStatus('saving');
       try {
+        // Pre-compute wrapped lines for each text element using browser canvas metrics
+        // so the PDF generator can reproduce the exact same layout without re-measuring.
+        const elementsWithWraps = store.elements.map((el) => {
+          if (el.type !== 'text') return el;
+          const t = el as import('../store/useEditorStore').TextElement & { widthMm?: number; heightMm?: number };
+          const blockW = t.widthMm ? t.widthMm * SCALE : 0;
+          if (!blockW || !t.text) return { ...t, _wrappedLines: [t.text] };
+          const fontSizePx = t.fitToBlock && t.heightMm
+            ? getFitFontSizePx(t.text, t.bold, blockW, t.heightMm * SCALE)
+            : t.fontSizePt * (SCALE / 3);
+          const wrapped = browserWrapText(t.text, t.bold, fontSizePx, blockW);
+          return { ...t, _wrappedLines: wrapped };
+        });
         await api.saveTemplate(projectId, {
           widthMm: store.widthMm, heightMm: store.heightMm,
-          elements: store.elements, czArea: store.czArea,
+          elements: elementsWithWraps, czArea: store.czArea,
           barcodeValue: store.barcodeValue || null, printMargins: store.printMargins,
         });
         setSaveStatus('saved');

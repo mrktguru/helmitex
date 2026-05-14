@@ -18,6 +18,8 @@ export interface TextElement extends BaseElement {
   color: string;
   align?: 'left' | 'center' | 'right';
   fitToBlock?: boolean;
+  /** Pre-computed line breaks from browser canvas — used by PDF generator for WYSIWYG accuracy. */
+  _wrappedLines?: string[];
 }
 
 export interface BarcodeElement extends BaseElement {

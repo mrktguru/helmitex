@@ -88,6 +88,8 @@ interface LabelElement {
   color?: string;
   align?: 'left' | 'center' | 'right';
   fitToBlock?: boolean;
+  /** Pre-computed line breaks from browser canvas — use directly in PDF for WYSIWYG accuracy. */
+  _wrappedLines?: string[];
   value?: string;
   s3Key?: string;
   strokeColor?: string;
@@ -267,16 +269,13 @@ const worker = new Worker<JobData>(
               }
               size = Math.max(1, lo * 0.97);
             }
-            // Word-wrap text to fit block width
-            const lines = wrapText(rawText, font, size, blockW);
+            // Use browser-precomputed line breaks if available (WYSIWYG accurate),
+            // otherwise fall back to server-side wrap (for old templates).
+            const lines = (el._wrappedLines && el._wrappedLines.length > 0)
+              ? el._wrappedLines
+              : wrapText(rawText, font, size, blockW);
             const lineHeight = size * 1.3;
             const startY = toY(el.yMm) - size * 0.75;
-            // blockBottom (in pt, bottom-up): lines whose baseline falls below this are clipped.
-            // baseline of line li = startY - li * lineHeight
-            // block bottom = toY(el.yMm, el.heightMm) = height - (el.yMm + el.heightMm)*MM_TO_PT
-            // clip when: startY - li*lineHeight < toY(el.yMm, el.heightMm)
-            //   => li * lineHeight > startY - toY(el.yMm, el.heightMm)
-            //   => li * lineHeight > blockH - size * 0.75
             const clipThreshold = blockH > 0 ? blockH - size * 0.75 : Infinity;
             lines.forEach((line, li) => {
               if (li * lineHeight > clipThreshold) return;
