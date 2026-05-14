@@ -1,21 +1,20 @@
 import prisma from '../prisma/client';
-import { downloadFile, uploadFile, objectExists } from './s3';
+import { downloadFile, uploadFile } from './s3';
 import { convertPdfPageToPng } from './pdf';
 import { decodeDataMatrix, encodeDataMatrix } from './datamatrix';
 
-const CACHE_PREFIX = 'cache/cz-dm-v2';
+const CACHE_PREFIX = 'cache/cz-dm-v3';
 
 /**
  * Returns a clean, re-encoded DataMatrix PNG for the given (batch, page).
  *
  * Pipeline (cached on S3, run at most once per page):
- *   1. Render PDF page → raster PNG (450 dpi via pdf2pic).
- *   2. Decode DataMatrix payload via pylibdmtx (Python child).
- *   3. Persist payload on CzCode.code.
- *   4. Re-encode payload as a clean square DataMatrix via bwip-js.
- *   5. Upload the clean PNG to S3 cache and return it.
- *
- * On subsequent calls only step 5's download runs.
+ *   1. Try single GET from S3 — fast path, no extra HEAD round-trip.
+ *   2. Render PDF page → raster at 250 DPI (~3× faster than 450 DPI).
+ *   3. Decode DataMatrix payload via pylibdmtx (Python child).
+ *   4. Persist payload on CzCode.code.
+ *   5. Re-encode clean square DataMatrix via bwip-js.
+ *   6. Upload to S3 cache and return.
  */
 export async function getCleanCzPng(
   czBatchId: string,
@@ -23,13 +22,17 @@ export async function getCleanCzPng(
   pdfBuffer: Buffer,
 ): Promise<Buffer> {
   const key = `${CACHE_PREFIX}/${czBatchId}/page-${pageIndex}.png`;
-  if (await objectExists(key)) {
+
+  // Fast path: single GET — no separate HEAD round-trip.
+  try {
     return await downloadFile(key);
+  } catch {
+    // Not cached yet — build it.
   }
 
-  // Need raw raster to feed the decoder. Use the trim=false path: we want the
-  // original page, decoder picks the DM out by itself.
+  // 250 DPI is sufficient for pylibdmtx; ~3× faster than 450 DPI in Ghostscript.
   const raster = await convertPdfPageToPng(pdfBuffer, pageIndex, {
+    density: 250,
     timeoutMs: 60_000,
     trim: false,
   });
@@ -37,7 +40,6 @@ export async function getCleanCzPng(
   const payload = await decodeDataMatrix(raster);
   if (!payload) throw new Error(`DataMatrix decode failed on page ${pageIndex}`);
 
-  // Persist the decoded payload (best effort — not fatal if no row exists).
   try {
     await prisma.czCode.updateMany({
       where: { czBatchId, pageIndex },

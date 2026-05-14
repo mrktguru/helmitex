@@ -126,19 +126,27 @@ const worker = new Worker<JobData>(
       const regularFont = await loadFont(ttfCandidates, StandardFonts.Helvetica);
       const boldFont = await loadFont(ttfBoldCandidates, StandardFonts.HelveticaBold);
 
+      // Pre-warm all CZ PNGs in parallel (6 concurrent) before PDF assembly.
+      // This converts Ghostscript + Python decode from sequential to parallel
+      // and means the main loop only does cheap in-memory PDF drawing.
+      const CONCURRENCY = 6;
+      const czPngMap = new Map<string, Buffer>();
+      for (let start = 0; start < codes.length; start += CONCURRENCY) {
+        const chunk = codes.slice(start, start + CONCURRENCY);
+        await Promise.all(chunk.map(async (c) => {
+          const mapKey = `${c.czBatchId}:${c.pageIndex}`;
+          const czPdfBuffer = batchPdfs.get(c.czBatchId)!;
+          const png = await getCleanCzPng(c.czBatchId, c.pageIndex, czPdfBuffer);
+          czPngMap.set(mapKey, png);
+        }));
+        await job.updateProgress(Math.round(((start + chunk.length) / codes.length) * 50));
+      }
+
       for (let i = 0; i < codes.length; i++) {
         const code = codes[i];
         const t0 = Date.now();
 
-        // Decode-on-first-use + cache. Always yields a clean square DataMatrix.
-        let czPng: Buffer;
-        try {
-          const czPdfBuffer = batchPdfs.get(code.czBatchId)!;
-          czPng = await getCleanCzPng(code.czBatchId, code.pageIndex, czPdfBuffer);
-        } catch (err: any) {
-          console.error(`[worker] batch=${outputBatchId} page=${code.pageIndex} render failed:`, err?.message ?? err);
-          throw err;
-        }
+        const czPng = czPngMap.get(`${code.czBatchId}:${code.pageIndex}`)!;
 
         const page = outputDoc.addPage([widthPt, heightPt]);
         const { height } = page.getSize();
@@ -225,7 +233,7 @@ const worker = new Worker<JobData>(
           height: drawHpt,
         });
 
-        await job.updateProgress(Math.round(((i + 1) / codes.length) * 100));
+        await job.updateProgress(50 + Math.round(((i + 1) / codes.length) * 50));
         console.log(`[worker] batch=${outputBatchId} ${i + 1}/${codes.length} page=${code.pageIndex} in ${Date.now() - t0}ms`);
       }
 
@@ -254,7 +262,7 @@ const worker = new Worker<JobData>(
       throw err;
     }
   },
-  { connection, concurrency: 2 }
+  { connection, concurrency: 4 }
 );
 
 worker.on('completed', (job) => console.log(`Job ${job.id} completed`));
