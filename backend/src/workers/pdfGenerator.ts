@@ -205,7 +205,8 @@ const worker = new Worker<JobData>(
             const font: PDFFont = el.bold ? boldFont : regularFont;
             const blockW = (el.widthMm ?? 0) * MM_TO_PT;
             const blockH = (el.heightMm ?? 0) * MM_TO_PT;
-            const lines = (el.text ?? '').split('\n');
+            // Normalize Windows (\r\n) and old Mac (\r) line endings, then split
+            const lines = (el.text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
             // Calculate font size: fit-to-block uses binary search on pdf-lib font metrics
             let size = el.fontSizePt ?? 10;
             if (el.fitToBlock && blockW > 0 && blockH > 0) {

@@ -625,7 +625,7 @@ function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTe
     }
     return (
       <div
-        style={{ ...base, ...textStyle, width: w, height: h, overflow: 'hidden', whiteSpace: w ? 'pre-wrap' : 'nowrap' }}
+        style={{ ...base, ...textStyle, width: w, height: h, overflow: 'hidden', whiteSpace: 'pre-wrap' }}
         onMouseDown={(e) => onMouseDown(e, el.id)}
         onDoubleClick={() => onDoubleClick(el.id)}
         onClick={(e) => e.stopPropagation()}
