@@ -153,14 +153,18 @@ const worker = new Worker<JobData>(
       const outputDoc = await PDFDocument.create();
       outputDoc.registerFontkit(fontkit);
 
-      // Try Unicode TTFs (Cyrillic support); fall back to Helvetica if missing.
+      // Bundled PT Sans — same font used in the browser editor for WYSIWYG fidelity.
+      // Falls back to DejaVu / Noto (system) if somehow missing, then to Helvetica.
+      const BUNDLED_FONT_DIR = path.resolve(__dirname, '../../assets/fonts');
       const ttfCandidates = [
         process.env.PDF_FONT_REGULAR,
+        path.join(BUNDLED_FONT_DIR, 'PTSans-Regular.ttf'),
         '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
         '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
       ].filter(Boolean) as string[];
       const ttfBoldCandidates = [
         process.env.PDF_FONT_BOLD,
+        path.join(BUNDLED_FONT_DIR, 'PTSans-Bold.ttf'),
         '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
         '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf',
       ].filter(Boolean) as string[];

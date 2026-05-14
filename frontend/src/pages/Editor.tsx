@@ -14,6 +14,8 @@ function snapToGrid(val: number): number {
   return Math.round(val / SNAP) * SNAP;
 }
 
+const LABEL_FONT = "'PT Sans', sans-serif";
+
 // Canvas context for measuring text — created once, reused
 let _mctx: CanvasRenderingContext2D | null = null;
 function getFitFontSizePx(text: string, bold: boolean, widthPx: number, heightPx: number): number {
@@ -23,7 +25,7 @@ function getFitFontSizePx(text: string, bold: boolean, widthPx: number, heightPx
   let lo = 1, hi = 600;
   for (let i = 0; i < 20; i++) {
     const mid = (lo + hi) / 2;
-    _mctx.font = `${bold ? 'bold ' : ''}${mid}px sans-serif`;
+    _mctx.font = `${bold ? 'bold ' : ''}${mid}px ${LABEL_FONT}`;
     const maxW = Math.max(...lines.map((l) => _mctx!.measureText(l || ' ').width));
     const totalH = lines.length * mid * 1.3;
     if (maxW <= widthPx - 4 && totalH <= heightPx - 4) lo = mid;
@@ -602,6 +604,7 @@ function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTe
       ? getFitFontSizePx(t.text || ' ', t.bold, w, h)
       : t.fontSizePt * (SCALE / 3);
     const textStyle: React.CSSProperties = {
+      fontFamily: LABEL_FONT,
       fontSize: fontSizePx,
       fontWeight: t.bold ? 'bold' : 'normal',
       color: t.color,
