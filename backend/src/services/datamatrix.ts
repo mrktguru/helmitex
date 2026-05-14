@@ -60,7 +60,10 @@ export async function encodeDataMatrix(payload: string, scale = 8): Promise<Buff
     bcid: 'datamatrix',
     text,
     scale,
-    padding: scale * 2,
+    // No padding / quiet zone — the template czArea defines the exact
+    // size of the DataMatrix. Quiet zone, if needed, must be reserved
+    // in the template layout itself.
+    padding: 0,
     parse: parsed,
     backgroundcolor: 'FFFFFF',
   } as any);

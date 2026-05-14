@@ -3,7 +3,7 @@ import { downloadFile, uploadFile, objectExists } from './s3';
 import { convertPdfPageToPng } from './pdf';
 import { decodeDataMatrix, encodeDataMatrix } from './datamatrix';
 
-const CACHE_PREFIX = 'cache/cz-dm-v1';
+const CACHE_PREFIX = 'cache/cz-dm-v2';
 
 /**
  * Returns a clean, re-encoded DataMatrix PNG for the given (batch, page).
