@@ -1,4 +1,4 @@
-import { useEditorStore, LabelElement, TextElement, BarcodeElement, RectElement, CzArea } from '../store/useEditorStore';
+import { useEditorStore, LabelElement, TextElement, BarcodeElement, RectElement, EacElement, CzArea } from '../store/useEditorStore';
 
 export default function ElementProperties() {
   const store = useEditorStore();
@@ -40,6 +40,7 @@ export default function ElementProperties() {
       {el.type === 'barcode' && <BarcodeProps el={el as BarcodeElement} update={update} />}
       {el.type === 'rect' && <RectProps el={el as RectElement} update={update} />}
       {el.type === 'image' && <ImageProps el={el as any} update={update} />}
+      {el.type === 'eac' && <EacProps el={el as EacElement} update={update} />}
     </div>
   );
 }
@@ -134,6 +135,18 @@ function ImageProps({ el, update }: { el: any; update: (p: any) => void }) {
       <Field label="Файл"><p className="text-xs text-gray-500 truncate">{el.filename ?? el.s3Key}</p></Field>
       <Field label="Ширина (мм)"><NumInput value={el.widthMm} onChange={(v) => update({ widthMm: v })} /></Field>
       <Field label="Высота (мм)"><NumInput value={el.heightMm} onChange={(v) => update({ heightMm: v })} /></Field>
+    </>
+  );
+}
+
+function EacProps({ el, update }: { el: EacElement; update: (p: any) => void }) {
+  return (
+    <>
+      <Field label="Ширина (мм)"><NumInput value={el.widthMm} onChange={(v) => update({ widthMm: v })} /></Field>
+      <Field label="Высота (мм)"><NumInput value={el.heightMm} onChange={(v) => update({ heightMm: v })} /></Field>
+      <Field label="Цвет">
+        <input type="color" value={el.color} onChange={(e) => update({ color: e.target.value })} className="w-full h-8 rounded border cursor-pointer" />
+      </Field>
     </>
   );
 }

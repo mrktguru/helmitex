@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type ElementType = 'text' | 'barcode' | 'image' | 'rect';
+export type ElementType = 'text' | 'barcode' | 'image' | 'rect' | 'eac';
 
 export interface BaseElement {
   id: string;
@@ -44,7 +44,14 @@ export interface RectElement extends BaseElement {
   strokeWidthPt: number;
 }
 
-export type LabelElement = TextElement | BarcodeElement | ImageElement | RectElement;
+export interface EacElement extends BaseElement {
+  type: 'eac';
+  widthMm: number;
+  heightMm: number;
+  color: string; // mark color (usually black)
+}
+
+export type LabelElement = TextElement | BarcodeElement | ImageElement | RectElement | EacElement;
 
 export interface CzArea {
   xMm: number;

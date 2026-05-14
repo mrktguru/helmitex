@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useEditorStore, LabelElement, TextElement, BarcodeElement, RectElement } from '../store/useEditorStore';
+import { useEditorStore, LabelElement, TextElement, BarcodeElement, RectElement, EacElement } from '../store/useEditorStore';
 import { api } from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
 import ElementProperties from '../components/ElementProperties';
@@ -100,6 +100,23 @@ function BarcodeSvg({ value, width, height }: { value: string; width: number; he
   );
 }
 
+// ─── EAC mark SVG ─────────────────────────────────────────────────────────────
+// Знак Евразийского соответствия — стандартный вид: скруглённый прямоугольник + жирный текст EAC
+function EacSvg({ width, height, color }: { width: number; height: number; color: string }) {
+  return (
+    <svg viewBox="0 0 100 60" width={width} height={height}
+      style={{ display: 'block' }} xmlns="http://www.w3.org/2000/svg">
+      <rect x="2" y="2" width="96" height="56" rx="8" ry="8"
+        fill="white" stroke={color} strokeWidth="4" />
+      <text x="50" y="44" textAnchor="middle"
+        fontFamily="Arial Black, Arial, sans-serif"
+        fontWeight="900" fontSize="36" fill={color} letterSpacing="2">
+        EAC
+      </text>
+    </svg>
+  );
+}
+
 export default function Editor() {
   const { id: projectId } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -179,6 +196,13 @@ export default function Editor() {
   function addBarcode() {
     const id = genId();
     store.addElement({ id, type: 'barcode', xMm: 5, yMm: 5, widthMm: 35, heightMm: 12, value: '4600000000006', label: 'Штрихкод' } as any);
+    store.selectElement(id);
+    setDrawMode('select');
+  }
+
+  function addEac() {
+    const id = genId();
+    store.addElement({ id, type: 'eac', xMm: 5, yMm: 5, widthMm: 15, heightMm: 9, color: '#000000', label: 'Знак ЕАС' } as EacElement);
     store.selectElement(id);
     setDrawMode('select');
   }
@@ -377,6 +401,7 @@ export default function Editor() {
               <ToolButton onClick={() => { setDrawMode('select'); setDrawRect(null); drawing.current = null; }} label="↖ Выбор" active={drawMode === 'select'} />
               <ToolButton onClick={() => { setDrawMode('text'); store.selectElement(null); setEditingId(null); }} label="T Текст" active={drawMode === 'text'} hint="Нарисуйте зону на канвасе" />
               <ToolButton onClick={addBarcode} label="| Штрихкод" />
+              <ToolButton onClick={addEac} label="✓ Знак ЕАС" />
               <ToolButton onClick={() => { setDrawMode('rect'); store.selectElement(null); setEditingId(null); }} label="□ Прямоугольник" active={drawMode === 'rect'} />
               <label className="flex items-center gap-2 text-sm cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
                 Изображение
@@ -618,6 +643,20 @@ function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTe
         onClick={(e) => e.stopPropagation()}
       >
         <span style={{ fontSize: 9, color: '#6b7280' }}>Изображение</span>
+        {selected && canResize && <ResizeHandles id={el.id} onResizeStart={onResizeStart} />}
+      </div>
+    );
+  }
+
+  if (el.type === 'eac') {
+    const eac = el as EacElement;
+    return (
+      <div
+        style={{ ...base, width: eac.widthMm * SCALE, height: eac.heightMm * SCALE }}
+        onMouseDown={(e) => onMouseDown(e, el.id)} onDoubleClick={() => onDoubleClick(el.id)}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <EacSvg width={eac.widthMm * SCALE} height={eac.heightMm * SCALE} color={eac.color} />
         {selected && canResize && <ResizeHandles id={el.id} onResizeStart={onResizeStart} />}
       </div>
     );

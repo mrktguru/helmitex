@@ -19,7 +19,7 @@ interface JobData {
 
 interface LabelElement {
   id: string;
-  type: 'text' | 'barcode' | 'image' | 'rect';
+  type: 'text' | 'barcode' | 'image' | 'rect' | 'eac';
   xMm: number;
   yMm: number;
   widthMm?: number;
@@ -35,6 +35,8 @@ interface LabelElement {
   strokeColor?: string;
   fillColor?: string | null;
   strokeWidthPt?: number;
+  // eac
+  color?: string;
 }
 
 interface CzArea {
@@ -171,6 +173,30 @@ const worker = new Worker<JobData>(
               borderWidth: el.strokeWidthPt ?? 1,
               color: fillRgb ? rgb(fillRgb.r, fillRgb.g, fillRgb.b) : undefined,
               opacity: fillRgb ? 1 : 0,
+            });
+          } else if (el.type === 'eac') {
+            // Draw EAC mark: rounded-rect border + bold "EAC" text centered
+            const { r, g, b } = hexToRgb(el.color ?? '#000000');
+            const markX = toX(el.xMm);
+            const markY = toY(el.yMm, el.heightMm ?? 0);
+            const markW = (el.widthMm ?? 15) * MM_TO_PT;
+            const markH = (el.heightMm ?? 9) * MM_TO_PT;
+            const borderPt = Math.max(0.8, markW * 0.03);
+            page.drawRectangle({
+              x: markX, y: markY, width: markW, height: markH,
+              borderColor: rgb(r, g, b), borderWidth: borderPt,
+              color: rgb(1, 1, 1), opacity: 1,
+            });
+            // Fit "EAC" text inside: use ~58% of height as font size
+            const fontSize = Math.max(4, markH * 0.62);
+            const text = 'EAC';
+            const textW = boldFont.widthOfTextAtSize(text, fontSize);
+            page.drawText(text, {
+              x: markX + (markW - textW) / 2,
+              y: markY + (markH - fontSize) / 2 - fontSize * 0.05,
+              size: fontSize,
+              font: boldFont,
+              color: rgb(r, g, b),
             });
           } else if (el.type === 'text') {
             const { r, g, b } = hexToRgb(el.color ?? '#000000');
