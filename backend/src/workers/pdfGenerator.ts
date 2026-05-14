@@ -7,7 +7,7 @@ import fontkit from '@pdf-lib/fontkit';
 import prisma from '../prisma/client';
 import { downloadFile, uploadFile } from '../services/s3';
 import { getCleanCzPng } from '../services/czRender';
-import { generateEan13Png } from '../services/barcode';
+import { drawEan13Vector } from '../services/barcode';
 
 const MM_TO_PT = 2.8346;
 
@@ -185,14 +185,16 @@ const worker = new Worker<JobData>(
               color: rgb(r, g, b),
             });
           } else if (el.type === 'barcode' && el.value) {
-            const barPng = await generateEan13Png(el.value);
-            const barImage = await outputDoc.embedPng(barPng);
-            page.drawImage(barImage, {
-              x: toX(el.xMm),
-              y: toY(el.yMm, el.heightMm ?? 0),
-              width: (el.widthMm ?? 20) * MM_TO_PT,
-              height: (el.heightMm ?? 10) * MM_TO_PT,
-            });
+            // Vector rendering: bars = rectangles, digits = drawText — crisp at any scale
+            drawEan13Vector(
+              page,
+              toX(el.xMm),
+              toY(el.yMm, el.heightMm ?? 0),
+              (el.widthMm ?? 20) * MM_TO_PT,
+              (el.heightMm ?? 10) * MM_TO_PT,
+              el.value,
+              regularFont,
+            );
           } else if (el.type === 'image' && el.s3Key) {
             if (!assetCache.has(el.s3Key)) {
               const buf = await downloadFile(el.s3Key);
