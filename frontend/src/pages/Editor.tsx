@@ -88,8 +88,10 @@ export default function Editor() {
   const store = useEditorStore();
   const token = useAuthStore((s) => s.accessToken);
 
-  const [saving, setSaving] = useState(false);
-  const [saveMsg, setSaveMsg] = useState('');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'pending' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveError, setSaveError] = useState('');
+  const hasLoaded = useRef(false);
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [czSelected, setCzSelected] = useState(false);
   const [drawMode, setDrawMode] = useState<DrawMode>('select');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -103,8 +105,32 @@ export default function Editor() {
 
   useEffect(() => {
     if (!projectId) return;
-    api.getTemplate(projectId).then((t) => { store.loadTemplate(t); }).catch(() => {});
+    api.getTemplate(projectId)
+      .then((t) => { store.loadTemplate(t); setTimeout(() => { hasLoaded.current = true; }, 50); })
+      .catch(() => { hasLoaded.current = true; });
   }, [projectId]);
+
+  // Auto-save: debounce 1 s after any content change
+  useEffect(() => {
+    if (!hasLoaded.current || !projectId) return;
+    setSaveStatus('pending');
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(async () => {
+      setSaveStatus('saving');
+      try {
+        await api.saveTemplate(projectId, {
+          widthMm: store.widthMm, heightMm: store.heightMm,
+          elements: store.elements, czArea: store.czArea,
+          barcodeValue: store.barcodeValue || null, printMargins: store.printMargins,
+        });
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+      } catch (err: any) {
+        setSaveStatus('error'); setSaveError(err.message ?? 'Ошибка');
+      }
+    }, 1000);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.elements, store.czArea, store.widthMm, store.heightMm, store.printMargins, store.barcodeValue]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -153,21 +179,20 @@ export default function Editor() {
     store.selectElement(id);
   }
 
-  async function handleSave() {
+  async function handleSaveNow() {
     if (!projectId) return;
-    setSaving(true);
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    setSaveStatus('saving');
     try {
       await api.saveTemplate(projectId, {
         widthMm: store.widthMm, heightMm: store.heightMm,
         elements: store.elements, czArea: store.czArea, barcodeValue: store.barcodeValue || null,
         printMargins: store.printMargins,
       });
-      setSaveMsg('Сохранено');
-      setTimeout(() => setSaveMsg(''), 2000);
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
     } catch (err: any) {
-      setSaveMsg(`Ошибка: ${err.message}`);
-    } finally {
-      setSaving(false);
+      setSaveStatus('error'); setSaveError(err.message ?? 'Ошибка');
     }
   }
 
@@ -316,9 +341,12 @@ export default function Editor() {
         <button onClick={store.undo} className="text-xs px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-40" disabled={store.past.length === 0}>↩ Отмена</button>
         <button onClick={store.redo} className="text-xs px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-40" disabled={store.future.length === 0}>↪ Повтор</button>
         <div className="ml-auto flex items-center gap-2">
-          {saveMsg && <span className="text-sm text-green-600">{saveMsg}</span>}
-          <button onClick={handleSave} disabled={saving} className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-1.5 rounded text-sm font-medium">
-            {saving ? 'Сохранение...' : 'Сохранить'}
+          {saveStatus === 'pending' && <span className="text-xs text-gray-400">Изменено...</span>}
+          {saveStatus === 'saving' && <span className="text-xs text-blue-500">Сохранение...</span>}
+          {saveStatus === 'saved' && <span className="text-xs text-green-600">✓ Сохранено</span>}
+          {saveStatus === 'error' && <span className="text-xs text-red-500" title={saveError}>⚠ Ошибка сохранения</span>}
+          <button onClick={handleSaveNow} disabled={saveStatus === 'saving'} className="text-xs px-3 py-1.5 border rounded hover:bg-gray-50 disabled:opacity-40">
+            Сохранить сейчас
           </button>
         </div>
       </div>
