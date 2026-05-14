@@ -173,10 +173,14 @@ const worker = new Worker<JobData>(
           } else if (el.type === 'text') {
             const { r, g, b } = hexToRgb(el.color ?? '#000000');
             const font: PDFFont = el.bold ? boldFont : regularFont;
+            const size = el.fontSizePt ?? 10;
+            // pdf-lib Y = baseline (bottom-up). Canvas top: yMm (top-down).
+            // Shift baseline down by ~75% of font size so the visual top of
+            // the text aligns with yMm, matching the canvas preview.
             page.drawText(el.text ?? '', {
               x: toX(el.xMm),
-              y: toY(el.yMm),
-              size: el.fontSizePt ?? 10,
+              y: toY(el.yMm) - size * 0.75,
+              size,
               font,
               color: rgb(r, g, b),
             });

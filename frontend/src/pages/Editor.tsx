@@ -6,6 +6,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import ElementProperties from '../components/ElementProperties';
 import LayerList from '../components/LayerList';
 import { genId } from '../lib/uuid';
+import bwipjs from 'bwip-js';
 
 const SCALE = 3.7795 * 3;
 const SNAP = 0.5;
@@ -16,106 +17,46 @@ function snapToGrid(val: number): number {
 
 type DrawMode = 'select' | 'text' | 'rect';
 
-// EAN-13 renderer
-const EAN13_L: number[][] = [
-  [0,0,0,1,1,0,1],[0,0,1,1,0,0,1],[0,0,1,0,0,1,1],[0,1,1,1,1,0,1],
-  [0,1,0,0,0,1,1],[0,1,1,0,0,0,1],[0,1,0,1,1,1,1],[0,1,1,1,0,1,1],
-  [0,1,1,0,1,1,1],[0,0,0,1,0,1,1],
-];
-const EAN13_G: number[][] = EAN13_L.map(p => [...p].reverse());
-const EAN13_R: number[][] = EAN13_L.map(p => p.map((b: number) => b ^ 1));
-const EAN13_PARITY: number[][] = [
-  [0,0,0,0,0,0],[0,0,1,0,1,1],[0,0,1,1,0,1],[0,0,1,1,1,0],
-  [0,1,0,0,1,1],[0,1,1,0,0,1],[0,1,1,1,0,0],[0,1,0,1,0,1],
-  [0,1,0,1,1,0],[0,1,1,0,1,0],
-];
-
-function ean13Checksum(d: number[]): number {
-  const s = d.reduce((a, v, i) => a + (i % 2 === 0 ? v : v * 3), 0);
-  return (10 - (s % 10)) % 10;
-}
-
-function isValidEan13Input(value: string): boolean {
-  const digits = (value || '').replace(/\D/g, '');
-  return digits.length === 12 || digits.length === 13;
-}
-
-function drawInvalidBarcode(canvas: HTMLCanvasElement, msg: string) {
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-  ctx.fillStyle = '#fef2f2';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.strokeStyle = '#fca5a5';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(0.5, 0.5, canvas.width - 1, canvas.height - 1);
-  ctx.fillStyle = '#b91c1c';
-  ctx.font = `${Math.max(9, Math.min(14, canvas.height * 0.22))}px sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(msg, canvas.width / 2, canvas.height / 2);
-}
-
-function drawEan13(canvas: HTMLCanvasElement, value: string) {
-  if (!isValidEan13Input(value)) {
-    drawInvalidBarcode(canvas, 'EAN-13: нужно 12 или 13 цифр');
-    return;
-  }
-  const raw = value.replace(/\D/g, '').padEnd(12, '0').slice(0, 12);
-  const digits = raw.split('').map(Number);
-  const check = ean13Checksum(digits);
-  const all = [...digits, check];
-  const first = all[0];
-  const left = all.slice(1, 7);
-  const right = all.slice(7);
-  const parity = EAN13_PARITY[first];
-  const GUARD_L = [1,0,1];
-  const GUARD_M = [0,1,0,1,0];
-  const GUARD_R = [1,0,1];
-  const bars: number[] = [
-    ...GUARD_L,
-    ...left.flatMap((d, i) => parity[i] === 0 ? EAN13_L[d] : EAN13_G[d]),
-    ...GUARD_M,
-    ...right.flatMap(d => EAN13_R[d]),
-    ...GUARD_R,
-  ];
-  const W = canvas.width;
-  const H = canvas.height;
-  const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, W, H);
-  const barW = W / bars.length;
-  const barH = H * 0.80;
-  bars.forEach((b, i) => {
-    if (b) {
-      ctx.fillStyle = '#000';
-      ctx.fillRect(Math.round(i * barW), 0, Math.max(1, Math.round(barW)), barH);
-    }
-  });
-  const fontSize = Math.max(7, H * 0.14);
-  ctx.fillStyle = '#000';
-  ctx.font = `${fontSize}px monospace`;
-  ctx.textBaseline = 'bottom';
-  ctx.textAlign = 'left';
-  ctx.fillText(String(first), 0, H);
-  ctx.textAlign = 'center';
-  ctx.fillText(left.join(''), (3 + 6 * 7 / 2) * barW, H);
-  ctx.fillText(right.join(''), (3 + 6 * 7 + 5 + 6 * 7 / 2) * barW, H);
+// Compute EAN-13 check digit so we always pass a valid 13-digit string to bwip-js.
+function normalizeEan13(value: string): string {
+  let digits = (value ?? '').replace(/\D/g, '');
+  if (digits.length === 0) digits = '0';
+  digits = digits.slice(0, 13).padStart(13, '0');
+  const head = digits.slice(0, 12);
+  let sum = 0;
+  for (let i = 0; i < 12; i++) sum += parseInt(head[i]) * (i % 2 === 0 ? 1 : 3);
+  const check = (10 - (sum % 10)) % 10;
+  return head + check;
 }
 
 function BarcodeCanvas({ value, width, height }: { value: string; width: number; height: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
-    if (!ref.current) return;
-    const w = Math.max(1, Math.round(width));
-    const h = Math.max(1, Math.round(height));
-    ref.current.width = w;
-    ref.current.height = h;
-    if (width <= 0 || height <= 0) return;
+    if (!ref.current || width <= 0 || height <= 0) return;
+    const canvas = ref.current;
+    // bwip-js needs physical pixel dimensions; set them before calling.
+    canvas.width = Math.max(1, Math.round(width));
+    canvas.height = Math.max(1, Math.round(height));
     try {
-      drawEan13(ref.current, value);
+      bwipjs.toCanvas(canvas, {
+        bcid: 'ean13',
+        text: normalizeEan13(value),
+        scale: 3,
+        height: 10,
+        includetext: true,
+        textxalign: 'center',
+      } as any);
     } catch (err) {
-      console.error('drawEan13 failed:', err);
-      drawInvalidBarcode(ref.current, 'Ошибка отрисовки');
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#fef2f2';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#b91c1c';
+        ctx.font = `${Math.max(9, canvas.height * 0.22)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('EAN-13: нужно 12/13 цифр', canvas.width / 2, canvas.height / 2);
+      }
     }
   }, [value, width, height]);
   return <canvas ref={ref} style={{ width: Math.max(1, width), height: Math.max(1, height), display: 'block' }} />;
