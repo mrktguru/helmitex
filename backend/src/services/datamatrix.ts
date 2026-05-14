@@ -63,6 +63,6 @@ export async function encodeDataMatrix(payload: string, scale = 8): Promise<Buff
     padding: scale * 2,
     parse: parsed,
     backgroundcolor: 'FFFFFF',
-  });
-  return Buffer.from(png);
+  } as any);
+  return Buffer.from(png as Buffer);
 }
