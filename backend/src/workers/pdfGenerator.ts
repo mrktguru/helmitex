@@ -16,14 +16,52 @@ const EAC_SVG_PATH = path.resolve(__dirname, '../../assets/eac-icon.svg');
 
 async function renderEacPng(color: string, widthPx: number, heightPx: number): Promise<Buffer> {
   let svgText = fs.readFileSync(EAC_SVG_PATH, 'utf-8');
+  // Replace intrinsic width/height with pixel values so sharp rasterizes at exactly our dimensions.
+  // Without this, librsvg may use the SVG's declared "55mm × 55mm" dimensions before resize.
+  svgText = svgText
+    .replace(/width="[^"]*"/, `width="${widthPx}"`)
+    .replace(/height="[^"]*"/, `height="${heightPx}"`);
   if (color !== '#000000' && color !== '#000') {
-    // Replace all black fills in the SVG with the chosen color
     svgText = svgText.replace(/fill:#000000/g, `fill:${color}`);
   }
   return sharp(Buffer.from(svgText))
-    .resize(Math.round(widthPx), Math.round(heightPx), { fit: 'fill' })
     .png()
     .toBuffer();
+}
+
+/**
+ * Word-wraps a single paragraph to fit within maxWidthPt.
+ * Returns array of lines. Never splits inside a word.
+ */
+function wrapParagraph(text: string, font: PDFFont, size: number, maxWidthPt: number): string[] {
+  if (maxWidthPt <= 0 || !text) return [text];
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let cur = '';
+  for (const word of words) {
+    const candidate = cur ? `${cur} ${word}` : word;
+    if (font.widthOfTextAtSize(candidate, size) <= maxWidthPt) {
+      cur = candidate;
+    } else {
+      if (cur) lines.push(cur);
+      // If single word is wider than block, just push it as-is (better than dropping)
+      cur = word;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines.length > 0 ? lines : [text];
+}
+
+/** Split text on \n then word-wrap each paragraph to maxWidthPt. */
+function wrapText(rawText: string, font: PDFFont, size: number, maxWidthPt: number): string[] {
+  const paragraphs = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  if (maxWidthPt <= 0) return paragraphs;
+  const result: string[] = [];
+  for (const para of paragraphs) {
+    if (!para.trim()) { result.push(''); continue; }
+    for (const line of wrapParagraph(para, font, size, maxWidthPt)) result.push(line);
+  }
+  return result;
 }
 
 interface JobData {
@@ -205,24 +243,28 @@ const worker = new Worker<JobData>(
             const font: PDFFont = el.bold ? boldFont : regularFont;
             const blockW = (el.widthMm ?? 0) * MM_TO_PT;
             const blockH = (el.heightMm ?? 0) * MM_TO_PT;
-            // Normalize Windows (\r\n) and old Mac (\r) line endings, then split
-            const lines = (el.text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-            // Calculate font size: fit-to-block uses binary search on pdf-lib font metrics
+            const rawText = el.text ?? '';
+            // Calculate font size
             let size = el.fontSizePt ?? 10;
             if (el.fitToBlock && blockW > 0 && blockH > 0) {
               let lo = 1, hi = 200;
               for (let fi = 0; fi < 20; fi++) {
                 const mid = (lo + hi) / 2;
-                const maxLineW = Math.max(...lines.map((l) => font.widthOfTextAtSize(l || ' ', mid)));
-                const totalH = lines.length * mid * 1.3;
+                const wrapped = wrapText(rawText, font, mid, blockW);
+                const maxLineW = Math.max(...wrapped.map((l) => font.widthOfTextAtSize(l || ' ', mid)));
+                const totalH = wrapped.length * mid * 1.3;
                 if (maxLineW <= blockW && totalH <= blockH) lo = mid;
                 else hi = mid;
               }
               size = Math.max(1, lo * 0.97);
             }
+            // Word-wrap text to fit block width
+            const lines = wrapText(rawText, font, size, blockW);
             const lineHeight = size * 1.3;
             const startY = toY(el.yMm) - size * 0.75;
             lines.forEach((line, li) => {
+              // Don't render lines below the block bottom
+              if (blockH > 0 && li * lineHeight > blockH + size * 0.5) return;
               const lineW = font.widthOfTextAtSize(line || ' ', size);
               let x = toX(el.xMm);
               if (el.align === 'center' && blockW) x = toX(el.xMm) + (blockW - lineW) / 2;
