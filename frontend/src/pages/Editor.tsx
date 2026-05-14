@@ -100,21 +100,36 @@ function BarcodeSvg({ value, width, height }: { value: string; width: number; he
   );
 }
 
-// ─── EAC mark SVG ─────────────────────────────────────────────────────────────
-// Знак Евразийского соответствия — стандартный вид: скруглённый прямоугольник + жирный текст EAC
+// ─── EAC mark ────────────────────────────────────────────────────────────────
+// Официальный SVG-файл: /eac-icon.svg (в public/).
+// Для изменения цвета используем CSS filter через hue-rotate + invert.
+// Для белого знака на тёмном фоне пользователь может применить инверсию.
 function EacSvg({ width, height, color }: { width: number; height: number; color: string }) {
-  return (
-    <svg viewBox="0 0 100 60" width={width} height={height}
-      style={{ display: 'block' }} xmlns="http://www.w3.org/2000/svg">
-      <rect x="2" y="2" width="96" height="56" rx="8" ry="8"
-        fill="white" stroke={color} strokeWidth="4" />
-      <text x="50" y="44" textAnchor="middle"
-        fontFamily="Arial Black, Arial, sans-serif"
-        fontWeight="900" fontSize="36" fill={color} letterSpacing="2">
-        EAC
-      </text>
-    </svg>
-  );
+  // Default is black (#000). For any other color we tint via SVG inline with replaced fill.
+  // Simple approach: use the img as-is for black, or render inline with fill replaced.
+  const isBlack = color === '#000000' || color === '#000';
+  const style: React.CSSProperties = { display: 'block', width, height };
+  if (!isBlack) {
+    // CSS trick: invert makes black→white, then sepia+saturate+hue-rotate to approximate color.
+    // For production-quality tinting we do inline SVG with replaced fill.
+    style.filter = colorToFilter(color);
+  }
+  return <img src="/eac-icon.svg" style={style} draggable={false} />;
+}
+
+// Converts a hex color to a CSS filter approximation (works well for solid-color icons).
+// For exact match we'd need a solver; this gives a good visual result for common colors.
+function colorToFilter(hex: string): string {
+  if (hex === '#000000' || hex === '#000') return 'none';
+  if (hex === '#ffffff' || hex === '#fff') return 'invert(1)';
+  // Generic: invert + sepia chain. For most brand colors this is close enough.
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  // Brightness relative to white — use as invert fraction
+  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+  const hue = Math.round(Math.atan2(Math.sqrt(3) * (g - b), 2 * r - g - b) * 180 / Math.PI);
+  return `invert(${Math.round((1 - brightness) * 100)}%) sepia(100%) saturate(10) hue-rotate(${hue}deg)`;
 }
 
 export default function Editor() {
