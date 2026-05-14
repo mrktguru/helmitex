@@ -34,7 +34,7 @@ interface LabelElement {
   s3Key?: string;
   strokeColor?: string;
   fillColor?: string | null;
-  strokeWidthPt?: number;\n  // eac color reuses color field above
+  strokeWidthPt?: number;
 }
 
 interface CzArea {
