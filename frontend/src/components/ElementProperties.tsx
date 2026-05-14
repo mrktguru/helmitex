@@ -55,9 +55,28 @@ function TextProps({ el, update }: { el: TextElement; update: (p: any) => void }
           className="w-full border rounded px-2 py-1 text-sm"
         />
       </Field>
-      <Field label="Размер шрифта (pt)">
-        <NumInput value={el.fontSizePt} onChange={(v) => update({ fontSizePt: v })} min={4} max={72} />
+      <Field label="Выравнивание">
+        <div className="flex gap-1">
+          {(['left', 'center', 'right'] as const).map((a) => (
+            <button
+              key={a}
+              onClick={() => update({ align: a })}
+              className={`flex-1 text-xs py-1 border rounded ${(el.align ?? 'left') === a ? 'bg-blue-100 border-blue-400 text-blue-700 font-medium' : 'hover:bg-gray-50'}`}
+              title={a === 'left' ? 'По левому краю' : a === 'center' ? 'По центру' : 'По правому краю'}
+            >
+              {a === 'left' ? '⇐' : a === 'center' ? '⇔' : '⇒'}
+            </button>
+          ))}
+        </div>
       </Field>
+      <Field label="Заполнить блок">
+        <input type="checkbox" checked={el.fitToBlock ?? false} onChange={(e) => update({ fitToBlock: e.target.checked })} />
+      </Field>
+      {!el.fitToBlock && (
+        <Field label="Размер шрифта (pt)">
+          <NumInput value={el.fontSizePt} onChange={(v) => update({ fontSizePt: v })} min={4} max={72} />
+        </Field>
+      )}
       <Field label="Жирный">
         <input type="checkbox" checked={el.bold} onChange={(e) => update({ bold: e.target.checked })} />
       </Field>

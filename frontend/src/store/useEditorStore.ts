@@ -16,6 +16,8 @@ export interface TextElement extends BaseElement {
   fontSizePt: number;
   bold: boolean;
   color: string;
+  align?: 'left' | 'center' | 'right';
+  fitToBlock?: boolean;
 }
 
 export interface BarcodeElement extends BaseElement {

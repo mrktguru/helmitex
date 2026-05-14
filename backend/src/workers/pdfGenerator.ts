@@ -28,6 +28,8 @@ interface LabelElement {
   fontSizePt?: number;
   bold?: boolean;
   color?: string;
+  align?: 'left' | 'center' | 'right';
+  fitToBlock?: boolean;
   value?: string;
   s3Key?: string;
   strokeColor?: string;
@@ -173,16 +175,30 @@ const worker = new Worker<JobData>(
           } else if (el.type === 'text') {
             const { r, g, b } = hexToRgb(el.color ?? '#000000');
             const font: PDFFont = el.bold ? boldFont : regularFont;
-            const size = el.fontSizePt ?? 10;
-            // pdf-lib Y = baseline (bottom-up). Canvas top: yMm (top-down).
-            // Shift baseline down by ~75% of font size so the visual top of
-            // the text aligns with yMm, matching the canvas preview.
-            page.drawText(el.text ?? '', {
-              x: toX(el.xMm),
-              y: toY(el.yMm) - size * 0.75,
-              size,
-              font,
-              color: rgb(r, g, b),
+            const blockW = (el.widthMm ?? 0) * MM_TO_PT;
+            const blockH = (el.heightMm ?? 0) * MM_TO_PT;
+            const lines = (el.text ?? '').split('\n');
+            // Calculate font size: fit-to-block uses binary search on pdf-lib font metrics
+            let size = el.fontSizePt ?? 10;
+            if (el.fitToBlock && blockW > 0 && blockH > 0) {
+              let lo = 1, hi = 200;
+              for (let fi = 0; fi < 20; fi++) {
+                const mid = (lo + hi) / 2;
+                const maxLineW = Math.max(...lines.map((l) => font.widthOfTextAtSize(l || ' ', mid)));
+                const totalH = lines.length * mid * 1.3;
+                if (maxLineW <= blockW && totalH <= blockH) lo = mid;
+                else hi = mid;
+              }
+              size = Math.max(1, lo * 0.97);
+            }
+            const lineHeight = size * 1.3;
+            const startY = toY(el.yMm) - size * 0.75;
+            lines.forEach((line, li) => {
+              const lineW = font.widthOfTextAtSize(line || ' ', size);
+              let x = toX(el.xMm);
+              if (el.align === 'center' && blockW) x = toX(el.xMm) + (blockW - lineW) / 2;
+              else if (el.align === 'right' && blockW) x = toX(el.xMm) + blockW - lineW;
+              if (line.trim()) page.drawText(line, { x, y: startY - li * lineHeight, size, font, color: rgb(r, g, b) });
             });
           } else if (el.type === 'barcode' && el.value) {
             // Vector rendering: bars = rectangles, digits = drawText — crisp at any scale

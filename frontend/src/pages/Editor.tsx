@@ -14,6 +14,24 @@ function snapToGrid(val: number): number {
   return Math.round(val / SNAP) * SNAP;
 }
 
+// Canvas context for measuring text — created once, reused
+let _mctx: CanvasRenderingContext2D | null = null;
+function getFitFontSizePx(text: string, bold: boolean, widthPx: number, heightPx: number): number {
+  if (!text.trim()) return 12;
+  if (!_mctx) _mctx = document.createElement('canvas').getContext('2d')!;
+  const lines = text.split('\n');
+  let lo = 1, hi = 600;
+  for (let i = 0; i < 20; i++) {
+    const mid = (lo + hi) / 2;
+    _mctx.font = `${bold ? 'bold ' : ''}${mid}px sans-serif`;
+    const maxW = Math.max(...lines.map((l) => _mctx!.measureText(l || ' ').width));
+    const totalH = lines.length * mid * 1.3;
+    if (maxW <= widthPx - 4 && totalH <= heightPx - 4) lo = mid;
+    else hi = mid;
+  }
+  return Math.max(4, lo);
+}
+
 type DrawMode = 'select' | 'text' | 'rect';
 type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
@@ -540,11 +558,15 @@ function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTe
     const t = el as TextElement & { widthMm?: number; heightMm?: number };
     const w = t.widthMm ? t.widthMm * SCALE : undefined;
     const h = t.heightMm ? t.heightMm * SCALE : undefined;
+    const fontSizePx = (t.fitToBlock && w && h)
+      ? getFitFontSizePx(t.text || ' ', t.bold, w, h)
+      : t.fontSizePt * (SCALE / 3);
     const textStyle: React.CSSProperties = {
-      fontSize: t.fontSizePt * (SCALE / 3),
+      fontSize: fontSizePx,
       fontWeight: t.bold ? 'bold' : 'normal',
       color: t.color,
       lineHeight: 1.3,
+      textAlign: (t.align ?? 'left') as React.CSSProperties['textAlign'],
       padding: 2,
     };
     if (editing) {
