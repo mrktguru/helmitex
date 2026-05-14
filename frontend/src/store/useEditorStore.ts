@@ -20,6 +20,8 @@ export interface TextElement extends BaseElement {
   fitToBlock?: boolean;
   /** Pre-computed line breaks from browser canvas — used by PDF generator for WYSIWYG accuracy. */
   _wrappedLines?: string[];
+  /** Browser-resolved font size in pt (for fit-to-block); ensures PDF matches editor exactly. */
+  _resolvedFontSizePt?: number;
 }
 
 export interface BarcodeElement extends BaseElement {

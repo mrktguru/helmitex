@@ -90,6 +90,8 @@ interface LabelElement {
   fitToBlock?: boolean;
   /** Pre-computed line breaks from browser canvas — use directly in PDF for WYSIWYG accuracy. */
   _wrappedLines?: string[];
+  /** Browser-resolved font size in pt (accounts for fit-to-block + correct zoom math). */
+  _resolvedFontSizePt?: number;
   value?: string;
   s3Key?: string;
   strokeColor?: string;
@@ -255,9 +257,9 @@ const worker = new Worker<JobData>(
             const blockW = (el.widthMm ?? 0) * MM_TO_PT;
             const blockH = (el.heightMm ?? 0) * MM_TO_PT;
             const rawText = el.text ?? '';
-            // Calculate font size
-            let size = el.fontSizePt ?? 10;
-            if (el.fitToBlock && blockW > 0 && blockH > 0) {
+            // Calculate font size: prefer browser-resolved value (WYSIWYG) when available
+            let size = el._resolvedFontSizePt ?? el.fontSizePt ?? 10;
+            if (!el._resolvedFontSizePt && el.fitToBlock && blockW > 0 && blockH > 0) {
               let lo = 1, hi = 200;
               for (let fi = 0; fi < 20; fi++) {
                 const mid = (lo + hi) / 2;

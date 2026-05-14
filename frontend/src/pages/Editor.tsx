@@ -206,7 +206,10 @@ export default function Editor() {
             ? getFitFontSizePx(t.text, t.bold, blockW, t.heightMm * SCALE)
             : t.fontSizePt * (SCALE / 3);
           const wrapped = browserWrapText(t.text, t.bold, fontSizePx, blockW);
-          return { ...t, _wrappedLines: wrapped };
+          // Convert browser fontSizePx back to PDF pt, accounting for 3x canvas zoom.
+          // SCALE = px/mm at current zoom; 72pt = 25.4mm → pt = px * 72 / (SCALE * 25.4)
+          const resolvedFontSizePt = fontSizePx * 72 / (SCALE * 25.4);
+          return { ...t, _wrappedLines: wrapped, _resolvedFontSizePt: resolvedFontSizePt };
         });
         await api.saveTemplate(projectId, {
           widthMm: store.widthMm, heightMm: store.heightMm,
