@@ -15,6 +15,7 @@ function snapToGrid(val: number): number {
 }
 
 type DrawMode = 'select' | 'text' | 'rect';
+type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
 // ─── EAN-13 SVG renderer ──────────────────────────────────────────────────────
 const EAN13_L = [[0,0,0,1,1,0,1],[0,0,1,1,0,0,1],[0,0,1,0,0,1,1],[0,1,1,1,1,0,1],[0,1,0,0,0,1,1],[0,1,1,0,0,0,1],[0,1,0,1,1,1,1],[0,1,1,1,0,1,1],[0,1,1,0,1,1,1],[0,0,0,1,0,1,1]];
@@ -97,6 +98,7 @@ export default function Editor() {
   const dragging = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
   const czDragging = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
   const drawing = useRef<{ startXmm: number; startYmm: number; newId: string } | null>(null);
+  const resizing = useRef<{ id: string; handle: ResizeHandle; startX: number; startY: number; origEl: LabelElement } | null>(null);
   const [drawRect, setDrawRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
   useEffect(() => {
@@ -158,6 +160,7 @@ export default function Editor() {
       await api.saveTemplate(projectId, {
         widthMm: store.widthMm, heightMm: store.heightMm,
         elements: store.elements, czArea: store.czArea, barcodeValue: store.barcodeValue || null,
+        printMargins: store.printMargins,
       });
       setSaveMsg('Сохранено');
       setTimeout(() => setSaveMsg(''), 2000);
@@ -194,7 +197,46 @@ export default function Editor() {
     czDragging.current = { startX: e.clientX, startY: e.clientY, origX: store.czArea.xMm, origY: store.czArea.yMm };
   }, [store, drawMode]);
 
+  const onResizeStart = useCallback((e: React.MouseEvent, id: string, handle: ResizeHandle) => {
+    if (e.button !== 0) return;
+    const el = store.elements.find((x) => x.id === id);
+    if (!el) return;
+    store.pushHistory();
+    resizing.current = { id, handle, startX: e.clientX, startY: e.clientY, origEl: { ...el } };
+  }, [store]);
+
   const onMouseMove = useCallback((e: React.MouseEvent) => {
+    if (resizing.current) {
+      const { id, handle, startX, startY, origEl } = resizing.current;
+      const dx = (e.clientX - startX) / SCALE;
+      const dy = (e.clientY - startY) / SCALE;
+      const orig = origEl as any;
+      const origW = orig.widthMm ?? 20;
+      const origH = orig.heightMm ?? 10;
+      let newX = orig.xMm, newY = orig.yMm, newW = origW, newH = origH;
+      if (handle === 'se') {
+        newW = snapToGrid(Math.max(3, origW + dx)); newH = snapToGrid(Math.max(3, origH + dy));
+      } else if (handle === 'sw') {
+        newW = snapToGrid(Math.max(3, origW - dx)); newX = snapToGrid(orig.xMm + origW - newW);
+        newH = snapToGrid(Math.max(3, origH + dy));
+      } else if (handle === 'ne') {
+        newW = snapToGrid(Math.max(3, origW + dx));
+        newH = snapToGrid(Math.max(3, origH - dy)); newY = snapToGrid(orig.yMm + origH - newH);
+      } else if (handle === 'nw') {
+        newW = snapToGrid(Math.max(3, origW - dx)); newX = snapToGrid(orig.xMm + origW - newW);
+        newH = snapToGrid(Math.max(3, origH - dy)); newY = snapToGrid(orig.yMm + origH - newH);
+      } else if (handle === 'e') {
+        newW = snapToGrid(Math.max(3, origW + dx));
+      } else if (handle === 'w') {
+        newW = snapToGrid(Math.max(3, origW - dx)); newX = snapToGrid(orig.xMm + origW - newW);
+      } else if (handle === 's') {
+        newH = snapToGrid(Math.max(3, origH + dy));
+      } else if (handle === 'n') {
+        newH = snapToGrid(Math.max(3, origH - dy)); newY = snapToGrid(orig.yMm + origH - newH);
+      }
+      store.updateElement(id, { xMm: newX, yMm: newY, widthMm: newW, heightMm: newH } as any);
+      return;
+    }
     if (czDragging.current) {
       const dx = (e.clientX - czDragging.current.startX) / SCALE;
       const dy = (e.clientY - czDragging.current.startY) / SCALE;
@@ -218,6 +260,7 @@ export default function Editor() {
   }, [store]);
 
   const onMouseUp = useCallback((e: React.MouseEvent) => {
+    if (resizing.current) { resizing.current = null; return; }
     if (czDragging.current) { czDragging.current = null; store.setCzArea(store.czArea); }
     dragging.current = null;
     if (drawing.current && canvasRef.current) {
@@ -258,6 +301,17 @@ export default function Editor() {
           <input type="number" min={10} max={200} step={0.5} value={store.widthMm} onChange={(e) => store.setSize(Number(e.target.value), store.heightMm)} className="w-16 border rounded px-1 py-0.5 text-sm" />
           <label className="text-xs text-gray-500">В (мм):</label>
           <input type="number" min={10} max={200} step={0.5} value={store.heightMm} onChange={(e) => store.setSize(store.widthMm, Number(e.target.value))} className="w-16 border rounded px-1 py-0.5 text-sm" />
+        </div>
+        <div className="flex items-center gap-1 ml-2 border-l pl-2">
+          <span className="text-xs text-gray-500">Поля:</span>
+          {([['topMm', 'Верх'], ['rightMm', 'Право'], ['bottomMm', 'Низ'], ['leftMm', 'Лево']] as const).map(([key, label]) => (
+            <input key={key} type="number" min={0} max={50} step={0.5}
+              value={store.printMargins[key]}
+              onChange={(e) => store.setPrintMargins({ ...store.printMargins, [key]: Number(e.target.value) })}
+              className="w-12 border rounded px-1 py-0.5 text-xs"
+              title={`${label} (мм)`}
+            />
+          ))}
         </div>
         <button onClick={store.undo} className="text-xs px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-40" disabled={store.past.length === 0}>↩ Отмена</button>
         <button onClick={store.redo} className="text-xs px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-40" disabled={store.future.length === 0}>↪ Повтор</button>
@@ -310,6 +364,12 @@ export default function Editor() {
             style={{ width: canvasW, height: canvasH, position: 'relative' }}
             className="bg-white shadow-xl border border-gray-300"
             onMouseDown={onCanvasMouseDown}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (e.target === canvasRef.current && drawMode === 'select') {
+                store.selectElement(null); setCzSelected(false); setEditingId(null);
+              }
+            }}
           >
             <div
               style={{
@@ -323,6 +383,7 @@ export default function Editor() {
                 boxShadow: czSelected ? '0 0 0 1px #f97316' : undefined,
               }}
               onMouseDown={onCzMouseDown}
+              onClick={(e) => e.stopPropagation()}
             >
               <span style={{ fontSize: 10, color: '#f97316', padding: '1px 3px', pointerEvents: 'none' }}>ЧЗ</span>
             </div>
@@ -336,8 +397,15 @@ export default function Editor() {
                 onDoubleClick={(id) => { if (drawMode === 'select') { store.selectElement(id); setEditingId(id); } }}
                 onTextChange={(id, text) => store.updateElement(id, { text } as any)}
                 onEditDone={() => setEditingId(null)}
+                onResizeStart={onResizeStart}
               />
             ))}
+
+            {/* Print margin guides */}
+            {store.printMargins.topMm > 0 && <div style={{ position: 'absolute', left: 0, right: 0, top: store.printMargins.topMm * SCALE, borderTop: '1px dashed #94a3b8', pointerEvents: 'none', zIndex: 5 }} />}
+            {store.printMargins.bottomMm > 0 && <div style={{ position: 'absolute', left: 0, right: 0, top: (store.heightMm - store.printMargins.bottomMm) * SCALE, borderTop: '1px dashed #94a3b8', pointerEvents: 'none', zIndex: 5 }} />}
+            {store.printMargins.leftMm > 0 && <div style={{ position: 'absolute', top: 0, bottom: 0, left: store.printMargins.leftMm * SCALE, borderLeft: '1px dashed #94a3b8', pointerEvents: 'none', zIndex: 5 }} />}
+            {store.printMargins.rightMm > 0 && <div style={{ position: 'absolute', top: 0, bottom: 0, left: (store.widthMm - store.printMargins.rightMm) * SCALE, borderLeft: '1px dashed #94a3b8', pointerEvents: 'none', zIndex: 5 }} />}
 
             {drawRect && (
               <div style={{
@@ -366,6 +434,43 @@ function ToolButton({ onClick, label, active, hint }: { onClick: () => void; lab
   );
 }
 
+function ResizeHandles({ id, onResizeStart }: {
+  id: string;
+  onResizeStart: (e: React.MouseEvent, id: string, handle: ResizeHandle) => void;
+}) {
+  const handles: { h: ResizeHandle; style: React.CSSProperties }[] = [
+    { h: 'nw', style: { top: -4, left: -4, cursor: 'nw-resize' } },
+    { h: 'n',  style: { top: -4, left: '50%', transform: 'translateX(-50%)', cursor: 'n-resize' } },
+    { h: 'ne', style: { top: -4, right: -4, cursor: 'ne-resize' } },
+    { h: 'e',  style: { top: '50%', right: -4, transform: 'translateY(-50%)', cursor: 'e-resize' } },
+    { h: 'se', style: { bottom: -4, right: -4, cursor: 'se-resize' } },
+    { h: 's',  style: { bottom: -4, left: '50%', transform: 'translateX(-50%)', cursor: 's-resize' } },
+    { h: 'sw', style: { bottom: -4, left: -4, cursor: 'sw-resize' } },
+    { h: 'w',  style: { top: '50%', left: -4, transform: 'translateY(-50%)', cursor: 'w-resize' } },
+  ];
+  return (
+    <>
+      {handles.map(({ h, style }) => (
+        <div
+          key={h}
+          onMouseDown={(e) => { e.stopPropagation(); onResizeStart(e, id, h); }}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'absolute',
+            width: 8, height: 8,
+            background: '#fff',
+            border: '1.5px solid #3b82f6',
+            borderRadius: 1,
+            boxSizing: 'border-box',
+            zIndex: 100,
+            ...style,
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
 interface CanvasElementProps {
   el: LabelElement;
   selected: boolean;
@@ -374,9 +479,11 @@ interface CanvasElementProps {
   onDoubleClick: (id: string) => void;
   onTextChange: (id: string, text: string) => void;
   onEditDone: () => void;
+  onResizeStart: (e: React.MouseEvent, id: string, handle: ResizeHandle) => void;
 }
 
-function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTextChange, onEditDone }: CanvasElementProps) {
+function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTextChange, onEditDone, onResizeStart }: CanvasElementProps) {
+  const canResize = (el as any).widthMm != null && (el as any).heightMm != null;
   const base: React.CSSProperties = {
     position: 'absolute',
     left: el.xMm * SCALE,
@@ -394,7 +501,10 @@ function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTe
         style={{ ...base, width: r.widthMm * SCALE, height: r.heightMm * SCALE, border: `${r.strokeWidthPt}px solid ${r.strokeColor}`, background: r.fillColor ?? 'transparent' }}
         onMouseDown={(e) => onMouseDown(e, el.id)}
         onDoubleClick={() => onDoubleClick(el.id)}
-      />
+        onClick={(e) => e.stopPropagation()}
+      >
+        {selected && canResize && <ResizeHandles id={el.id} onResizeStart={onResizeStart} />}
+      </div>
     );
   }
 
@@ -411,7 +521,7 @@ function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTe
     };
     if (editing) {
       return (
-        <div style={{ ...base, width: w, height: h, outline: '2px solid #3b82f6', cursor: 'default' }} onMouseDown={(e) => e.stopPropagation()}>
+        <div style={{ ...base, width: w, height: h, outline: '2px solid #3b82f6', cursor: 'default' }} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
           <textarea
             autoFocus
             value={t.text}
@@ -428,8 +538,10 @@ function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTe
         style={{ ...base, ...textStyle, width: w, height: h, overflow: 'hidden', whiteSpace: w ? 'pre-wrap' : 'nowrap' }}
         onMouseDown={(e) => onMouseDown(e, el.id)}
         onDoubleClick={() => onDoubleClick(el.id)}
+        onClick={(e) => e.stopPropagation()}
       >
         {t.text || <span style={{ color: '#bbb', fontStyle: 'italic' }}>Текст...</span>}
+        {selected && canResize && !editing && <ResizeHandles id={el.id} onResizeStart={onResizeStart} />}
       </div>
     );
   }
@@ -438,8 +550,11 @@ function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTe
     const b = el as BarcodeElement;
     return (
       <div style={{ ...base, width: b.widthMm * SCALE, height: b.heightMm * SCALE }}
-        onMouseDown={(e) => onMouseDown(e, el.id)} onDoubleClick={() => onDoubleClick(el.id)}>
+        onMouseDown={(e) => onMouseDown(e, el.id)} onDoubleClick={() => onDoubleClick(el.id)}
+        onClick={(e) => e.stopPropagation()}
+      >
         <BarcodeSvg value={b.value} width={b.widthMm * SCALE} height={b.heightMm * SCALE} />
+        {selected && canResize && <ResizeHandles id={el.id} onResizeStart={onResizeStart} />}
       </div>
     );
   }
@@ -450,8 +565,10 @@ function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTe
       <div
         style={{ ...base, width: img.widthMm * SCALE, height: img.heightMm * SCALE, background: '#e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         onMouseDown={(e) => onMouseDown(e, el.id)} onDoubleClick={() => onDoubleClick(el.id)}
+        onClick={(e) => e.stopPropagation()}
       >
         <span style={{ fontSize: 9, color: '#6b7280' }}>Изображение</span>
+        {selected && canResize && <ResizeHandles id={el.id} onResizeStart={onResizeStart} />}
       </div>
     );
   }

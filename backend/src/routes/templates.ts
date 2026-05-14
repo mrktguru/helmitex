@@ -22,6 +22,9 @@ const templateSchema = z.object({
     heightMm: z.number().positive(),
   }),
   barcodeValue: z.string().optional().nullable(),
+  printMargins: z.object({
+    topMm: z.number(), rightMm: z.number(), bottomMm: z.number(), leftMm: z.number(),
+  }).optional().nullable(),
 });
 
 // GET /api/projects/:id/template

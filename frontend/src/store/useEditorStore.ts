@@ -51,6 +51,15 @@ export interface CzArea {
   heightMm: number;
 }
 
+export interface PrintMargins {
+  topMm: number;
+  rightMm: number;
+  bottomMm: number;
+  leftMm: number;
+}
+
+const DEFAULT_PRINT_MARGINS: PrintMargins = { topMm: 3, rightMm: 3, bottomMm: 3, leftMm: 3 };
+
 interface HistoryEntry {
   elements: LabelElement[];
   czArea: CzArea;
@@ -64,10 +73,12 @@ interface EditorState {
   elements: LabelElement[];
   czArea: CzArea;
   barcodeValue: string;
+  printMargins: PrintMargins;
   selectedId: string | null;
   past: HistoryEntry[];
   future: HistoryEntry[];
 
+  setPrintMargins: (m: PrintMargins) => void;
   setSize: (w: number, h: number) => void;
   addElement: (el: LabelElement) => void;
   updateElement: (id: string, patch: Partial<LabelElement>) => void;
@@ -80,6 +91,7 @@ interface EditorState {
   loadTemplate: (data: {
     widthMm: number; heightMm: number;
     elements: LabelElement[]; czArea: CzArea; barcodeValue?: string | null;
+    printMargins?: PrintMargins | null;
   }) => void;
   undo: () => void;
   redo: () => void;
@@ -94,6 +106,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   elements: [],
   czArea: DEFAULT_CZ_AREA,
   barcodeValue: '',
+  printMargins: DEFAULT_PRINT_MARGINS,
   selectedId: null,
   past: [],
   future: [],
@@ -140,8 +153,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   setBarcodeValue: (v) => set({ barcodeValue: v }),
 
-  loadTemplate: ({ widthMm, heightMm, elements, czArea, barcodeValue }) => {
-    set({ widthMm, heightMm, elements, czArea, barcodeValue: barcodeValue ?? '', past: [], future: [] });
+  setPrintMargins: (m) => set({ printMargins: m }),
+
+  loadTemplate: ({ widthMm, heightMm, elements, czArea, barcodeValue, printMargins }) => {
+    set({ widthMm, heightMm, elements, czArea, barcodeValue: barcodeValue ?? '', printMargins: printMargins ?? DEFAULT_PRINT_MARGINS, past: [], future: [] });
   },
 
   undo: () => {

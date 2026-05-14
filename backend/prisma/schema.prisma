@@ -42,6 +42,7 @@ model LabelTemplate {
   elements     Json     // array of LabelElement objects
   czArea       Json     // { xMm, yMm, widthMm, heightMm }
   barcodeValue String?
+  printMargins Json?    // { topMm, rightMm, bottomMm, leftMm }
   updatedAt    DateTime @updatedAt
 }
 
