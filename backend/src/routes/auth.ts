@@ -12,8 +12,8 @@ const loginSchema = z.object({
 });
 
 const REFRESH_COOKIE = 'refreshToken';
-const ACCESS_EXPIRY = '15m';
-const REFRESH_EXPIRY = '7d';
+const ACCESS_EXPIRY = '8h';
+const REFRESH_EXPIRY = '30d';
 
 function signAccess(id: string, role: string): string {
   return jwt.sign({ id, role }, process.env.JWT_SECRET!, { expiresIn: ACCESS_EXPIRY });
@@ -40,9 +40,9 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
   const refreshToken = signRefresh(user.id);
   res.cookie(REFRESH_COOKIE, refreshToken, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    secure: process.env.COOKIE_SECURE === 'true',
+    sameSite: 'lax',
+    maxAge: 30 * 24 * 60 * 60 * 1000,
   });
   res.json({ accessToken, user: { id: user.id, email: user.email, role: user.role } });
 });
