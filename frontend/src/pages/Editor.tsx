@@ -416,6 +416,20 @@ export default function Editor() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-100">
+      {/* Mobile guard: the visual editor needs a wide screen */}
+      <div className="md:hidden flex flex-col items-center justify-center text-center px-6 py-10 gap-4 h-screen">
+        <h1 className="text-lg font-semibold">Редактор недоступен на мобильных</h1>
+        <p className="text-sm text-gray-600 max-w-sm">
+          Визуальный редактор шаблонов требует широкого экрана. Пожалуйста, откройте этот проект с компьютера или планшета (от 768px).
+        </p>
+        <button
+          onClick={() => navigate(`/projects/${projectId}`)}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium"
+        >
+          ← Вернуться к проекту
+        </button>
+      </div>
+      <div className="hidden md:flex flex-col flex-1 min-h-0">
       <div className="bg-white border-b px-4 py-2 flex items-center gap-3">
         <button onClick={() => navigate(`/projects/${projectId}`)} className="text-gray-500 hover:text-gray-900 text-sm">
           ← Назад
@@ -550,6 +564,7 @@ export default function Editor() {
         <div className="w-64 bg-white border-l overflow-y-auto p-4">
           <ElementProperties />
         </div>
+      </div>
       </div>
     </div>
   );

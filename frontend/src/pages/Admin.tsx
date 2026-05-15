@@ -40,10 +40,10 @@ export default function Admin() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm px-6 py-4">
-        <h1 className="text-xl font-bold">Панель администратора</h1>
+      <header className="bg-white shadow-sm px-4 sm:px-6 py-3 sm:py-4">
+        <h1 className="text-lg sm:text-xl font-bold">Панель администратора</h1>
       </header>
-      <main className="max-w-4xl mx-auto px-6 py-8">
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Пользователи</h2>
           <button
@@ -57,7 +57,7 @@ export default function Admin() {
         {showCreate && (
           <form onSubmit={handleCreate} className="bg-white border rounded-xl p-4 mb-4 space-y-3">
             <h3 className="font-medium">Новый пользователь</h3>
-            <div className="flex gap-3">
+            <div className="flex flex-col sm:flex-row gap-3">
               <input
                 type="email" placeholder="Email" required
                 value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
@@ -84,7 +84,8 @@ export default function Admin() {
           </form>
         )}
 
-        <table className="w-full bg-white rounded-xl border text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full bg-white rounded-xl border text-sm min-w-[500px]">
           <thead>
             <tr className="border-b text-left text-gray-400">
               <th className="px-4 py-3">Email</th>
@@ -115,6 +116,7 @@ export default function Admin() {
             ))}
           </tbody>
         </table>
+        </div>
       </main>
     </div>
   );

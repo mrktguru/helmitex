@@ -47,21 +47,21 @@ export default function Projects() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm px-6 py-4 flex items-center justify-between">
-        <h1 className="text-xl font-bold">LabelStudio</h1>
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-gray-600">{user?.email}</span>
+      <header className="bg-white shadow-sm px-4 sm:px-6 py-3 sm:py-4 flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-lg sm:text-xl font-bold">LabelStudio</h1>
+        <div className="flex items-center gap-3 sm:gap-4 text-sm">
+          <span className="hidden sm:inline text-gray-600 truncate max-w-[140px]">{user?.email}</span>
           {user?.role === 'ADMIN' && (
-            <button onClick={() => navigate('/admin')} className="text-sm text-blue-600 hover:underline">Админ</button>
+            <button onClick={() => navigate('/admin')} className="text-blue-600 hover:underline">Админ</button>
           )}
-          <button onClick={handleLogout} className="text-sm text-gray-500 hover:underline">Выйти</button>
+          <button onClick={handleLogout} className="text-gray-500 hover:underline">Выйти</button>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-semibold">Проекты</h2>
-          <form onSubmit={handleCreate} className="flex gap-2">
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+          <h2 className="text-xl sm:text-2xl font-semibold">Проекты</h2>
+          <form onSubmit={handleCreate} className="flex flex-col sm:flex-row gap-2">
             <input
               type="text"
               placeholder="Название проекта"
@@ -72,7 +72,7 @@ export default function Projects() {
             <button
               type="submit"
               disabled={creating || !newName.trim()}
-              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium"
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap"
             >
               + Новый проект
             </button>
