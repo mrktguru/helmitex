@@ -332,14 +332,13 @@ const worker = new Worker<JobData>(
             );
           } else if (el.type === 'image' && el.s3Key) {
             if (!assetCache.has(el.s3Key)) {
-              const buf = await downloadFile(el.s3Key);
-              assetCache.set(el.s3Key, buf);
+              const raw = await downloadFile(el.s3Key);
+              // Convert to PNG via sharp (handles PNG, JPEG, WEBP, etc.)
+              const pngBuf = await sharp(raw).png().toBuffer();
+              assetCache.set(el.s3Key, pngBuf);
             }
             const imgBuf = assetCache.get(el.s3Key)!;
-            const ext = el.s3Key.split('.').pop()?.toLowerCase();
-            const embeddedImg = ext === 'png'
-              ? await outputDoc.embedPng(imgBuf)
-              : await outputDoc.embedJpg(imgBuf);
+            const embeddedImg = await outputDoc.embedPng(imgBuf);
             // Letterbox: preserve aspect ratio inside the declared bounding box
             const boxW = (el.widthMm ?? 20) * MM_TO_PT;
             const boxH = (el.heightMm ?? 20) * MM_TO_PT;
