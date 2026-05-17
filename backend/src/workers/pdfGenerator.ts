@@ -278,9 +278,11 @@ const worker = new Worker<JobData>(
             const sourceText = el.type === 'variable'
               ? (templateVariables[el.key ?? ''] ?? el.placeholder ?? '')
               : (el.text ?? '');
-            // Substitute {{token}} placeholders against current template.variables.
-            // Unknown / unset tokens stay as literal {{token}}.
-            const hasTokens = el.type === 'text' && sourceText.includes('{{');
+            // The browser pre-computes _wrappedLines on the substituted text; if present,
+            // they are already final. Only fall back to server-side substitution+wrap
+            // when no cached lines are provided (older templates / direct API saves).
+            const hasCachedLines = Array.isArray(el._wrappedLines) && el._wrappedLines.length > 0;
+            const hasTokens = !hasCachedLines && el.type === 'text' && sourceText.includes('{{');
             const rawText = hasTokens
               ? sourceText.replace(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g, (m, key) => {
                   const v = templateVariables[key];
@@ -288,10 +290,8 @@ const worker = new Worker<JobData>(
                 })
               : sourceText;
             // Calculate font size: prefer browser-resolved value (WYSIWYG) when available.
-            // When the text contains tokens, ignore browser-precomputed values because
-            // the substituted text may differ — we need to re-fit/re-wrap here.
-            let size = (hasTokens ? undefined : el._resolvedFontSizePt) ?? el.fontSizePt ?? 10;
-            if ((hasTokens || !el._resolvedFontSizePt) && el.fitToBlock && blockW > 0 && blockH > 0) {
+            let size = el._resolvedFontSizePt ?? el.fontSizePt ?? 10;
+            if (!el._resolvedFontSizePt && el.fitToBlock && blockW > 0 && blockH > 0) {
               let lo = 1, hi = 200;
               for (let fi = 0; fi < 20; fi++) {
                 const mid = (lo + hi) / 2;
@@ -304,9 +304,9 @@ const worker = new Worker<JobData>(
               size = Math.max(1, lo * 0.97);
             }
             // Use browser-precomputed line breaks if available (WYSIWYG accurate),
-            // otherwise fall back to server-side wrap (for old templates or token-substituted text).
-            const lines = (!hasTokens && el._wrappedLines && el._wrappedLines.length > 0)
-              ? el._wrappedLines
+            // otherwise fall back to server-side wrap.
+            const lines: string[] = hasCachedLines
+              ? (el._wrappedLines as string[])
               : wrapText(rawText, font, size, blockW);
             const lineHeight = size * 1.3;
             const startY = toY(el.yMm) - size * 0.75;

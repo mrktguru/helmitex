@@ -7,6 +7,7 @@ import ElementProperties from '../components/ElementProperties';
 import LayerList from '../components/LayerList';
 import { genId } from '../lib/uuid';
 import { substituteVariables, hasVariableRefs } from '../lib/variables';
+import { precomputeWraps } from '../lib/wrap';
 
 const SCALE = 3.7795 * 3;
 const SNAP = 0.5;
@@ -199,38 +200,9 @@ export default function Editor() {
       try {
         // Pre-compute wrapped lines for each text element using browser canvas metrics
         // so the PDF generator can reproduce the exact same layout without re-measuring.
-        const elementsWithWraps = store.elements.map((el) => {
-          if (el.type === 'text') {
-            const t = el as import('../store/useEditorStore').TextElement & { widthMm?: number; heightMm?: number };
-            // Texts with {{token}} references must be re-wrapped at render time (server-side)
-            // because their substituted value depends on current template.variables.
-            if (hasVariableRefs(t.text)) {
-              const { _wrappedLines, _resolvedFontSizePt, ...rest } = t as any;
-              return rest;
-            }
-            const blockW = t.widthMm ? t.widthMm * SCALE : 0;
-            if (!blockW || !t.text) return { ...t, _wrappedLines: [t.text] };
-            const fontSizePx = t.fitToBlock && t.heightMm
-              ? getFitFontSizePx(t.text, t.bold, blockW, t.heightMm * SCALE)
-              : t.fontSizePt * (SCALE / 3);
-            const wrapped = browserWrapText(t.text, t.bold, fontSizePx, blockW);
-            const resolvedFontSizePt = fontSizePx * 72 / (SCALE * 25.4);
-            return { ...t, _wrappedLines: wrapped, _resolvedFontSizePt: resolvedFontSizePt };
-          }
-          if (el.type === 'variable') {
-            const v = el as VariableElement & { widthMm?: number; heightMm?: number };
-            const value = store.variables[v.key] ?? v.placeholder ?? '';
-            const blockW = v.widthMm ? v.widthMm * SCALE : 0;
-            if (!blockW) return { ...v, _wrappedLines: [value] };
-            const fontSizePx = v.fitToBlock && v.heightMm
-              ? getFitFontSizePx(value || ' ', v.bold, blockW, v.heightMm * SCALE)
-              : v.fontSizePt * (SCALE / 3);
-            const wrapped = browserWrapText(value, v.bold, fontSizePx, blockW);
-            const resolvedFontSizePt = fontSizePx * 72 / (SCALE * 25.4);
-            return { ...v, _wrappedLines: wrapped, _resolvedFontSizePt: resolvedFontSizePt };
-          }
-          return el;
-        });
+        // For {{token}} references — substitute against current variables first, so the
+        // wrap matches the actual rendered value (not the literal `{{token}}` source).
+        const elementsWithWraps = precomputeWraps(store.elements, store.variables);
         await api.saveTemplate(projectId, {
           widthMm: store.widthMm, heightMm: store.heightMm,
           elements: elementsWithWraps, czArea: store.czArea,

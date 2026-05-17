@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { buildEan13Geometry } from '../lib/ean13';
+import { substituteVariables } from '../lib/variables';
 
 interface Props {
   projectId: string;
@@ -66,7 +67,7 @@ export default function TemplatePreview({ projectId, maxWidthPx = 900, variables
           if (el.type === 'text' || el.type === 'variable') {
             const value = el.type === 'variable'
               ? (effectiveVars[el.key] ?? el.placeholder ?? `{${el.key}}`)
-              : (el.text ?? '');
+              : substituteVariables(el.text ?? '', effectiveVars);
             if (!value) return null;
             // Approximate text rendering — use foreignObject for proper wrap.
             return (

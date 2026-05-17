@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
+import { precomputeWraps } from '../lib/wrap';
 
 interface Props {
   projectId: string;
@@ -63,10 +64,13 @@ export default function VariablesCard({ projectId, onSaved }: Props) {
       const validKeys = new Set(defs.map((d) => d.token));
       const filtered: Record<string, string> = {};
       Object.entries(values).forEach(([k, v]) => { if (validKeys.has(k)) filtered[k] = v; });
+      // Recompute browser-side wraps on the substituted text so the PDF generator
+      // matches the dashboard preview pixel-for-pixel.
+      const elementsWithWraps = precomputeWraps(template.elements ?? [], filtered);
       await api.saveTemplate(projectId, {
         widthMm: template.widthMm,
         heightMm: template.heightMm,
-        elements: template.elements,
+        elements: elementsWithWraps,
         czArea: template.czArea,
         barcodeValue: template.barcodeValue ?? null,
         printMargins: template.printMargins ?? null,
