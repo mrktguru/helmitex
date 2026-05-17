@@ -666,11 +666,27 @@ interface CanvasElementProps {
 
 function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTextChange, onEditDone, onResizeStart }: CanvasElementProps) {
   const { id: projectId } = useParams<{ id: string }>();
+  const token = useAuthStore((s) => s.accessToken);
   // Subscribe to the variable value if this is a variable element (so it re-renders when value changes)
   const varKey = el.type === 'variable' ? (el as VariableElement).key : '';
   const varValue = useEditorStore((s) => (varKey ? s.variables[varKey] ?? '' : ''));
   // Subscribe to all variables map for text elements that may contain {{token}} refs
   const allVars = useEditorStore((s) => s.variables);
+  // Blob URL for image elements (fetched with auth token)
+  const [blobUrl, setBlobUrl] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (el.type !== 'image') return;
+    const s3Key = (el as any).s3Key;
+    if (!s3Key || !projectId || !token) return;
+    let revoked = false;
+    fetch(`/api/projects/${projectId}/template/assets/serve?key=${encodeURIComponent(s3Key)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(r => r.ok ? r.blob() : null).then(blob => {
+      if (!blob || revoked) return;
+      setBlobUrl(URL.createObjectURL(blob));
+    });
+    return () => { revoked = true; setBlobUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null; }); };
+  }, [(el as any).s3Key, projectId, token]);
   const canResize = (el as any).widthMm != null && (el as any).heightMm != null;
   const base: React.CSSProperties = {
     position: 'absolute',
@@ -757,16 +773,15 @@ function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTe
 
   if (el.type === 'image') {
     const img = el as any;
-    const proxyUrl = img.s3Key ? `/api/projects/${projectId}/template/assets/serve?key=${encodeURIComponent(img.s3Key)}` : null;
     return (
       <div
-        style={{ ...base, width: img.widthMm * SCALE, height: img.heightMm * SCALE, background: proxyUrl ? 'transparent' : '#e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+        style={{ ...base, width: img.widthMm * SCALE, height: img.heightMm * SCALE, background: blobUrl ? 'transparent' : '#e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
         onMouseDown={(e) => onMouseDown(e, el.id)} onDoubleClick={() => onDoubleClick(el.id)}
         onClick={(e) => e.stopPropagation()}
       >
-        {proxyUrl
-          ? <img src={proxyUrl} style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none', userSelect: 'none' }} draggable={false} />
-          : <span style={{ fontSize: 9, color: '#6b7280' }}>Изображение</span>
+        {blobUrl
+          ? <img src={blobUrl} style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none', userSelect: 'none' }} draggable={false} />
+          : <span style={{ fontSize: 9, color: '#6b7280' }}>{img.filename ?? 'Изображение'}</span>
         }
         {selected && canResize && <ResizeHandles id={el.id} onResizeStart={onResizeStart} />}
       </div>
