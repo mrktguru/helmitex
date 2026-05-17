@@ -4,7 +4,7 @@ import { z } from 'zod';
 import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { getProjectOrFail } from './projects';
-import { uploadFile, getSignedUrl } from '../services/s3';
+import { uploadFile, downloadFile, getSignedUrl } from '../services/s3';
 
 const router = Router();
 router.use(authMiddleware);
@@ -58,6 +58,25 @@ router.put('/:id/template', async (req: AuthRequest, res: Response): Promise<voi
     create: { ...data, projectId: req.params.id },
   });
   res.json(template);
+});
+
+// GET /api/projects/:id/template/assets/serve?key=… — proxy image from S3
+router.get('/:id/template/assets/serve', async (req: AuthRequest, res: Response): Promise<void> => {
+  if (!(await getProjectOrFail(req.params.id, req, res))) return;
+  const key = req.query.key as string;
+  if (!key || !key.startsWith(`assets/${req.params.id}/`) || key.includes('..')) {
+    res.status(400).json({ error: 'Invalid key' }); return;
+  }
+  try {
+    const buf = await downloadFile(key);
+    const ext = key.split('.').pop()?.toLowerCase() ?? 'bin';
+    const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
+    res.set('Content-Type', mime);
+    res.set('Cache-Control', 'private, max-age=3600');
+    res.send(buf);
+  } catch {
+    res.status(404).json({ error: 'Not found' });
+  }
 });
 
 // POST /api/projects/:id/template/assets (upload logo/image)

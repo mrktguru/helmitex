@@ -665,6 +665,7 @@ interface CanvasElementProps {
 }
 
 function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTextChange, onEditDone, onResizeStart }: CanvasElementProps) {
+  const { id: projectId } = useParams<{ id: string }>();
   // Subscribe to the variable value if this is a variable element (so it re-renders when value changes)
   const varKey = el.type === 'variable' ? (el as VariableElement).key : '';
   const varValue = useEditorStore((s) => (varKey ? s.variables[varKey] ?? '' : ''));
@@ -756,13 +757,17 @@ function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTe
 
   if (el.type === 'image') {
     const img = el as any;
+    const proxyUrl = img.s3Key ? `/api/projects/${projectId}/template/assets/serve?key=${encodeURIComponent(img.s3Key)}` : null;
     return (
       <div
-        style={{ ...base, width: img.widthMm * SCALE, height: img.heightMm * SCALE, background: '#e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        style={{ ...base, width: img.widthMm * SCALE, height: img.heightMm * SCALE, background: proxyUrl ? 'transparent' : '#e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
         onMouseDown={(e) => onMouseDown(e, el.id)} onDoubleClick={() => onDoubleClick(el.id)}
         onClick={(e) => e.stopPropagation()}
       >
-        <span style={{ fontSize: 9, color: '#6b7280' }}>Изображение</span>
+        {proxyUrl
+          ? <img src={proxyUrl} style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none', userSelect: 'none' }} draggable={false} />
+          : <span style={{ fontSize: 9, color: '#6b7280' }}>Изображение</span>
+        }
         {selected && canResize && <ResizeHandles id={el.id} onResizeStart={onResizeStart} />}
       </div>
     );
