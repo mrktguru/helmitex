@@ -81,12 +81,16 @@ interface JobData {
 
 interface LabelElement {
   id: string;
-  type: 'text' | 'barcode' | 'image' | 'rect' | 'eac';
+  type: 'text' | 'barcode' | 'image' | 'rect' | 'eac' | 'variable';
   xMm: number;
   yMm: number;
   widthMm?: number;
   heightMm?: number;
   text?: string;
+  /** Variable key (for type='variable'); looked up in template.variables. */
+  key?: string;
+  /** Fallback shown if variable value is empty. */
+  placeholder?: string;
   fontSizePt?: number;
   bold?: boolean;
   color?: string;
@@ -141,6 +145,7 @@ const worker = new Worker<JobData>(
 
       const elements = template.elements as unknown as LabelElement[];
       const czArea = template.czArea as unknown as CzArea;
+      const templateVariables = (template.variables as Record<string, string> | null) ?? {};
       const widthPt = template.widthMm * MM_TO_PT;
       const heightPt = template.heightMm * MM_TO_PT;
 
@@ -255,12 +260,14 @@ const worker = new Worker<JobData>(
               width: markW,
               height: markH,
             });
-          } else if (el.type === 'text') {
+          } else if (el.type === 'text' || el.type === 'variable') {
             const { r, g, b } = hexToRgb(el.color ?? '#000000');
             const font: PDFFont = el.bold ? boldFont : regularFont;
             const blockW = (el.widthMm ?? 0) * MM_TO_PT;
             const blockH = (el.heightMm ?? 0) * MM_TO_PT;
-            const rawText = el.text ?? '';
+            const rawText = el.type === 'variable'
+              ? (templateVariables[el.key ?? ''] ?? el.placeholder ?? '')
+              : (el.text ?? '');
             // Calculate font size: prefer browser-resolved value (WYSIWYG) when available
             let size = el._resolvedFontSizePt ?? el.fontSizePt ?? 10;
             if (!el._resolvedFontSizePt && el.fitToBlock && blockW > 0 && blockH > 0) {

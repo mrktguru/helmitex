@@ -3,14 +3,14 @@ import { z } from 'zod';
 import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { getProjectOrFail } from './projects';
-import { downloadFile } from '../services/s3';
+import { downloadFile, deleteFile } from '../services/s3';
 import { pdfQueue } from '../workers/pdfQueue';
 
 const router = Router();
 router.use(authMiddleware);
 
 const createBatchSchema = z.object({
-  batchSize: z.union([z.literal(50), z.literal(100)]),
+  batchSize: z.number().int().min(1).max(2000),
 });
 
 // POST /api/projects/:id/batches
@@ -68,14 +68,44 @@ router.post('/projects/:id/batches', async (req: AuthRequest, res: Response): Pr
   res.status(201).json({ outputBatchId: outputBatch.id, jobId: job.id });
 });
 
-// GET /api/projects/:id/batches
+// GET /api/projects/:id/batches?limit=10&offset=0
 router.get('/projects/:id/batches', async (req: AuthRequest, res: Response): Promise<void> => {
   if (!(await getProjectOrFail(req.params.id, req, res))) return;
-  const batches = await prisma.outputBatch.findMany({
-    where: { projectId: req.params.id },
-    orderBy: { createdAt: 'desc' },
+  const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? '10'), 10) || 10));
+  const offset = Math.max(0, parseInt(String(req.query.offset ?? '0'), 10) || 0);
+  const [items, total] = await Promise.all([
+    prisma.outputBatch.findMany({
+      where: { projectId: req.params.id },
+      orderBy: { createdAt: 'desc' },
+      skip: offset,
+      take: limit,
+    }),
+    prisma.outputBatch.count({ where: { projectId: req.params.id } }),
+  ]);
+  res.json({ items, total });
+});
+
+// DELETE /api/batches/:id  — rolls back USED codes → PENDING, removes PDF from S3
+router.delete('/batches/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+  const batch = await prisma.outputBatch.findUnique({ where: { id: req.params.id } });
+  if (!batch) { res.status(404).json({ error: 'Not found' }); return; }
+  if (req.user!.role !== 'ADMIN') {
+    const project = await prisma.project.findUnique({ where: { id: batch.projectId } });
+    if (project?.userId !== req.user!.id) { res.status(403).json({ error: 'Forbidden' }); return; }
+  }
+  const s3Key = batch.s3Key;
+  await prisma.$transaction(async (tx) => {
+    // Roll codes back to PENDING so they can be reused in a new batch
+    await tx.czCode.updateMany({
+      where: { outputBatchId: batch.id },
+      data: { status: 'PENDING', usedAt: null, outputBatchId: null },
+    });
+    await tx.outputBatch.delete({ where: { id: batch.id } });
   });
-  res.json(batches);
+  if (s3Key) {
+    try { await deleteFile(s3Key); } catch (e) { console.warn('[batch delete] s3 cleanup failed:', e); }
+  }
+  res.json({ ok: true });
 });
 
 // GET /api/batches/:id/status

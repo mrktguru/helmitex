@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useEditorStore, LabelElement, TextElement, BarcodeElement, RectElement, EacElement } from '../store/useEditorStore';
+import { useEditorStore, LabelElement, TextElement, BarcodeElement, RectElement, EacElement, VariableElement } from '../store/useEditorStore';
 import { api } from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
 import ElementProperties from '../components/ElementProperties';
@@ -59,7 +59,7 @@ function getFitFontSizePx(text: string, bold: boolean, widthPx: number, heightPx
   return Math.max(4, lo);
 }
 
-type DrawMode = 'select' | 'text' | 'rect';
+type DrawMode = 'select' | 'text' | 'rect' | 'variable';
 type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
 // ─── EAN-13 SVG renderer ──────────────────────────────────────────────────────
@@ -198,23 +198,36 @@ export default function Editor() {
         // Pre-compute wrapped lines for each text element using browser canvas metrics
         // so the PDF generator can reproduce the exact same layout without re-measuring.
         const elementsWithWraps = store.elements.map((el) => {
-          if (el.type !== 'text') return el;
-          const t = el as import('../store/useEditorStore').TextElement & { widthMm?: number; heightMm?: number };
-          const blockW = t.widthMm ? t.widthMm * SCALE : 0;
-          if (!blockW || !t.text) return { ...t, _wrappedLines: [t.text] };
-          const fontSizePx = t.fitToBlock && t.heightMm
-            ? getFitFontSizePx(t.text, t.bold, blockW, t.heightMm * SCALE)
-            : t.fontSizePt * (SCALE / 3);
-          const wrapped = browserWrapText(t.text, t.bold, fontSizePx, blockW);
-          // Convert browser fontSizePx back to PDF pt, accounting for 3x canvas zoom.
-          // SCALE = px/mm at current zoom; 72pt = 25.4mm → pt = px * 72 / (SCALE * 25.4)
-          const resolvedFontSizePt = fontSizePx * 72 / (SCALE * 25.4);
-          return { ...t, _wrappedLines: wrapped, _resolvedFontSizePt: resolvedFontSizePt };
+          if (el.type === 'text') {
+            const t = el as import('../store/useEditorStore').TextElement & { widthMm?: number; heightMm?: number };
+            const blockW = t.widthMm ? t.widthMm * SCALE : 0;
+            if (!blockW || !t.text) return { ...t, _wrappedLines: [t.text] };
+            const fontSizePx = t.fitToBlock && t.heightMm
+              ? getFitFontSizePx(t.text, t.bold, blockW, t.heightMm * SCALE)
+              : t.fontSizePt * (SCALE / 3);
+            const wrapped = browserWrapText(t.text, t.bold, fontSizePx, blockW);
+            const resolvedFontSizePt = fontSizePx * 72 / (SCALE * 25.4);
+            return { ...t, _wrappedLines: wrapped, _resolvedFontSizePt: resolvedFontSizePt };
+          }
+          if (el.type === 'variable') {
+            const v = el as VariableElement & { widthMm?: number; heightMm?: number };
+            const value = store.variables[v.key] ?? v.placeholder ?? '';
+            const blockW = v.widthMm ? v.widthMm * SCALE : 0;
+            if (!blockW) return { ...v, _wrappedLines: [value] };
+            const fontSizePx = v.fitToBlock && v.heightMm
+              ? getFitFontSizePx(value || ' ', v.bold, blockW, v.heightMm * SCALE)
+              : v.fontSizePt * (SCALE / 3);
+            const wrapped = browserWrapText(value, v.bold, fontSizePx, blockW);
+            const resolvedFontSizePt = fontSizePx * 72 / (SCALE * 25.4);
+            return { ...v, _wrappedLines: wrapped, _resolvedFontSizePt: resolvedFontSizePt };
+          }
+          return el;
         });
         await api.saveTemplate(projectId, {
           widthMm: store.widthMm, heightMm: store.heightMm,
           elements: elementsWithWraps, czArea: store.czArea,
           barcodeValue: store.barcodeValue || null, printMargins: store.printMargins,
+          variables: store.variables,
         });
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus('idle'), 2000);
@@ -223,7 +236,7 @@ export default function Editor() {
       }
     }, 1000);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store.elements, store.czArea, store.widthMm, store.heightMm, store.printMargins, store.barcodeValue, hasLoaded]);
+  }, [store.elements, store.czArea, store.widthMm, store.heightMm, store.printMargins, store.barcodeValue, store.variables, hasLoaded]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -288,6 +301,7 @@ export default function Editor() {
         widthMm: store.widthMm, heightMm: store.heightMm,
         elements: store.elements, czArea: store.czArea, barcodeValue: store.barcodeValue || null,
         printMargins: store.printMargins,
+        variables: store.variables,
       });
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
@@ -401,6 +415,20 @@ export default function Editor() {
         store.addElement({ id: newId, type: 'text', xMm: x, yMm: y, widthMm: w, heightMm: h, text: '', fontSizePt: 10, bold: false, color: '#000000', label: 'Текст' } as any);
         store.selectElement(newId);
         setEditingId(newId);
+      } else if (drawMode === 'variable') {
+        // Auto-generate a unique key like var_1, var_2, ...
+        const existingKeys = new Set(
+          store.elements.filter((e) => e.type === 'variable').map((e) => (e as VariableElement).key)
+        );
+        let n = 1;
+        while (existingKeys.has(`var_${n}`)) n++;
+        const key = `var_${n}`;
+        store.addElement({
+          id: newId, type: 'variable', xMm: x, yMm: y, widthMm: w, heightMm: h,
+          key, placeholder: '', fontSizePt: 10, bold: false, color: '#000000',
+          label: `Переменная: ${key}`,
+        } as VariableElement);
+        store.selectElement(newId);
       } else if (drawMode === 'rect') {
         store.addElement({ id: newId, type: 'rect', xMm: x, yMm: y, widthMm: w, heightMm: h, strokeColor: '#000000', fillColor: null, strokeWidthPt: 1, label: 'Прямоугольник' });
         store.selectElement(newId);
@@ -472,6 +500,7 @@ export default function Editor() {
             <div className="space-y-1">
               <ToolButton onClick={() => { setDrawMode('select'); setDrawRect(null); drawing.current = null; }} label="↖ Выбор" active={drawMode === 'select'} />
               <ToolButton onClick={() => { setDrawMode('text'); store.selectElement(null); setEditingId(null); }} label="T Текст" active={drawMode === 'text'} hint="Нарисуйте зону на канвасе" />
+              <ToolButton onClick={() => { setDrawMode('variable'); store.selectElement(null); setEditingId(null); }} label="{ } Переменная" active={drawMode === 'variable'} hint="Поле, значение которого задаётся на dashboard" />
               <ToolButton onClick={addBarcode} label="| Штрихкод" />
               <ToolButton onClick={addEac} label="✓ Знак ЕАС" />
               <ToolButton onClick={() => { setDrawMode('rect'); store.selectElement(null); setEditingId(null); }} label="□ Прямоугольник" active={drawMode === 'rect'} />
@@ -499,7 +528,7 @@ export default function Editor() {
         >
           {drawMode !== 'select' && (
             <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-amber-50 border border-amber-300 text-amber-700 text-xs px-3 py-1 rounded shadow z-50 pointer-events-none">
-              {drawMode === 'text' ? 'Нарисуйте зону для текста' : 'Нарисуйте прямоугольник'} — Esc для отмены
+              {drawMode === 'text' ? 'Нарисуйте зону для текста' : drawMode === 'variable' ? 'Нарисуйте зону для переменной' : 'Нарисуйте прямоугольник'} — Esc для отмены
             </div>
           )}
           <div
@@ -627,6 +656,9 @@ interface CanvasElementProps {
 }
 
 function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTextChange, onEditDone, onResizeStart }: CanvasElementProps) {
+  // Subscribe to the variable value if this is a variable element (so it re-renders when value changes)
+  const varKey = el.type === 'variable' ? (el as VariableElement).key : '';
+  const varValue = useEditorStore((s) => (varKey ? s.variables[varKey] ?? '' : ''));
   const canResize = (el as any).widthMm != null && (el as any).heightMm != null;
   const base: React.CSSProperties = {
     position: 'absolute',
@@ -733,6 +765,45 @@ function CanvasElement({ el, selected, editing, onMouseDown, onDoubleClick, onTe
         onClick={(e) => e.stopPropagation()}
       >
         <EacSvg width={eac.widthMm * SCALE} height={eac.heightMm * SCALE} color={eac.color} />
+        {selected && canResize && <ResizeHandles id={el.id} onResizeStart={onResizeStart} />}
+      </div>
+    );
+  }
+
+  if (el.type === 'variable') {
+    const v = el as VariableElement & { widthMm?: number; heightMm?: number };
+    const displayText = varValue || v.placeholder || `{${v.key}}`;
+    const isPlaceholder = !varValue;
+    const w = v.widthMm ? v.widthMm * SCALE : undefined;
+    const h = v.heightMm ? v.heightMm * SCALE : undefined;
+    const fontSizePx = (v.fitToBlock && w && h)
+      ? getFitFontSizePx(displayText || ' ', v.bold, w, h)
+      : v.fontSizePt * (SCALE / 3);
+    const textStyle: React.CSSProperties = {
+      fontFamily: LABEL_FONT,
+      fontSize: fontSizePx,
+      fontWeight: v.bold ? 'bold' : 'normal',
+      color: isPlaceholder ? '#9ca3af' : v.color,
+      fontStyle: isPlaceholder ? 'italic' : 'normal',
+      lineHeight: 1.3,
+      textAlign: (v.align ?? 'left') as React.CSSProperties['textAlign'],
+      padding: 0,
+    };
+    return (
+      <div
+        style={{
+          ...base, ...textStyle, width: w, height: h, overflow: 'hidden',
+          whiteSpace: 'pre', wordBreak: 'keep-all',
+          background: 'rgba(168, 85, 247, 0.06)',
+          borderTop: '1px dashed rgba(168, 85, 247, 0.4)',
+          borderBottom: '1px dashed rgba(168, 85, 247, 0.4)',
+        }}
+        onMouseDown={(e) => onMouseDown(e, el.id)}
+        onDoubleClick={() => onDoubleClick(el.id)}
+        onClick={(e) => e.stopPropagation()}
+        title={`Переменная: ${v.key}`}
+      >
+        {(w ? browserWrapText(displayText, v.bold, fontSizePx, w) : [displayText]).join('\n')}
         {selected && canResize && <ResizeHandles id={el.id} onResizeStart={onResizeStart} />}
       </div>
     );

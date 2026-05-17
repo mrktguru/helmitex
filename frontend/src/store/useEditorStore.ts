@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type ElementType = 'text' | 'barcode' | 'image' | 'rect' | 'eac';
+export type ElementType = 'text' | 'barcode' | 'image' | 'rect' | 'eac' | 'variable';
 
 export interface BaseElement {
   id: string;
@@ -55,7 +55,21 @@ export interface EacElement extends BaseElement {
   color: string; // mark color (usually black)
 }
 
-export type LabelElement = TextElement | BarcodeElement | ImageElement | RectElement | EacElement;
+export interface VariableElement extends BaseElement {
+  type: 'variable';
+  key: string;
+  placeholder?: string;
+  fontSizePt: number;
+  bold: boolean;
+  color: string;
+  align?: 'left' | 'center' | 'right';
+  fitToBlock?: boolean;
+  /** Pre-computed line breaks (with substituted value) for PDF WYSIWYG. */
+  _wrappedLines?: string[];
+  _resolvedFontSizePt?: number;
+}
+
+export type LabelElement = TextElement | BarcodeElement | ImageElement | RectElement | EacElement | VariableElement;
 
 export interface CzArea {
   xMm: number;
@@ -87,6 +101,7 @@ interface EditorState {
   czArea: CzArea;
   barcodeValue: string;
   printMargins: PrintMargins;
+  variables: Record<string, string>;
   selectedId: string | null;
   past: HistoryEntry[];
   future: HistoryEntry[];
@@ -101,10 +116,13 @@ interface EditorState {
   setCzArea: (area: CzArea) => void;
   moveCzArea: (area: CzArea) => void;
   setBarcodeValue: (v: string) => void;
+  setVariable: (key: string, value: string) => void;
+  setVariables: (vars: Record<string, string>) => void;
   loadTemplate: (data: {
     widthMm: number; heightMm: number;
     elements: LabelElement[]; czArea: CzArea; barcodeValue?: string | null;
     printMargins?: PrintMargins | null;
+    variables?: Record<string, string> | null;
   }) => void;
   undo: () => void;
   redo: () => void;
@@ -120,6 +138,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   czArea: DEFAULT_CZ_AREA,
   barcodeValue: '',
   printMargins: DEFAULT_PRINT_MARGINS,
+  variables: {},
   selectedId: null,
   past: [],
   future: [],
@@ -168,8 +187,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   setPrintMargins: (m) => set({ printMargins: m }),
 
-  loadTemplate: ({ widthMm, heightMm, elements, czArea, barcodeValue, printMargins }) => {
-    set({ widthMm, heightMm, elements, czArea, barcodeValue: barcodeValue ?? '', printMargins: printMargins ?? DEFAULT_PRINT_MARGINS, past: [], future: [] });
+  setVariable: (key, value) => set((s) => ({ variables: { ...s.variables, [key]: value } })),
+  setVariables: (vars) => set({ variables: vars }),
+
+  loadTemplate: ({ widthMm, heightMm, elements, czArea, barcodeValue, printMargins, variables }) => {
+    set({ widthMm, heightMm, elements, czArea, barcodeValue: barcodeValue ?? '', printMargins: printMargins ?? DEFAULT_PRINT_MARGINS, variables: variables ?? {}, past: [], future: [] });
   },
 
   undo: () => {

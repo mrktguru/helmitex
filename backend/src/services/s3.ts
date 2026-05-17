@@ -3,6 +3,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl as awsGetSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -50,6 +51,15 @@ export async function objectExists(key: string): Promise<boolean> {
   } catch (err: any) {
     if (err?.$metadata?.httpStatusCode === 404 || err?.name === 'NotFound' || err?.Code === 'NotFound') return false;
     if (err?.$metadata?.httpStatusCode === 403) return false; // MinIO sometimes returns 403 for missing
+    throw err;
+  }
+}
+
+export async function deleteFile(key: string): Promise<void> {
+  try {
+    await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
+  } catch (err: any) {
+    if (err?.$metadata?.httpStatusCode === 404) return;
     throw err;
   }
 }

@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
-import CzUploadTab from '../components/CzUploadTab';
-import ExportTab from '../components/ExportTab';
-
-type Tab = 'template' | 'cz' | 'export';
+import TemplatePreview from '../components/TemplatePreview';
+import VariablesCard from '../components/VariablesCard';
+import CzStatusCard from '../components/CzStatusCard';
+import ExportSection from '../components/ExportSection';
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const [project, setProject] = useState<any>(null);
   const [loadError, setLoadError] = useState('');
-  const [tab, setTab] = useState<Tab>('template');
+  // Bumped whenever variables/template are saved, to refresh TemplatePreview
+  const [previewKey, setPreviewKey] = useState(0);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -31,42 +32,43 @@ export default function ProjectDetail() {
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white shadow-sm px-4 sm:px-6 py-3 sm:py-4 flex items-center gap-3 sm:gap-4">
         <button onClick={() => navigate('/projects')} className="text-gray-500 hover:text-gray-900 shrink-0">← Назад</button>
-        <h1 className="text-lg sm:text-xl font-bold truncate">{project.name}</h1>
+        <h1 className="text-lg sm:text-xl font-bold truncate flex-1">{project.name}</h1>
       </header>
 
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
-        <div className="flex gap-2 mb-6 border-b overflow-x-auto">
-          {(['template', 'cz', 'export'] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-3 sm:px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                tab === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-900'
-              }`}
-            >
-              {t === 'template' ? 'Шаблон' : t === 'cz' ? 'Честный знак' : 'Экспорт'}
-            </button>
-          ))}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mb-6">
+          {/* Left: template preview (spans 2 cols on desktop) */}
+          <div className="lg:col-span-2 bg-white rounded-xl border p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="font-semibold">Шаблон этикетки</h3>
+                {project.template && (
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {project.template.widthMm} × {project.template.heightMm} мм
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => navigate(`/projects/${id}/editor`)}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
+              >
+                {project.template ? 'Редактировать' : 'Создать шаблон'}
+              </button>
+            </div>
+            <div key={previewKey} className="bg-gray-50 rounded-lg p-4 min-h-[200px] flex items-center justify-center">
+              <TemplatePreview projectId={id!} />
+            </div>
+          </div>
+
+          {/* Right column: status cards */}
+          <div className="space-y-4 sm:space-y-6">
+            <CzStatusCard projectId={id!} />
+            <VariablesCard projectId={id!} onSaved={() => setPreviewKey((k) => k + 1)} />
+          </div>
         </div>
 
-        {tab === 'template' && (
-          <div className="bg-white rounded-xl border p-4 sm:p-6">
-            <p className="text-gray-600 mb-4">
-              {project.template
-                ? `Размер: ${project.template.widthMm} × ${project.template.heightMm} мм`
-                : 'Шаблон не создан'}
-            </p>
-            <button
-              onClick={() => navigate(`/projects/${id}/editor`)}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-medium"
-            >
-              {project.template ? 'Редактировать шаблон' : 'Создать шаблон'}
-            </button>
-          </div>
-        )}
-
-        {tab === 'cz' && <CzUploadTab projectId={id!} />}
-        {tab === 'export' && <ExportTab projectId={id!} />}
+        {/* Export section spans full width */}
+        <ExportSection projectId={id!} />
       </div>
     </div>
   );

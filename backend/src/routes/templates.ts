@@ -25,6 +25,7 @@ const templateSchema = z.object({
   printMargins: z.object({
     topMm: z.number(), rightMm: z.number(), bottomMm: z.number(), leftMm: z.number(),
   }).optional().nullable(),
+  variables: z.record(z.string()).optional().nullable(),
 });
 
 // GET /api/projects/:id/template
@@ -40,8 +41,12 @@ router.put('/:id/template', async (req: AuthRequest, res: Response): Promise<voi
   if (!(await getProjectOrFail(req.params.id, req, res))) return;
   const parsed = templateSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
-  const { printMargins, ...rest } = parsed.data;
-  const data = { ...rest, ...(printMargins != null ? { printMargins } : {}) };
+  const { printMargins, variables, ...rest } = parsed.data;
+  const data = {
+    ...rest,
+    ...(printMargins != null ? { printMargins } : {}),
+    ...(variables != null ? { variables } : {}),
+  };
   const template = await prisma.labelTemplate.upsert({
     where: { projectId: req.params.id },
     update: data,

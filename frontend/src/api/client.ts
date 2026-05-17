@@ -60,12 +60,15 @@ export const api = {
   getCzStats: (projectId: string) => request<{ total: number; used: number; pending: number }>(`/projects/${projectId}/cz/stats`),
 
   // Batches
-  getBatches: (projectId: string) => request<any[]>(`/projects/${projectId}/batches`),
-  createBatch: (projectId: string, batchSize: 50 | 100) =>
+  getBatches: (projectId: string, limit = 10, offset = 0) =>
+    request<{ items: any[]; total: number }>(`/projects/${projectId}/batches?limit=${limit}&offset=${offset}`),
+  createBatch: (projectId: string, batchSize: number) =>
     request<{ outputBatchId: string; jobId: string }>(`/projects/${projectId}/batches`, {
       method: 'POST',
       body: JSON.stringify({ batchSize }),
     }),
+  deleteBatch: (batchId: string) =>
+    request<{ ok: true }>(`/batches/${batchId}`, { method: 'DELETE' }),
   getBatchStatus: (batchId: string) => request<{ status: string; downloadUrl?: string }>(`/batches/${batchId}/status`),
 
   // Users (admin)

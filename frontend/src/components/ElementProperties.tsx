@@ -1,4 +1,4 @@
-import { useEditorStore, LabelElement, TextElement, BarcodeElement, RectElement, EacElement, CzArea } from '../store/useEditorStore';
+import { useEditorStore, LabelElement, TextElement, BarcodeElement, RectElement, EacElement, VariableElement, CzArea } from '../store/useEditorStore';
 
 export default function ElementProperties() {
   const store = useEditorStore();
@@ -37,6 +37,7 @@ export default function ElementProperties() {
       </Field>
 
       {el.type === 'text' && <TextProps el={el as TextElement} update={update} />}
+      {el.type === 'variable' && <VariableProps el={el as VariableElement} update={update} elements={store.elements} />}
       {el.type === 'barcode' && <BarcodeProps el={el as BarcodeElement} update={update} />}
       {el.type === 'rect' && <RectProps el={el as RectElement} update={update} />}
       {el.type === 'image' && <ImageProps el={el as any} update={update} />}
@@ -158,6 +159,63 @@ function CzAreaProps({ area, onChange }: { area: CzArea; onChange: (a: CzArea) =
       <Field label="Y (мм)"><NumInput value={area.yMm} onChange={(v) => onChange({ ...area, yMm: v })} step={0.5} /></Field>
       <Field label="Ширина (мм)"><NumInput value={area.widthMm} onChange={(v) => onChange({ ...area, widthMm: v })} min={5} /></Field>
       <Field label="Высота (мм)"><NumInput value={area.heightMm} onChange={(v) => onChange({ ...area, heightMm: v })} min={5} /></Field>
+    </>
+  );
+}
+
+function VariableProps({ el, update, elements }: { el: VariableElement; update: (p: any) => void; elements: LabelElement[] }) {
+  const otherKeys = new Set(
+    elements.filter((e) => e.type === 'variable' && e.id !== el.id).map((e) => (e as VariableElement).key)
+  );
+  const keyValid = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(el.key) && !otherKeys.has(el.key);
+  return (
+    <>
+      <Field label="Ключ переменной">
+        <input
+          type="text"
+          value={el.key}
+          onChange={(e) => update({ key: e.target.value, label: `Переменная: ${e.target.value}` })}
+          className={`w-full border rounded px-2 py-1 text-sm font-mono ${!keyValid ? 'border-red-400' : ''}`}
+        />
+        {!keyValid && <p className="text-xs text-red-500 mt-0.5">латиница, цифры, _; уникальный</p>}
+      </Field>
+      <Field label="Подсказка (если значение пусто)">
+        <input
+          type="text"
+          value={el.placeholder ?? ''}
+          onChange={(e) => update({ placeholder: e.target.value })}
+          className="w-full border rounded px-2 py-1 text-sm"
+        />
+      </Field>
+      <Field label="Ширина (мм)"><NumInput value={(el as any).widthMm} onChange={(v) => update({ widthMm: v })} /></Field>
+      <Field label="Высота (мм)"><NumInput value={(el as any).heightMm} onChange={(v) => update({ heightMm: v })} /></Field>
+      <Field label="Выравнивание">
+        <div className="flex gap-1">
+          {(['left', 'center', 'right'] as const).map((a) => (
+            <button
+              key={a}
+              onClick={() => update({ align: a })}
+              className={`flex-1 text-xs py-1 border rounded ${(el.align ?? 'left') === a ? 'bg-blue-100 border-blue-400 text-blue-700 font-medium' : 'hover:bg-gray-50'}`}
+            >
+              {a === 'left' ? '⇐' : a === 'center' ? '⇔' : '⇒'}
+            </button>
+          ))}
+        </div>
+      </Field>
+      <Field label="Заполнить блок">
+        <input type="checkbox" checked={el.fitToBlock ?? false} onChange={(e) => update({ fitToBlock: e.target.checked })} />
+      </Field>
+      {!el.fitToBlock && (
+        <Field label="Размер шрифта (pt)">
+          <NumInput value={el.fontSizePt} onChange={(v) => update({ fontSizePt: v })} min={4} max={72} />
+        </Field>
+      )}
+      <Field label="Жирный">
+        <input type="checkbox" checked={el.bold} onChange={(e) => update({ bold: e.target.checked })} />
+      </Field>
+      <Field label="Цвет">
+        <input type="color" value={el.color} onChange={(e) => update({ color: e.target.value })} className="w-full h-8 rounded border cursor-pointer" />
+      </Field>
     </>
   );
 }
