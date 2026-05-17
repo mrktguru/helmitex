@@ -7,18 +7,20 @@ interface Props {
   onSaved?: (variables: Record<string, string>) => void;
 }
 
-interface VariableField {
-  key: string;
-  label: string;
-  placeholder?: string;
+interface VarDef {
+  token: string;
+  name: string;
 }
 
 /**
- * Card on the project dashboard listing all `variable`-type elements found in the
- * template, with an input for each. Saves to LabelTemplate.variables on submit.
+ * Card on the project dashboard listing all declared `variableDefs` of the
+ * template, with an input for each value. Saves to LabelTemplate.variables.
+ *
+ * For backward compatibility, when `variableDefs` is empty but legacy `variable`
+ * elements exist on the canvas, fall back to deriving fields from those elements.
  */
 export default function VariablesCard({ projectId, onSaved }: Props) {
-  const [fields, setFields] = useState<VariableField[]>([]);
+  const [defs, setDefs] = useState<VarDef[]>([]);
   const [values, setValues] = useState<Record<string, string>>({});
   const [template, setTemplate] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -32,17 +34,20 @@ export default function VariablesCard({ projectId, onSaved }: Props) {
       .then((t) => {
         if (cancelled) return;
         setTemplate(t);
-        const vars: VariableField[] = (t.elements ?? [])
-          .filter((el: any) => el.type === 'variable')
-          .map((el: any) => ({
-            key: el.key,
-            label: el.label ?? `Переменная ${el.key}`,
-            placeholder: el.placeholder,
-          }))
-          // de-duplicate by key
-          .filter((v: VariableField, i: number, arr: VariableField[]) =>
-            arr.findIndex((x) => x.key === v.key) === i);
-        setFields(vars);
+        let list: VarDef[] = Array.isArray(t.variableDefs) ? t.variableDefs : [];
+        if (list.length === 0) {
+          // Legacy fallback — derive from canvas variable elements
+          const legacy = (t.elements ?? [])
+            .filter((el: any) => el.type === 'variable')
+            .map((el: any): VarDef => ({
+              token: el.key,
+              name: el.label ?? `Переменная ${el.key}`,
+            }))
+            .filter((v: VarDef, i: number, arr: VarDef[]) =>
+              arr.findIndex((x) => x.token === v.token) === i);
+          list = legacy;
+        }
+        setDefs(list);
         setValues(t.variables ?? {});
       })
       .catch(() => setTemplate(null))
@@ -55,8 +60,7 @@ export default function VariablesCard({ projectId, onSaved }: Props) {
     setSaving(true);
     setError('');
     try {
-      // Filter values to only keys that still exist in the template
-      const validKeys = new Set(fields.map((f) => f.key));
+      const validKeys = new Set(defs.map((d) => d.token));
       const filtered: Record<string, string> = {};
       Object.entries(values).forEach(([k, v]) => { if (validKeys.has(k)) filtered[k] = v; });
       await api.saveTemplate(projectId, {
@@ -67,6 +71,7 @@ export default function VariablesCard({ projectId, onSaved }: Props) {
         barcodeValue: template.barcodeValue ?? null,
         printMargins: template.printMargins ?? null,
         variables: filtered,
+        variableDefs: template.variableDefs ?? null,
       });
       setValues(filtered);
       setSavedFlash(true);
@@ -89,25 +94,25 @@ export default function VariablesCard({ projectId, onSaved }: Props) {
         <h3 className="font-semibold">Переменные</h3>
         {savedFlash && <span className="text-xs text-green-600">✓ Сохранено</span>}
       </div>
-      {fields.length === 0 ? (
+      {defs.length === 0 ? (
         <p className="text-sm text-gray-500">
-          В шаблоне нет переменных. Добавьте их в редакторе (инструмент <span className="font-mono">{'{ }'}</span> Переменная)
-          — они появятся здесь как редактируемые поля.
+          В шаблоне нет переменных. Объявите их в редакторе (инструмент <span className="font-mono">{'{ }'}</span> Переменные)
+          и вставляйте в любой текст как <code className="bg-gray-100 px-1 rounded">{'{{token}}'}</code>.
         </p>
       ) : (
         <>
           <div className="space-y-3">
-            {fields.map((f) => (
-              <div key={f.key}>
-                <label className="block text-xs text-gray-500 mb-1">
-                  <span className="font-mono text-purple-600">{f.key}</span>
-                  {f.placeholder && <span className="text-gray-400 ml-2">· {f.placeholder}</span>}
+            {defs.map((d) => (
+              <div key={d.token}>
+                <label className="block text-sm mb-1">
+                  <span className="font-medium text-gray-800">{d.name}</span>
+                  <span className="ml-2 font-mono text-xs text-purple-600">{`{{${d.token}}}`}</span>
                 </label>
                 <input
                   type="text"
-                  value={values[f.key] ?? ''}
-                  onChange={(e) => setValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
-                  placeholder={f.placeholder ?? ''}
+                  value={values[d.token] ?? ''}
+                  onChange={(e) => setValues((prev) => ({ ...prev, [d.token]: e.target.value }))}
+                  placeholder={`Значение для ${d.name}`}
                   className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>

@@ -44,7 +44,8 @@ model LabelTemplate {
   czArea       Json     // { xMm, yMm, widthMm, heightMm }
   barcodeValue String?
   printMargins Json?    // { topMm, rightMm, bottomMm, leftMm }
-  variables    Json?    // { [key: string]: string }
+  variables    Json?    // { [token: string]: string } — current values
+  variableDefs Json?    // [{ token: string, name: string }] — declared variables
   updatedAt    DateTime @updatedAt
 }
 

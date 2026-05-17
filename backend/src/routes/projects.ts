@@ -85,6 +85,7 @@ router.post('/:id/copy', async (req: AuthRequest, res: Response): Promise<void> 
           barcodeValue: source.template.barcodeValue,
           printMargins: source.template.printMargins as any,
           variables: source.template.variables as any,
+          variableDefs: source.template.variableDefs as any,
         },
       });
     }

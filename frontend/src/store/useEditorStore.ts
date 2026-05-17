@@ -71,6 +71,13 @@ export interface VariableElement extends BaseElement {
 
 export type LabelElement = TextElement | BarcodeElement | ImageElement | RectElement | EacElement | VariableElement;
 
+export interface VariableDef {
+  /** Token name (without braces). Must match /^[a-zA-Z_][a-zA-Z0-9_]*$/ */
+  token: string;
+  /** Human-readable name shown in the dashboard, e.g. "Дата выпуска". */
+  name: string;
+}
+
 export interface CzArea {
   xMm: number;
   yMm: number;
@@ -102,6 +109,7 @@ interface EditorState {
   barcodeValue: string;
   printMargins: PrintMargins;
   variables: Record<string, string>;
+  variableDefs: VariableDef[];
   selectedId: string | null;
   past: HistoryEntry[];
   future: HistoryEntry[];
@@ -118,11 +126,16 @@ interface EditorState {
   setBarcodeValue: (v: string) => void;
   setVariable: (key: string, value: string) => void;
   setVariables: (vars: Record<string, string>) => void;
+  setVariableDefs: (defs: VariableDef[]) => void;
+  addVariableDef: (def: VariableDef) => void;
+  updateVariableDef: (token: string, patch: Partial<VariableDef>) => void;
+  removeVariableDef: (token: string) => void;
   loadTemplate: (data: {
     widthMm: number; heightMm: number;
     elements: LabelElement[]; czArea: CzArea; barcodeValue?: string | null;
     printMargins?: PrintMargins | null;
     variables?: Record<string, string> | null;
+    variableDefs?: VariableDef[] | null;
   }) => void;
   undo: () => void;
   redo: () => void;
@@ -139,6 +152,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   barcodeValue: '',
   printMargins: DEFAULT_PRINT_MARGINS,
   variables: {},
+  variableDefs: [],
   selectedId: null,
   past: [],
   future: [],
@@ -190,8 +204,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setVariable: (key, value) => set((s) => ({ variables: { ...s.variables, [key]: value } })),
   setVariables: (vars) => set({ variables: vars }),
 
-  loadTemplate: ({ widthMm, heightMm, elements, czArea, barcodeValue, printMargins, variables }) => {
-    set({ widthMm, heightMm, elements, czArea, barcodeValue: barcodeValue ?? '', printMargins: printMargins ?? DEFAULT_PRINT_MARGINS, variables: variables ?? {}, past: [], future: [] });
+  setVariableDefs: (defs) => set({ variableDefs: defs }),
+  addVariableDef: (def) => set((s) => (
+    s.variableDefs.some((d) => d.token === def.token)
+      ? s
+      : { variableDefs: [...s.variableDefs, def] }
+  )),
+  updateVariableDef: (token, patch) => set((s) => ({
+    variableDefs: s.variableDefs.map((d) => d.token === token ? { ...d, ...patch } : d),
+  })),
+  removeVariableDef: (token) => set((s) => ({
+    variableDefs: s.variableDefs.filter((d) => d.token !== token),
+  })),
+
+  loadTemplate: ({ widthMm, heightMm, elements, czArea, barcodeValue, printMargins, variables, variableDefs }) => {
+    set({ widthMm, heightMm, elements, czArea, barcodeValue: barcodeValue ?? '', printMargins: printMargins ?? DEFAULT_PRINT_MARGINS, variables: variables ?? {}, variableDefs: variableDefs ?? [], past: [], future: [] });
   },
 
   undo: () => {

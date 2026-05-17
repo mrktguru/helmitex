@@ -1,8 +1,13 @@
 import { useEditorStore, LabelElement, TextElement, BarcodeElement, RectElement, EacElement, VariableElement, CzArea } from '../store/useEditorStore';
+import VariablesManager from './VariablesManager';
 
-export default function ElementProperties() {
+export default function ElementProperties({ showVars }: { showVars?: boolean } = {}) {
   const store = useEditorStore();
   const el = store.elements.find((e) => e.id === store.selectedId);
+
+  if (showVars) {
+    return <VariablesManager />;
+  }
 
   if (!store.selectedId) {
     return (

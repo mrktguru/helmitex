@@ -26,6 +26,10 @@ const templateSchema = z.object({
     topMm: z.number(), rightMm: z.number(), bottomMm: z.number(), leftMm: z.number(),
   }).optional().nullable(),
   variables: z.record(z.string()).optional().nullable(),
+  variableDefs: z.array(z.object({
+    token: z.string().regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/),
+    name: z.string(),
+  })).optional().nullable(),
 });
 
 // GET /api/projects/:id/template
@@ -41,11 +45,12 @@ router.put('/:id/template', async (req: AuthRequest, res: Response): Promise<voi
   if (!(await getProjectOrFail(req.params.id, req, res))) return;
   const parsed = templateSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
-  const { printMargins, variables, ...rest } = parsed.data;
+  const { printMargins, variables, variableDefs, ...rest } = parsed.data;
   const data = {
     ...rest,
     ...(printMargins != null ? { printMargins } : {}),
     ...(variables != null ? { variables } : {}),
+    ...(variableDefs != null ? { variableDefs } : {}),
   };
   const template = await prisma.labelTemplate.upsert({
     where: { projectId: req.params.id },
