@@ -537,7 +537,7 @@ export default function Editor() {
           )}
           <div
             ref={canvasRef}
-            style={{ width: canvasW, height: canvasH, position: 'relative' }}
+            style={{ width: canvasW, height: canvasH, position: 'relative', borderRadius: 6, overflow: 'hidden' }}
             className="bg-white shadow-xl border border-gray-300"
             onMouseDown={onCanvasMouseDown}
             onClick={(e) => {

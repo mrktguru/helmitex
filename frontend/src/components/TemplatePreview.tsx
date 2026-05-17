@@ -48,7 +48,7 @@ export default function TemplatePreview({ projectId, maxWidthPx = 900, variables
         viewBox={`0 0 ${t.widthMm} ${t.heightMm}`}
         preserveAspectRatio="xMidYMid meet"
         className="bg-white border border-gray-300 shadow"
-        style={{ width: '100%', maxWidth: maxWidthPx, height: 'auto', aspectRatio: `${aspectRatio}` }}
+        style={{ width: '100%', maxWidth: maxWidthPx, height: 'auto', aspectRatio: `${aspectRatio}`, borderRadius: 6 }}
       >
         {/* Elements */}
         {t.elements.map((el) => {
