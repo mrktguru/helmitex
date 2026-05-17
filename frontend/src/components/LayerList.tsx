@@ -105,14 +105,6 @@ export default function LayerList() {
               title="Перетащите для изменения порядка"
             >
               <span className="text-gray-300 text-xs cursor-grab active:cursor-grabbing" title="Перетащить">⋮⋮</span>
-              <button
-                onClick={(e) => { e.stopPropagation(); toggleLock(el); }}
-                className="text-sm hover:opacity-80"
-                style={{ filter: el.locked ? 'none' : 'grayscale(1)', opacity: el.locked ? 1 : 0.4 }}
-                title={el.locked ? 'Разблокировать слой' : 'Заблокировать слой'}
-              >
-                🔒
-              </button>
               {renamingId === el.id ? (
                 <input
                   autoFocus
@@ -137,6 +129,14 @@ export default function LayerList() {
               )}
               <div className="flex gap-1 shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
                 <button onClick={() => startRename(el)} className="text-gray-300 hover:text-gray-600 text-xs" title="Переименовать">✎</button>
+                <button
+                  onClick={() => toggleLock(el)}
+                  className="text-sm hover:opacity-80"
+                  style={{ filter: el.locked ? 'none' : 'grayscale(1)', opacity: el.locked ? 1 : 0.4 }}
+                  title={el.locked ? 'Разблокировать слой' : 'Заблокировать слой'}
+                >
+                  🔒
+                </button>
                 <button
                   onClick={() => { if (!el.locked) deleteElement(el.id); }}
                   className={`text-xs ${el.locked ? 'text-gray-200 cursor-not-allowed' : 'text-red-300 hover:text-red-600'}`}
