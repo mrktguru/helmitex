@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useEditorStore, LabelElement, TextElement, BarcodeElement, RectElement, EacElement, VariableElement } from '../store/useEditorStore';
 import { api } from '../api/client';
