@@ -259,10 +259,33 @@ export default function Editor() {
       if ((e.key === 'Delete' || e.key === 'Backspace') && store.selectedId && !editingId) {
         store.deleteElement(store.selectedId);
       }
+      // Arrow keys — nudge selected element (or CZ area). Shift = 10× step.
+      if (!editingId && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        const step = e.shiftKey ? SNAP * 10 : SNAP; // 0.5 mm / 5 mm
+        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+        if (store.selectedId) {
+          e.preventDefault();
+          const el = store.elements.find((x) => x.id === store.selectedId);
+          if (el) {
+            store.updateElement(store.selectedId, {
+              xMm: snapToGrid(Math.max(0, el.xMm + dx)),
+              yMm: snapToGrid(Math.max(0, el.yMm + dy)),
+            } as any);
+          }
+        } else if (czSelected) {
+          e.preventDefault();
+          store.moveCzArea({
+            ...store.czArea,
+            xMm: snapToGrid(Math.max(0, store.czArea.xMm + dx)),
+            yMm: snapToGrid(Math.max(0, store.czArea.yMm + dy)),
+          });
+        }
+      }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [store, editingId]);
+  }, [store, editingId, czSelected]);
 
   function toMm(e: React.MouseEvent): { xMm: number; yMm: number } | null {
     if (!canvasRef.current) return null;
