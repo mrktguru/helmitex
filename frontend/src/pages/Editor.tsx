@@ -176,6 +176,12 @@ export default function Editor() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showVarsPanel, setShowVarsPanel] = useState(false);
 
+  // Close variables panel as soon as user selects an element or the CZ area —
+  // properties of the picked item should take over the right panel.
+  useEffect(() => {
+    if (showVarsPanel && (store.selectedId || czSelected)) setShowVarsPanel(false);
+  }, [store.selectedId, czSelected, showVarsPanel]);
+
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragging = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
   const czDragging = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
