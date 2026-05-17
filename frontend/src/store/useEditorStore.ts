@@ -8,6 +8,8 @@ export interface BaseElement {
   xMm: number;
   yMm: number;
   label?: string;
+  /** If true, element is read-only: not selectable on canvas, not draggable/resizable, not deletable via DEL key. */
+  locked?: boolean;
 }
 
 export interface TextElement extends BaseElement {

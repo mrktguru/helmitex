@@ -229,7 +229,8 @@ export default function Editor() {
         drawing.current = null; setDrawRect(null);
       }
       if ((e.key === 'Delete' || e.key === 'Backspace') && store.selectedId && !editingId) {
-        store.deleteElement(store.selectedId);
+        const sel = store.elements.find((x) => x.id === store.selectedId);
+        if (sel && !sel.locked) store.deleteElement(store.selectedId);
       }
       // Arrow keys — nudge selected element (or CZ area). Shift = 10× step.
       if (!editingId && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
@@ -237,9 +238,9 @@ export default function Editor() {
         const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
         const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
         if (store.selectedId) {
-          e.preventDefault();
           const el = store.elements.find((x) => x.id === store.selectedId);
-          if (el) {
+          if (el && !el.locked) {
+            e.preventDefault();
             store.updateElement(store.selectedId, {
               xMm: snapToGrid(Math.max(0, el.xMm + dx)),
               yMm: snapToGrid(Math.max(0, el.yMm + dy)),
@@ -327,10 +328,11 @@ export default function Editor() {
   const onElementMouseDown = useCallback((e: React.MouseEvent, id: string) => {
     if (drawMode !== 'select' || e.button !== 0) return;
     e.stopPropagation();
-    setEditingId(null);
-    store.selectElement(id);
     const el = store.elements.find((x) => x.id === id);
     if (!el) return;
+    if (el.locked) return; // locked layers are non-interactive
+    setEditingId(null);
+    store.selectElement(id);
     dragging.current = { id, startX: e.clientX, startY: e.clientY, origX: el.xMm, origY: el.yMm };
   }, [store, drawMode]);
 
@@ -562,7 +564,12 @@ export default function Editor() {
                 selected={store.selectedId === el.id}
                 editing={editingId === el.id}
                 onMouseDown={onElementMouseDown}
-                onDoubleClick={(id) => { if (drawMode === 'select') { store.selectElement(id); setEditingId(id); } }}
+                onDoubleClick={(id) => {
+                  if (drawMode !== 'select') return;
+                  const el = store.elements.find((x) => x.id === id);
+                  if (!el || el.locked) return;
+                  store.selectElement(id); setEditingId(id);
+                }}
                 onTextChange={(id, text) => store.updateElement(id, { text } as any)}
                 onEditDone={() => setEditingId(null)}
                 onResizeStart={onResizeStart}
