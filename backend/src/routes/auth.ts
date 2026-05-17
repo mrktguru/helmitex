@@ -7,8 +7,8 @@ import prisma from '../prisma/client';
 const router = Router();
 
 const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(6),
+  login: z.string().min(1),
+  password: z.string().min(1),
 });
 
 const REFRESH_COOKIE = 'refreshToken';
@@ -30,8 +30,11 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
     res.status(400).json({ error: parsed.error.flatten() });
     return;
   }
-  const { email, password } = parsed.data;
-  const user = await prisma.user.findUnique({ where: { email } });
+  const { login, password } = parsed.data;
+  // Allow login by username (login field) OR email
+  const user = await prisma.user.findFirst({
+    where: { OR: [{ login }, { email: login }] },
+  });
   if (!user || !(await argon2.verify(user.passwordHash, password))) {
     res.status(401).json({ error: 'Invalid credentials' });
     return;

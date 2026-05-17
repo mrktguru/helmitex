@@ -37,9 +37,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export const api = {
   // Auth
-  login: (email: string, password: string) =>
+  login: (login: string, password: string) =>
     request<{ accessToken: string; user: { id: string; email: string; role: 'ADMIN' | 'OPERATOR' } }>(
-      '/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }
+      '/auth/login', { method: 'POST', body: JSON.stringify({ login, password }) }
     ),
   logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
 
