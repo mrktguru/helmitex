@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
+import { buildEan13Geometry } from '../lib/ean13';
 
 interface Props {
   projectId: string;
@@ -98,35 +99,41 @@ export default function TemplatePreview({ projectId, maxWidthPx = 900, variables
             );
           }
           if (el.type === 'barcode') {
+            const { first, leftD, rightD, bars } = buildEan13Geometry(el.value ?? '');
+            const LQUIET = 11;
+            const FS = 5.2;
+            const TY = 49;
             return (
-              <g key={el.id}>
-                <rect x={el.xMm} y={el.yMm} width={el.widthMm} height={el.heightMm} fill="#fff" stroke="#ccc" strokeWidth={0.1} />
-                {/* Simple stripe pattern */}
-                {Array.from({ length: 30 }).map((_, i) => (
-                  <rect key={i}
-                    x={el.xMm + 0.5 + i * (el.widthMm - 1) / 30}
-                    y={el.yMm + 0.5}
-                    width={(el.widthMm - 1) / 60}
-                    height={el.heightMm * 0.7}
-                    fill="#000" />
+              <svg key={el.id}
+                x={el.xMm} y={el.yMm}
+                width={el.widthMm} height={el.heightMm}
+                viewBox="0 0 113 50"
+                preserveAspectRatio="none"
+              >
+                <rect width="113" height="50" fill="white" />
+                {bars.map((b, i) => (
+                  <rect key={i} x={LQUIET + b.x} y={0} width={1} height={b.h} fill="black" />
                 ))}
-              </g>
+                <text x={5.5} y={TY} fontSize={FS} textAnchor="middle" fontFamily="monospace" fill="black">{first}</text>
+                {leftD.map((digit, i) => (
+                  <text key={`l${i}`} x={LQUIET + 3 + i * 7 + 3.5} y={TY} fontSize={FS} textAnchor="middle" fontFamily="monospace" fill="black">{digit}</text>
+                ))}
+                {rightD.map((digit, i) => (
+                  <text key={`r${i}`} x={LQUIET + 50 + i * 7 + 3.5} y={TY} fontSize={FS} textAnchor="middle" fontFamily="monospace" fill="black">{digit}</text>
+                ))}
+              </svg>
             );
           }
           if (el.type === 'eac') {
+            const isBlack = !el.color || el.color === '#000000' || el.color === '#000';
             return (
-              <g key={el.id}>
-                <rect x={el.xMm} y={el.yMm} width={el.widthMm} height={el.heightMm} fill="#fff" />
-                <text
-                  x={el.xMm + el.widthMm / 2}
-                  y={el.yMm + el.heightMm / 2 + el.heightMm * 0.15}
-                  fontSize={el.heightMm * 0.4}
-                  textAnchor="middle"
-                  fontFamily="serif"
-                  fontWeight="bold"
-                  fill={el.color ?? '#000'}
-                >EAC</text>
-              </g>
+              <image key={el.id}
+                href="/eac-icon.svg"
+                x={el.xMm} y={el.yMm}
+                width={el.widthMm} height={el.heightMm}
+                preserveAspectRatio="xMidYMid meet"
+                style={isBlack ? undefined : { filter: hexToCssFilter(el.color) }}
+              />
             );
           }
           if (el.type === 'image') {
@@ -150,4 +157,17 @@ export default function TemplatePreview({ projectId, maxWidthPx = 900, variables
       </svg>
     </div>
   );
+}
+
+// Approximate CSS filter chain that tints a black SVG icon to the given color.
+// Good enough for preview — matches the heuristic used in the editor.
+function hexToCssFilter(hex?: string): string {
+  if (!hex || hex === '#000000' || hex === '#000') return 'none';
+  if (hex === '#ffffff' || hex === '#fff') return 'invert(1)';
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+  const hue = Math.round(Math.atan2(Math.sqrt(3) * (g - b), 2 * r - g - b) * 180 / Math.PI);
+  return `invert(${Math.round((1 - brightness) * 100)}%) sepia(100%) saturate(10) hue-rotate(${hue}deg)`;
 }
