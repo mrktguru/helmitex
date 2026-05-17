@@ -11,6 +11,23 @@ import { uploadFile } from '../services/s3';
 const router = Router();
 router.use(authMiddleware);
 
+/**
+ * Many CRPT / Честный знак CSV exports replace the literal GS byte (0x1D)
+ * with a textual placeholder so the file stays printable. We accept all
+ * common variants and convert them back to a single 0x1D so the encoded
+ * DataMatrix matches what the official PDF contains.
+ */
+function unescapeGs(raw: string): string {
+  return raw
+    .replace(/\\u001[dD]/g, '\x1d')   // \u001d / \u001D
+    .replace(/\\x1[dD]/g, '\x1d')     // \x1d / \x1D
+    .replace(/\\029/g, '\x1d')        // bwip-js style ^029 → \029
+    .replace(/<GS>/gi, '\x1d')        // <GS>
+    .replace(/\{GS\}/gi, '\x1d')      // {GS}
+    .replace(/\u241d/g, '\x1d')       // ␝ (U+241D symbol for group separator)
+    .replace(/\u00a0/g, '\x1d');      // some exports use NBSP as GS placeholder
+}
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 },
@@ -120,7 +137,9 @@ router.post('/:id/cz/csv', uploadCsv.single('file'), async (req: AuthRequest, re
   const codes: string[] = [];
   for (const line of lines) {
     const first = line.split(/[,;\t]/)[0].trim().replace(/^"|"$/g, '');
-    if (first && first.toLowerCase() !== 'code' && first.toLowerCase() !== 'код') codes.push(first);
+    if (first && first.toLowerCase() !== 'code' && first.toLowerCase() !== 'код') {
+      codes.push(unescapeGs(first));
+    }
   }
   if (codes.length === 0) {
     res.status(400).json({ error: 'CSV is empty or has no valid codes' });

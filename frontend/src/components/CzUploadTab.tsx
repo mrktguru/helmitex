@@ -170,7 +170,7 @@ export default function CzUploadTab({ projectId, onUploaded }: Props) {
         <p className="text-gray-500">
           {uploading ? 'Загрузка...' : 'Перетащите PDF или CSV с кодами ЧЗ или нажмите для выбора'}
         </p>
-        <p className="text-xs text-gray-400 mt-1">PDF до 50 МБ · CSV до 10 МБ · дубликаты отклоняются автоматически</p>
+        <p className="text-xs text-gray-400 mt-1">PDF до 50 МБ · CSV до 10 МБ · GS-разделители (\u001d, &lt;GS&gt;) распознаются автоматически · дубликаты отклоняются</p>
         <input ref={fileRef} type="file" accept="application/pdf,text/csv,.csv" className="hidden" onChange={handleFileInput} />
       </div>
 
