@@ -156,11 +156,15 @@ const worker = new Worker<JobData>(
         orderBy: { pageIndex: 'asc' },
       });
 
-      // Group codes by czBatch to avoid downloading same PDF multiple times
+      // Group codes by czBatch to avoid downloading same PDF multiple times.
+      // CSV-sourced batches (s3Key starts with "csv:") have no PDF to download —
+      // their DataMatrix images are re-encoded directly from the stored code text.
       const batchPdfs = new Map<string, Buffer>();
       for (const code of codes) {
+        const key = code.czBatch.s3Key;
+        if (key.startsWith('csv:') || !key) continue;
         if (!batchPdfs.has(code.czBatchId)) {
-          const buf = await downloadFile(code.czBatch.s3Key);
+          const buf = await downloadFile(key);
           batchPdfs.set(code.czBatchId, buf);
         }
       }
@@ -208,13 +212,19 @@ const worker = new Worker<JobData>(
       // and means the main loop only does cheap in-memory PDF drawing.
       const CONCURRENCY = 6;
       const czPngMap = new Map<string, Buffer>();
+      const { encodeDataMatrix } = await import('../services/datamatrix');
       for (let start = 0; start < codes.length; start += CONCURRENCY) {
         const chunk = codes.slice(start, start + CONCURRENCY);
         await Promise.all(chunk.map(async (c) => {
           const mapKey = `${c.czBatchId}:${c.pageIndex}`;
-          const czPdfBuffer = batchPdfs.get(c.czBatchId)!;
-          const png = await getCleanCzPng(c.czBatchId, c.pageIndex, czPdfBuffer);
-          czPngMap.set(mapKey, png);
+          const isCsv = c.czBatch.s3Key.startsWith('csv:') || !c.czBatch.s3Key;
+          if (isCsv) {
+            if (!c.code) throw new Error(`CSV code missing payload (codeId=${c.id})`);
+            czPngMap.set(mapKey, await encodeDataMatrix(c.code, 10));
+          } else {
+            const czPdfBuffer = batchPdfs.get(c.czBatchId)!;
+            czPngMap.set(mapKey, await getCleanCzPng(c.czBatchId, c.pageIndex, czPdfBuffer));
+          }
         }));
         await job.updateProgress(Math.round(((start + chunk.length) / codes.length) * 50));
       }

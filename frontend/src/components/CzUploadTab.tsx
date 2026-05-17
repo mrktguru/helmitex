@@ -46,13 +46,21 @@ export default function CzUploadTab({ projectId }: Props) {
     setPreviews([]);
     setPreviewErrors([]);
     try {
+      const isCsv = /\.csv$/i.test(file.name)
+        || file.type === 'text/csv'
+        || file.type === 'application/vnd.ms-excel'
+        || file.type === 'text/plain';
+      const endpoint = isCsv
+        ? `/api/projects/${projectId}/cz/csv`
+        : `/api/projects/${projectId}/cz`;
+
       const formData = new FormData();
       formData.append('file', file);
 
       const result = await new Promise<{ czBatchId: string; totalCount: number; pageCount: number; previews: string[]; previewErrors?: string[] }>(
         (resolve, reject) => {
           const xhr = new XMLHttpRequest();
-          xhr.open('POST', `/api/projects/${projectId}/cz`);
+          xhr.open('POST', endpoint);
           if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
           xhr.upload.onprogress = (e) => {
             if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100));
@@ -126,8 +134,13 @@ export default function CzUploadTab({ projectId }: Props) {
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
-    if (file?.type === 'application/pdf') handleUpload(file);
-    else setError('Требуется PDF файл');
+    if (!file) return;
+    const isCsv = /\.csv$/i.test(file.name)
+      || file.type === 'text/csv'
+      || file.type === 'application/vnd.ms-excel'
+      || file.type === 'text/plain';
+    if (file.type === 'application/pdf' || isCsv) handleUpload(file);
+    else setError('Требуется PDF или CSV файл');
   }
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
@@ -152,10 +165,10 @@ export default function CzUploadTab({ projectId }: Props) {
         className="border-2 border-dashed border-gray-300 rounded-xl p-10 text-center cursor-pointer hover:border-blue-400 transition-colors"
       >
         <p className="text-gray-500">
-          {uploading ? 'Загрузка...' : 'Перетащите PDF с кодами ЧЗ или нажмите для выбора'}
+          {uploading ? 'Загрузка...' : 'Перетащите PDF или CSV с кодами ЧЗ или нажмите для выбора'}
         </p>
-        <p className="text-xs text-gray-400 mt-1">Максимум 50 МБ · дубликат отклоняется автоматически</p>
-        <input ref={fileRef} type="file" accept="application/pdf" className="hidden" onChange={handleFileInput} />
+        <p className="text-xs text-gray-400 mt-1">PDF до 50 МБ · CSV до 10 МБ · дубликаты отклоняются автоматически</p>
+        <input ref={fileRef} type="file" accept="application/pdf,text/csv,.csv" className="hidden" onChange={handleFileInput} />
       </div>
 
       {uploading && (

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
 
@@ -25,6 +25,8 @@ export default function ExportSection({ projectId }: Props) {
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
   const [activeStatus, setActiveStatus] = useState<string>('');
   const [error, setError] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const token = useAuthStore((s) => s.accessToken);
 
@@ -37,6 +39,13 @@ export default function ExportSection({ projectId }: Props) {
       setBatches(b.items);
       setTotal(b.total);
       if (s) setStats(s);
+      // Drop selections that are no longer on the current page
+      setSelected((prev) => {
+        const ids = new Set(b.items.map((x: Batch) => x.id));
+        const next = new Set<string>();
+        prev.forEach((id) => { if (ids.has(id)) next.add(id); });
+        return next;
+      });
     } catch (err: any) {
       setError(err.message ?? 'Ошибка загрузки');
     }
@@ -105,9 +114,48 @@ export default function ExportSection({ projectId }: Props) {
     }
   }
 
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function toggleAll() {
+    setSelected((prev) => {
+      if (prev.size === batches.length && batches.length > 0) return new Set();
+      return new Set(batches.map((b) => b.id));
+    });
+  }
+
+  async function handleBulkDelete() {
+    if (selected.size === 0) return;
+    const totalCodes = batches.filter((b) => selected.has(b.id)).reduce((s, b) => s + b.count, 0);
+    if (!confirm(`Удалить ${selected.size} экспорт(ов) суммарно на ${totalCodes} кодов? Коды вернутся в "Доступные".`)) return;
+    setBulkDeleting(true);
+    setError('');
+    try {
+      // Delete sequentially to keep ordering deterministic and surface first error
+      for (const id of Array.from(selected)) {
+        await api.deleteBatch(id);
+      }
+      setSelected(new Set());
+      await load();
+    } catch (err: any) {
+      setError(err.message ?? 'Ошибка массового удаления');
+      await load();
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
   const isGenerating = activeBatchId && (activeStatus === 'pending' || activeStatus === 'processing');
   const available = stats?.pending ?? 0;
   const pageCount = Math.ceil(total / PAGE_SIZE);
+  const allOnPageSelected = useMemo(
+    () => batches.length > 0 && batches.every((b) => selected.has(b.id)),
+    [batches, selected],
+  );
 
   return (
     <div className="bg-white rounded-xl border p-5">
@@ -148,6 +196,23 @@ export default function ExportSection({ projectId }: Props) {
 
       {error && <p className="text-red-500 text-sm mb-3">{error}</p>}
 
+      {selected.size > 0 && (
+        <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 mb-3 text-sm">
+          <span className="text-blue-900">Выбрано: <strong>{selected.size}</strong></span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setSelected(new Set())}
+              className="text-gray-600 hover:underline text-xs"
+            >Сбросить</button>
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-3 py-1 rounded text-xs font-medium"
+            >{bulkDeleting ? 'Удаление…' : 'Удалить выбранные'}</button>
+          </div>
+        </div>
+      )}
+
       {total === 0 ? (
         <p className="text-sm text-gray-400 text-center py-4">История экспортов пуста</p>
       ) : (
@@ -156,7 +221,16 @@ export default function ExportSection({ projectId }: Props) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-gray-400 border-b">
-                  <th className="pb-2 pl-5 font-normal">Дата</th>
+                  <th className="pb-2 pl-5 w-10">
+                    <input
+                      type="checkbox"
+                      checked={allOnPageSelected}
+                      onChange={toggleAll}
+                      className="cursor-pointer accent-blue-600"
+                      aria-label="Выбрать все на странице"
+                    />
+                  </th>
+                  <th className="pb-2 font-normal">Дата</th>
                   <th className="pb-2 font-normal">Коды</th>
                   <th className="pb-2 font-normal">Диапазон</th>
                   <th className="pb-2 font-normal">Статус</th>
@@ -166,7 +240,16 @@ export default function ExportSection({ projectId }: Props) {
               <tbody>
                 {batches.map((b) => (
                   <tr key={b.id} className="border-b last:border-0 hover:bg-gray-50">
-                    <td className="py-2 pl-5">{new Date(b.createdAt).toLocaleString('ru')}</td>
+                    <td className="py-2 pl-5">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(b.id)}
+                        onChange={() => toggleOne(b.id)}
+                        className="cursor-pointer accent-blue-600"
+                        aria-label="Выбрать партию"
+                      />
+                    </td>
+                    <td className="py-2">{new Date(b.createdAt).toLocaleString('ru')}</td>
                     <td className="py-2">{b.count}</td>
                     <td className="py-2 text-gray-500">{b.fromIndex}–{b.toIndex}</td>
                     <td className="py-2"><StatusBadge status={b.jobStatus} /></td>

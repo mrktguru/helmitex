@@ -21,7 +21,7 @@ interface TemplateData {
  * Renders the same element types as the editor (text, variable, rect, barcode, eac, image)
  * in a non-interactive scaled-down view.
  */
-export default function TemplatePreview({ projectId, maxWidthPx = 480, variables }: Props) {
+export default function TemplatePreview({ projectId, maxWidthPx = 900, variables }: Props) {
   const [t, setT] = useState<TemplateData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -37,20 +37,16 @@ export default function TemplatePreview({ projectId, maxWidthPx = 480, variables
   if (!t) return <div className="text-sm text-gray-400 text-center py-10">Шаблон ещё не создан</div>;
 
   const aspectRatio = t.widthMm / t.heightMm;
-  const renderW = Math.min(maxWidthPx, t.widthMm * 4); // ~4px per mm cap
-  const renderH = renderW / aspectRatio;
-  const scale = renderW / t.widthMm; // px per mm
 
   const effectiveVars: Record<string, string> = { ...(t.variables ?? {}), ...(variables ?? {}) };
 
   return (
-    <div className="flex justify-center">
+    <div className="w-full flex justify-center">
       <svg
-        width={renderW}
-        height={renderH}
         viewBox={`0 0 ${t.widthMm} ${t.heightMm}`}
+        preserveAspectRatio="xMidYMid meet"
         className="bg-white border border-gray-300 shadow"
-        style={{ maxWidth: '100%', height: 'auto' }}
+        style={{ width: '100%', maxWidth: maxWidthPx, height: 'auto', aspectRatio: `${aspectRatio}` }}
       >
         {/* Elements */}
         {t.elements.map((el) => {
