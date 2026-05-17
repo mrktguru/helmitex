@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import { api } from '../api/client';
 
-interface Props { projectId: string; }
+interface Props { projectId: string; onUploaded?: () => void; }
 
 interface Stats { total: number; used: number; pending: number; }
 
@@ -14,7 +14,7 @@ interface CzBatchInfo {
   used: number;
 }
 
-export default function CzUploadTab({ projectId }: Props) {
+export default function CzUploadTab({ projectId, onUploaded }: Props) {
   const [stats, setStats] = useState<Stats | null>(null);
   const [batches, setBatches] = useState<CzBatchInfo[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -84,6 +84,7 @@ export default function CzUploadTab({ projectId }: Props) {
       setPreviews(result.previews ?? []);
       setPreviewErrors(result.previewErrors ?? []);
       await loadAll();
+      onUploaded?.();
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -111,16 +112,17 @@ export default function CzUploadTab({ projectId }: Props) {
     } finally { setRegenerating(false); }
   }
 
-  async function deleteBatch(id: string, force = false) {
+  async function deleteBatch(id: string) {
     const batch = batches.find((b) => b.id === id);
     const usedCount = batch?.used ?? 0;
     const msg = usedCount > 0
-      ? `В этой партии ${usedCount} использованных кодов. Удаление сделает напечатанные этикетки невалидируемыми. Точно удалить?`
+      ? `В этой партии ${usedCount} использованных кодов. Удалить? Коды будут удалены принудительно.`
       : 'Удалить эту партию ЧЗ? Это действие необратимо.';
     if (!confirm(msg)) return;
     setError('');
     try {
-      const url = `/api/projects/${projectId}/cz/${id}${force || usedCount > 0 ? '?force=1' : ''}`;
+      // Always send force=1 — avoids the 409 "pass force=1" error for used codes
+      const url = `/api/projects/${projectId}/cz/${id}?force=1`;
       const res = await fetch(url, {
         method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
       });
@@ -128,6 +130,7 @@ export default function CzUploadTab({ projectId }: Props) {
       if (!res.ok) throw new Error(data.message ?? data.error ?? `HTTP ${res.status}`);
       if (czBatchId === id) { setCzBatchId(null); setPreviews([]); }
       await loadAll();
+      onUploaded?.();
     } catch (err: any) { setError(err.message); }
   }
 

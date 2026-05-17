@@ -10,8 +10,9 @@ export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const [project, setProject] = useState<any>(null);
   const [loadError, setLoadError] = useState('');
-  // Bumped whenever variables/template are saved, to refresh TemplatePreview
   const [previewKey, setPreviewKey] = useState(0);
+  // Bumped after CZ upload/delete → refreshes both CzStatusCard and ExportSection
+  const [czKey, setCzKey] = useState(0);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -62,13 +63,13 @@ export default function ProjectDetail() {
 
           {/* Right column: status cards */}
           <div className="space-y-4 sm:space-y-6">
-            <CzStatusCard projectId={id!} />
+            <CzStatusCard projectId={id!} onCzChange={() => setCzKey((k) => k + 1)} />
             <VariablesCard projectId={id!} onSaved={() => setPreviewKey((k) => k + 1)} />
           </div>
         </div>
 
         {/* Export section spans full width */}
-        <ExportSection projectId={id!} />
+        <ExportSection projectId={id!} czKey={czKey} onCzChange={() => setCzKey((k) => k + 1)} />
       </div>
     </div>
   );

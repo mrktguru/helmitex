@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
 
-interface Props { projectId: string; }
+interface Props { projectId: string; czKey?: number; onCzChange?: () => void; }
 interface Batch {
   id: string;
   createdAt: string;
@@ -16,7 +16,7 @@ interface Stats { total: number; used: number; pending: number; }
 
 const PAGE_SIZE = 10;
 
-export default function ExportSection({ projectId }: Props) {
+export default function ExportSection({ projectId, czKey, onCzChange }: Props) {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
@@ -50,6 +50,9 @@ export default function ExportSection({ projectId }: Props) {
       setError(err.message ?? 'Ошибка загрузки');
     }
   }, [projectId, page]);
+
+  // Reload when czKey bumps (CZ batch uploaded/deleted from CzStatusCard)
+  useEffect(() => { if (czKey !== undefined) load(); }, [czKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, [load]);
 
@@ -108,6 +111,7 @@ export default function ExportSection({ projectId }: Props) {
     if (!confirm(`Удалить экспорт от ${new Date(b.createdAt).toLocaleString('ru')} (${b.count} кодов)? Коды вернутся в "Доступные".`)) return;
     try {
       await api.deleteBatch(b.id);
+      onCzChange?.();
       await load();
     } catch (err: any) {
       setError(err.message ?? 'Ошибка удаления');
@@ -135,11 +139,11 @@ export default function ExportSection({ projectId }: Props) {
     setBulkDeleting(true);
     setError('');
     try {
-      // Delete sequentially to keep ordering deterministic and surface first error
       for (const id of Array.from(selected)) {
         await api.deleteBatch(id);
       }
       setSelected(new Set());
+      onCzChange?.();
       await load();
     } catch (err: any) {
       setError(err.message ?? 'Ошибка массового удаления');

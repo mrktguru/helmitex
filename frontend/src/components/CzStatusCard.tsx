@@ -2,19 +2,25 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import CzUploadTab from './CzUploadTab';
 
-interface Props { projectId: string; }
+interface Props { projectId: string; onCzChange?: () => void; }
 interface Stats { total: number; used: number; pending: number; }
 
 /**
  * CZ status card — always shows the full upload UI inline.
  * Compact stats line appears on top once codes exist.
  */
-export default function CzStatusCard({ projectId }: Props) {
+export default function CzStatusCard({ projectId, onCzChange }: Props) {
   const [stats, setStats] = useState<Stats | null>(null);
 
+  // Reload stats whenever parent signals a CZ change
   useEffect(() => {
     api.getCzStats(projectId).then(setStats).catch(() => setStats(null));
   }, [projectId]);
+
+  function handleCzChange() {
+    api.getCzStats(projectId).then(setStats).catch(() => {});
+    onCzChange?.();
+  }
 
   const percent = stats && stats.total > 0
     ? Math.round((stats.used / stats.total) * 100)
@@ -38,7 +44,7 @@ export default function CzStatusCard({ projectId }: Props) {
           />
         </div>
       )}
-      <CzUploadTab projectId={projectId} />
+      <CzUploadTab projectId={projectId} onUploaded={handleCzChange} />
     </div>
   );
 }
