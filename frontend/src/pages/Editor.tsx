@@ -497,17 +497,17 @@ export default function Editor() {
           <div className="p-3 border-b">
             <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Инструменты</p>
             <div className="space-y-1">
-              <ToolButton onClick={() => { setDrawMode('select'); setDrawRect(null); drawing.current = null; }} label="↖ Выбор" active={drawMode === 'select'} />
-              <ToolButton onClick={() => { setDrawMode('text'); store.selectElement(null); setEditingId(null); }} label="T Текст" active={drawMode === 'text'} hint="Нарисуйте зону на канвасе. Внутри текста можно использовать {{token}}" />
+              <ToolButton onClick={() => { setDrawMode('select'); setDrawRect(null); drawing.current = null; setShowVarsPanel(false); }} label="↖ Выбор" active={drawMode === 'select'} />
+              <ToolButton onClick={() => { setDrawMode('text'); store.selectElement(null); setEditingId(null); setShowVarsPanel(false); }} label="T Текст" active={drawMode === 'text'} hint="Нарисуйте зону на канвасе. Внутри текста можно использовать {{token}}" />
               <ToolButton
                 onClick={() => { setShowVarsPanel((v) => !v); store.selectElement(null); setEditingId(null); setCzSelected(false); }}
                 label="{ } Переменные"
                 active={showVarsPanel}
                 hint="Объявить переменные, которые можно вставлять в текст как {{token}}"
               />
-              <ToolButton onClick={addBarcode} label="| Штрихкод" />
-              <ToolButton onClick={addEac} label="✓ Знак ЕАС" />
-              <ToolButton onClick={() => { setDrawMode('rect'); store.selectElement(null); setEditingId(null); }} label="□ Прямоугольник" active={drawMode === 'rect'} />
+              <ToolButton onClick={() => { addBarcode(); setShowVarsPanel(false); }} label="| Штрихкод" />
+              <ToolButton onClick={() => { addEac(); setShowVarsPanel(false); }} label="✓ Знак ЕАС" />
+              <ToolButton onClick={() => { setDrawMode('rect'); store.selectElement(null); setEditingId(null); setShowVarsPanel(false); }} label="□ Прямоугольник" active={drawMode === 'rect'} />
               <label className="flex items-center gap-2 text-sm cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
                 Изображение
                 <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleImageUpload} />
