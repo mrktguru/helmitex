@@ -340,11 +340,22 @@ const worker = new Worker<JobData>(
             const embeddedImg = ext === 'png'
               ? await outputDoc.embedPng(imgBuf)
               : await outputDoc.embedJpg(imgBuf);
+            // Letterbox: preserve aspect ratio inside the declared bounding box
+            const boxW = (el.widthMm ?? 20) * MM_TO_PT;
+            const boxH = (el.heightMm ?? 20) * MM_TO_PT;
+            const imgRatioAsset = embeddedImg.width / embeddedImg.height;
+            const boxRatioAsset = boxW / boxH;
+            let drawW = boxW;
+            let drawH = boxH;
+            if (imgRatioAsset > boxRatioAsset) { drawH = boxW / imgRatioAsset; }
+            else { drawW = boxH * imgRatioAsset; }
+            const offsetX = (boxW - drawW) / 2;
+            const offsetY = (boxH - drawH) / 2;
             page.drawImage(embeddedImg, {
-              x: toX(el.xMm),
-              y: toY(el.yMm, el.heightMm ?? 0),
-              width: (el.widthMm ?? 20) * MM_TO_PT,
-              height: (el.heightMm ?? 20) * MM_TO_PT,
+              x: toX(el.xMm) + offsetX,
+              y: toY(el.yMm, el.heightMm ?? 0) + offsetY,
+              width: drawW,
+              height: drawH,
             });
           }
         }

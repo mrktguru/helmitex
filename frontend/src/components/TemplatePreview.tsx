@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { buildEan13Geometry } from '../lib/ean13';
 import { substituteVariables } from '../lib/variables';
+import { useAuthStore } from '../store/useAuthStore';
 
 interface Props {
   projectId: string;
@@ -26,6 +27,8 @@ interface TemplateData {
 export default function TemplatePreview({ projectId, maxWidthPx = 900, variables }: Props) {
   const [t, setT] = useState<TemplateData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [imageBlobUrls, setImageBlobUrls] = useState<Record<string, string>>({});
+  const token = useAuthStore((s) => s.accessToken);
 
   useEffect(() => {
     setLoading(true);
@@ -34,6 +37,28 @@ export default function TemplatePreview({ projectId, maxWidthPx = 900, variables
       .catch(() => setT(null))
       .finally(() => setLoading(false));
   }, [projectId]);
+
+  // Fetch blob URLs for all image elements
+  useEffect(() => {
+    if (!t || !token) return;
+    const imageEls = t.elements.filter((el) => el.type === 'image' && el.s3Key);
+    if (imageEls.length === 0) return;
+    const urls: Record<string, string> = {};
+    let cancelled = false;
+    Promise.all(
+      imageEls.map((el) =>
+        fetch(`/api/projects/${projectId}/template/assets/serve?key=${encodeURIComponent(el.s3Key)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+          .then((r) => r.ok ? r.blob() : null)
+          .then((blob) => { if (blob && !cancelled) urls[el.s3Key] = URL.createObjectURL(blob); })
+      )
+    ).then(() => { if (!cancelled) setImageBlobUrls({ ...urls }); });
+    return () => {
+      cancelled = true;
+      Object.values(urls).forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [t, projectId, token]);
 
   if (loading) return <div className="text-sm text-gray-400 text-center py-10">Загрузка превью…</div>;
   if (!t) return <div className="text-sm text-gray-400 text-center py-10">Шаблон ещё не создан</div>;
@@ -142,6 +167,17 @@ export default function TemplatePreview({ projectId, maxWidthPx = 900, variables
             );
           }
           if (el.type === 'image') {
+            const blobUrl = imageBlobUrls[el.s3Key];
+            if (blobUrl) {
+              return (
+                <image key={el.id}
+                  href={blobUrl}
+                  x={el.xMm} y={el.yMm}
+                  width={el.widthMm} height={el.heightMm}
+                  preserveAspectRatio="xMidYMid meet"
+                />
+              );
+            }
             return (
               <rect key={el.id}
                 x={el.xMm} y={el.yMm}
