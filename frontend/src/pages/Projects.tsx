@@ -15,6 +15,9 @@ export default function Projects() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [copySource, setCopySource] = useState<Project | null>(null);
+  const [copyName, setCopyName] = useState('');
+  const [copying, setCopying] = useState(false);
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const clearAuth = useAuthStore((s) => s.clearAuth);
@@ -43,6 +46,26 @@ export default function Projects() {
     await api.logout();
     clearAuth();
     navigate('/login');
+  }
+
+  function openCopyModal(e: React.MouseEvent, p: Project) {
+    e.stopPropagation();
+    setCopySource(p);
+    setCopyName(`${p.name} (копия)`);
+  }
+
+  async function handleCopy(e: React.FormEvent) {
+    e.preventDefault();
+    if (!copySource || !copyName.trim()) return;
+    setCopying(true);
+    try {
+      await api.copyProject(copySource.id, copyName.trim());
+      setCopySource(null);
+      setCopyName('');
+      await load();
+    } finally {
+      setCopying(false);
+    }
   }
 
   return (
@@ -92,9 +115,20 @@ export default function Projects() {
               <div
                 key={p.id}
                 onClick={() => navigate(`/projects/${p.id}`)}
-                className="bg-white rounded-xl shadow-sm border hover:shadow-md cursor-pointer p-5 transition-shadow"
+                className="relative bg-white rounded-xl shadow-sm border hover:shadow-md cursor-pointer p-5 transition-shadow"
               >
-                <h3 className="font-semibold text-lg mb-1">{p.name}</h3>
+                <button
+                  type="button"
+                  onClick={(e) => openCopyModal(e, p)}
+                  title="Скопировать проект"
+                  className="absolute top-3 right-3 p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                </button>
+                <h3 className="font-semibold text-lg mb-1 pr-7">{p.name}</h3>
                 <p className="text-xs text-gray-400 mb-3">{new Date(p.createdAt).toLocaleDateString('ru')}</p>
                 {p.template && (
                   <p className="text-xs text-gray-500 mb-1">
@@ -111,6 +145,49 @@ export default function Projects() {
           })}
         </div>
       </main>
+
+      {copySource && (
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onClick={() => !copying && setCopySource(null)}
+        >
+          <form
+            onSubmit={handleCopy}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5"
+          >
+            <h3 className="text-lg font-semibold mb-1">Скопировать проект</h3>
+            <p className="text-xs text-gray-500 mb-4">
+              Будет скопирован только шаблон. ЧЗ-коды и история экспортов не копируются.
+            </p>
+            <label className="block text-sm text-gray-700 mb-1">Название новой копии</label>
+            <input
+              type="text"
+              autoFocus
+              value={copyName}
+              onChange={(e) => setCopyName(e.target.value)}
+              className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={copying}
+                onClick={() => setCopySource(null)}
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
+              >
+                Отмена
+              </button>
+              <button
+                type="submit"
+                disabled={copying || !copyName.trim()}
+                className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg font-medium"
+              >
+                {copying ? 'Копирование…' : 'Скопировать'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

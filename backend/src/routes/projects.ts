@@ -7,6 +7,7 @@ const router = Router();
 router.use(authMiddleware);
 
 const createSchema = z.object({ name: z.string().min(1).max(100) });
+const copySchema = z.object({ name: z.string().min(1).max(100) });
 
 function projectFilter(req: AuthRequest) {
   return req.user!.role === 'ADMIN' ? {} : { userId: req.user!.id };
@@ -56,6 +57,39 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
     include: { template: true, czBatches: { include: { codes: { select: { status: true } } } } },
   });
   res.json(project);
+});
+
+// POST /api/projects/:id/copy
+router.post('/:id/copy', async (req: AuthRequest, res: Response): Promise<void> => {
+  if (!(await getProjectOrFail(req.params.id, req, res))) return;
+  const parsed = copySchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
+  const source = await prisma.project.findUnique({
+    where: { id: req.params.id },
+    include: { template: true },
+  });
+  if (!source) { res.status(404).json({ error: 'Not found' }); return; }
+
+  const created = await prisma.$transaction(async (tx) => {
+    const newProject = await tx.project.create({
+      data: { name: parsed.data.name, userId: req.user!.id },
+    });
+    if (source.template) {
+      await tx.labelTemplate.create({
+        data: {
+          projectId: newProject.id,
+          widthMm: source.template.widthMm,
+          heightMm: source.template.heightMm,
+          elements: source.template.elements as any,
+          czArea: source.template.czArea as any,
+          barcodeValue: source.template.barcodeValue,
+          printMargins: source.template.printMargins as any,
+        },
+      });
+    }
+    return newProject;
+  });
+  res.status(201).json(created);
 });
 
 // DELETE /api/projects/:id

@@ -48,6 +48,8 @@ export const api = {
   createProject: (name: string) => request<any>('/projects', { method: 'POST', body: JSON.stringify({ name }) }),
   getProject: (id: string) => request<any>(`/projects/${id}`),
   deleteProject: (id: string) => request<any>(`/projects/${id}`, { method: 'DELETE' }),
+  copyProject: (id: string, name: string) =>
+    request<any>(`/projects/${id}/copy`, { method: 'POST', body: JSON.stringify({ name }) }),
 
   // Templates
   getTemplate: (projectId: string) => request<any>(`/projects/${projectId}/template`),
