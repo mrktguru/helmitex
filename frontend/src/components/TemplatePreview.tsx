@@ -69,7 +69,11 @@ export default function TemplatePreview({ projectId, maxWidthPx = 900, variables
               ? (effectiveVars[el.key] ?? el.placeholder ?? `{${el.key}}`)
               : substituteVariables(el.text ?? '', effectiveVars);
             if (!value) return null;
-            // Approximate text rendering — use foreignObject for proper wrap.
+            // Use pre-computed line breaks if the value matches what was wrapped
+            // (i.e. variables haven't changed since the last save). Falls back to
+            // browser wrap (pre-wrap) for new/unsaved values.
+            const cachedLines: string[] | null = Array.isArray(el._wrappedLines) ? el._wrappedLines : null;
+            const usePrewrapped = cachedLines && cachedLines.join('\n').replace(/\s+/g, ' ').trim() === value.replace(/\s+/g, ' ').trim();
             return (
               <foreignObject
                 key={el.id}
@@ -90,11 +94,11 @@ export default function TemplatePreview({ projectId, maxWidthPx = 900, variables
                     fontStyle: el.type === 'variable' && !effectiveVars[el.key] ? 'italic' : 'normal',
                     lineHeight: 1.3,
                     textAlign: el.align ?? 'left',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
+                    whiteSpace: usePrewrapped ? 'pre' : 'pre-wrap',
+                    wordBreak: 'keep-all',
                   }}
                 >
-                  {value}
+                  {usePrewrapped ? cachedLines!.join('\n') : value}
                 </div>
               </foreignObject>
             );
