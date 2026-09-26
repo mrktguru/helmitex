@@ -74,6 +74,13 @@ docker compose exec postgres psql -U labelstudio labelstudio
 `portal-helmitex-backup.timer` ежедневно в 02:30 UTC делает `pg_dump` в `/portal_helmitex/backups` (хранятся последние 14).
 Данные MinIO (`data/minio`) в бэкап не входят.
 
+## Производительность генерации
+
+Первая генерация из свежего PDF с кодами ЧЗ (кэша нет) на 340 этикеток: ~25 с. Повторная из кэша: ~1 с на подготовку кодов.
+- Распознавание DataMatrix идёт через пул постоянных Python-процессов (`services/datamatrix.ts`, размер пула = число ядер, переопределяется `DECODER_POOL_SIZE`).
+- Страницы PDF рендерятся Ghostscript диапазонами по 20 страниц за запуск; одновременно не больше `GS_CONCURRENCY` (по умолчанию 2) процессов на весь воркер.
+- Переменные необязательные, задаются в `.env`.
+
 ## Образ MinIO
 
 MinIO больше не публикует образы на Docker Hub. Используемый образ `minio/minio:RELEASE.2025-09-07T16-13-09Z`

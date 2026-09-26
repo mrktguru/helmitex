@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
-Decode the largest DataMatrix on an image and print its bytes (base64) to stdout.
-Usage: decode_datamatrix.py <image_path>
+Decode the largest DataMatrix on an image and print its bytes (base64).
+
+One-shot:  decode_datamatrix.py <image_path>
+Server:    decode_datamatrix.py --serve
+           Reads one image path per line from stdin and answers one line per
+           request on stdout: "OK <base64>" or "ERR <message>". Keeps the
+           interpreter (and PIL / pylibdmtx imports, ~0.5 s) alive between
+           images, which is what makes bulk generation fast.
 """
 import base64
 import sys
@@ -10,12 +16,8 @@ from PIL import Image
 from pylibdmtx.pylibdmtx import decode
 
 
-def main() -> int:
-    if len(sys.argv) < 2:
-        print("usage: decode_datamatrix.py <image>", file=sys.stderr)
-        return 2
-
-    img = Image.open(sys.argv[1]).convert("RGB")
+def decode_file(path: str) -> bytes:
+    img = Image.open(path).convert("RGB")
     # try a few timeouts / shrink factors for tough scans
     results = decode(img, timeout=8000, max_count=1)
     if not results:
@@ -25,12 +27,40 @@ def main() -> int:
         results = decode(small, timeout=8000, max_count=1)
 
     if not results:
-        print("DECODE_FAILED", file=sys.stderr)
-        return 1
+        raise ValueError("DECODE_FAILED")
 
     # Pick the largest detection.
     best = max(results, key=lambda r: r.rect.width * r.rect.height)
-    sys.stdout.write(base64.b64encode(best.data).decode("ascii"))
+    return best.data
+
+
+def serve() -> int:
+    for line in sys.stdin:
+        path = line.rstrip("\r\n")
+        if not path:
+            continue
+        try:
+            out = "OK " + base64.b64encode(decode_file(path)).decode("ascii")
+        except Exception as e:  # keep the process alive for the next request
+            out = "ERR " + " ".join(str(e).split())
+        sys.stdout.write(out + "\n")
+        sys.stdout.flush()
+    return 0
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print("usage: decode_datamatrix.py <image> | --serve", file=sys.stderr)
+        return 2
+    if sys.argv[1] == "--serve":
+        return serve()
+
+    try:
+        data = decode_file(sys.argv[1])
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    sys.stdout.write(base64.b64encode(data).decode("ascii"))
     return 0
 
 

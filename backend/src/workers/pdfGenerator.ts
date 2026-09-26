@@ -4,11 +4,11 @@ import path from 'path';
 import sharp from 'sharp';
 import { Worker } from 'bullmq';
 import IORedis from 'ioredis';
-import { PDFDocument, rgb, StandardFonts, PDFFont } from 'pdf-lib';
+import { PDFDocument, rgb, StandardFonts, PDFFont, PDFImage } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import prisma from '../prisma/client';
 import { downloadFile, uploadFile } from '../services/s3';
-import { getCleanCzPng } from '../services/czRender';
+import { getCleanCzPngs } from '../services/czRender';
 import { drawEan13Vector } from '../services/barcode';
 
 const MM_TO_PT = 2.8346;
@@ -169,9 +169,6 @@ const worker = new Worker<JobData>(
         }
       }
 
-      // Asset cache to avoid redundant S3 downloads
-      const assetCache = new Map<string, Buffer>();
-
       const outputDoc = await PDFDocument.create();
       outputDoc.registerFontkit(fontkit);
 
@@ -207,27 +204,47 @@ const worker = new Worker<JobData>(
       const regularFont = await loadFont(ttfCandidates, StandardFonts.Helvetica);
       const boldFont = await loadFont(ttfBoldCandidates, StandardFonts.HelveticaBold);
 
-      // Pre-warm all CZ PNGs in parallel (6 concurrent) before PDF assembly.
-      // This converts Ghostscript + Python decode from sequential to parallel
-      // and means the main loop only does cheap in-memory PDF drawing.
-      const CONCURRENCY = 6;
+      // Prepare all CZ PNGs before PDF assembly so the main loop only does cheap in-memory
+      // drawing. PDF sources go through getCleanCzPngs: cached pages are fetched in parallel,
+      // the rest are rasterized in Ghostscript page ranges and decoded by a pool of persistent
+      // Python processes (see services/datamatrix.ts).
       const czPngMap = new Map<string, Buffer>();
       const { encodeDataMatrix } = await import('../services/datamatrix');
-      for (let start = 0; start < codes.length; start += CONCURRENCY) {
-        const chunk = codes.slice(start, start + CONCURRENCY);
-        await Promise.all(chunk.map(async (c) => {
-          const mapKey = `${c.czBatchId}:${c.pageIndex}`;
-          const isCsv = c.czBatch.s3Key.startsWith('csv:') || !c.czBatch.s3Key;
-          if (isCsv) {
-            if (!c.code) throw new Error(`CSV code missing payload (codeId=${c.id})`);
-            czPngMap.set(mapKey, await encodeDataMatrix(c.code, 10));
-          } else {
-            const czPdfBuffer = batchPdfs.get(c.czBatchId)!;
-            czPngMap.set(mapKey, await getCleanCzPng(c.czBatchId, c.pageIndex, czPdfBuffer));
-          }
-        }));
-        await job.updateProgress(Math.round(((start + chunk.length) / codes.length) * 50));
+      let prepared = 0;
+      let lastPct = -1;
+      const markPrepared = () => {
+        const pct = Math.round((++prepared / codes.length) * 50);
+        if (pct !== lastPct) {
+          lastPct = pct;
+          job.updateProgress(pct).catch(() => { /* progress is best-effort */ });
+        }
+      };
+
+      const pdfPagesByBatch = new Map<string, number[]>();
+      const csvCodes: typeof codes = [];
+      for (const c of codes) {
+        if (c.czBatch.s3Key.startsWith('csv:') || !c.czBatch.s3Key) csvCodes.push(c);
+        else pdfPagesByBatch.set(c.czBatchId, [...(pdfPagesByBatch.get(c.czBatchId) ?? []), c.pageIndex]);
       }
+
+      for (const [czBatchId, pageIndexes] of pdfPagesByBatch) {
+        const pngs = await getCleanCzPngs(czBatchId, pageIndexes, batchPdfs.get(czBatchId)!, markPrepared);
+        for (const [pageIndex, png] of pngs) czPngMap.set(`${czBatchId}:${pageIndex}`, png);
+      }
+
+      const CSV_CONCURRENCY = 6;
+      for (let start = 0; start < csvCodes.length; start += CSV_CONCURRENCY) {
+        await Promise.all(csvCodes.slice(start, start + CSV_CONCURRENCY).map(async (c) => {
+          if (!c.code) throw new Error(`CSV code missing payload (codeId=${c.id})`);
+          czPngMap.set(`${c.czBatchId}:${c.pageIndex}`, await encodeDataMatrix(c.code, 10));
+          markPrepared();
+        }));
+      }
+
+      // Images embedded once per document and reused on every page (same EAC mark / logo on
+      // all labels): re-rendering + re-embedding per page cost time and bloated the PDF.
+      const eacImages = new Map<string, PDFImage>();
+      const assetImages = new Map<string, PDFImage>();
 
       for (let i = 0; i < codes.length; i++) {
         const code = codes[i];
@@ -262,8 +279,14 @@ const worker = new Worker<JobData>(
             const markH = (el.heightMm ?? 9) * MM_TO_PT;
             // Render EAC SVG → PNG at 8× resolution for crisp anti-aliasing
             const scale = 8;
-            const pngBuf = await renderEacPng(el.color ?? '#000000', Math.round(markW * scale), Math.round(markH * scale));
-            const embeddedImg = await outputDoc.embedPng(pngBuf);
+            const eacW = Math.round(markW * scale);
+            const eacH = Math.round(markH * scale);
+            const eacKey = `${el.color ?? '#000000'}|${eacW}|${eacH}`;
+            let embeddedImg = eacImages.get(eacKey);
+            if (!embeddedImg) {
+              embeddedImg = await outputDoc.embedPng(await renderEacPng(el.color ?? '#000000', eacW, eacH));
+              eacImages.set(eacKey, embeddedImg);
+            }
             page.drawImage(embeddedImg, {
               x: toX(el.xMm),
               y: toY(el.yMm, el.heightMm ?? 0),
@@ -331,14 +354,14 @@ const worker = new Worker<JobData>(
               regularFont,
             );
           } else if (el.type === 'image' && el.s3Key) {
-            if (!assetCache.has(el.s3Key)) {
+            let embeddedImg = assetImages.get(el.s3Key);
+            if (!embeddedImg) {
               const raw = await downloadFile(el.s3Key);
               // Convert to PNG via sharp (handles PNG, JPEG, WEBP, etc.)
               const pngBuf = await sharp(raw).png().toBuffer();
-              assetCache.set(el.s3Key, pngBuf);
+              embeddedImg = await outputDoc.embedPng(pngBuf);
+              assetImages.set(el.s3Key, embeddedImg);
             }
-            const imgBuf = assetCache.get(el.s3Key)!;
-            const embeddedImg = await outputDoc.embedPng(imgBuf);
             // Letterbox: preserve aspect ratio inside the declared bounding box
             const boxW = (el.widthMm ?? 20) * MM_TO_PT;
             const boxH = (el.heightMm ?? 20) * MM_TO_PT;
@@ -384,7 +407,9 @@ const worker = new Worker<JobData>(
           height: drawHpt,
         });
 
-        await job.updateProgress(50 + Math.round(((i + 1) / codes.length) * 50));
+        if (i % 10 === 9 || i === codes.length - 1) {
+          await job.updateProgress(50 + Math.round(((i + 1) / codes.length) * 50));
+        }
         console.log(`[worker] batch=${outputBatchId} ${i + 1}/${codes.length} page=${code.pageIndex} in ${Date.now() - t0}ms`);
       }
 

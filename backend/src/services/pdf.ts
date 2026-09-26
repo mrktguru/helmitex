@@ -1,5 +1,6 @@
 import { fromPath } from 'pdf2pic';
-import { writeFileSync, readFileSync, unlinkSync, mkdtempSync } from 'fs';
+import { writeFileSync, readFileSync, unlinkSync, mkdtempSync, rmSync } from 'fs';
+import { execFile } from 'child_process';
 import { tmpdir } from 'os';
 import path from 'path';
 import sharp from 'sharp';
@@ -98,4 +99,64 @@ export async function convertPdfPageToPng(
 // Lower-density variant for screen previews (faster, smaller files).
 export function convertPdfPageToPngPreview(pdfBuffer: Buffer, pageIndex: number): Promise<Buffer> {
   return convertPdfPageToPng(pdfBuffer, pageIndex, { density: 200, timeoutMs: 25_000 });
+}
+
+/**
+ * Rasterize many pages of one PDF with a single Ghostscript process per run of
+ * consecutive pages. Per-page rendering (pdf2pic -> gm -> gs) re-parses the whole
+ * PDF and pays process start-up for every page; a range render pays it once.
+ *
+ * Pages are 1-based, like CzCode.pageIndex. Returns page number -> untrimmed PNG.
+ * Anti-aliasing flags match GraphicsMagick's own Ghostscript delegate, so the
+ * output is what pdf2pic produced.
+ */
+export async function renderPdfPages(
+  pdfBuffer: Buffer,
+  pages: number[],
+  opts: { density?: number; timeoutMs?: number } = {},
+): Promise<Map<number, Buffer>> {
+  const density = opts.density ?? 250;
+  const timeoutMs = opts.timeoutMs ?? 120_000;
+  const sorted = Array.from(new Set(pages)).sort((a, b) => a - b);
+  const out = new Map<number, Buffer>();
+  if (sorted.length === 0) return out;
+
+  // Consecutive runs -> one gs call each (a gap would make gs render pages nobody asked for).
+  const runs: Array<[number, number]> = [];
+  for (const pg of sorted) {
+    const last = runs[runs.length - 1];
+    if (last && pg === last[1] + 1) last[1] = pg;
+    else runs.push([pg, pg]);
+  }
+
+  const tmpDir = mkdtempSync(path.join(tmpdir(), 'cz-'));
+  const pdfPath = path.join(tmpDir, 'input.pdf');
+  writeFileSync(pdfPath, pdfBuffer);
+  try {
+    for (const [first, last] of runs) {
+      const prefix = path.join(tmpDir, `r${first}-`);
+      await new Promise<void>((resolve, reject) => {
+        execFile(
+          'gs',
+          [
+            '-q', '-dBATCH', '-dNOPAUSE', '-dSAFER',
+            '-dMaxBitmap=500000000', '-dAlignToPixels=0',
+            '-sDEVICE=png16m', '-dTextAlphaBits=4', '-dGraphicsAlphaBits=4',
+            `-r${density}`, `-dFirstPage=${first}`, `-dLastPage=${last}`,
+            `-sOutputFile=${prefix}%d.png`, pdfPath,
+          ],
+          { timeout: timeoutMs },
+          (err, _stdout, stderr) => (err ? reject(new Error(`gs pages ${first}-${last} failed: ${stderr?.trim() || err.message}`)) : resolve()),
+        );
+      });
+      for (let pg = first; pg <= last; pg++) {
+        const file = `${prefix}${pg - first + 1}.png`;
+        out.set(pg, readFileSync(file));
+        unlinkSync(file);
+      }
+    }
+    return out;
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
 }
