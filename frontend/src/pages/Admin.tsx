@@ -40,6 +40,7 @@ export default function Admin() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+
       <header className="bg-white shadow-sm px-4 sm:px-6 py-3 sm:py-4">
         <h1 className="text-lg sm:text-xl font-bold">Панель администратора</h1>
       </header>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
+import NewProjectCard from '../components/NewProjectCard';
 
 interface Project {
   id: string;
@@ -13,8 +14,6 @@ interface Project {
 
 export default function Projects() {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [newName, setNewName] = useState('');
-  const [creating, setCreating] = useState(false);
   const [copySource, setCopySource] = useState<Project | null>(null);
   const [copyName, setCopyName] = useState('');
   const [copying, setCopying] = useState(false);
@@ -28,19 +27,6 @@ export default function Projects() {
   }
 
   useEffect(() => { load(); }, []);
-
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newName.trim()) return;
-    setCreating(true);
-    try {
-      const project = await api.createProject(newName.trim());
-      setNewName('');
-      navigate(`/projects/${project.id}`);
-    } finally {
-      setCreating(false);
-    }
-  }
 
   async function handleLogout() {
     await api.logout();
@@ -75,31 +61,15 @@ export default function Projects() {
         <div className="flex items-center gap-3 sm:gap-4 text-sm">
           <span className="hidden sm:inline text-gray-600 truncate max-w-[140px]">{user?.email}</span>
           {user?.role === 'ADMIN' && (
-            <button onClick={() => navigate('/admin')} className="text-blue-600 hover:underline">Админ</button>
+            <button onClick={() => navigate('/admin')} className="text-blue-600 hover:text-blue-800 hover:underline border-none p-0 font-inherit cursor-pointer">Админ</button>
           )}
-          <button onClick={handleLogout} className="text-gray-500 hover:underline">Выйти</button>
+          <button onClick={handleLogout} className="text-gray-500 hover:text-gray-700 hover:underline border-none p-0 font-inherit cursor-pointer">Выйти</button>
         </div>
       </header>
 
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+        <div className="mb-6">
           <h2 className="text-xl sm:text-2xl font-semibold">Проекты</h2>
-          <form onSubmit={handleCreate} className="flex flex-col sm:flex-row gap-2">
-            <input
-              type="text"
-              placeholder="Название проекта"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              className="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <button
-              type="submit"
-              disabled={creating || !newName.trim()}
-              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap"
-            >
-              + Новый проект
-            </button>
-          </form>
         </div>
 
         {projects.length === 0 && (
@@ -107,6 +77,7 @@ export default function Projects() {
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <NewProjectCard onProjectCreated={load} />
           {projects.map((p) => {
             const latestBatch = p.czBatches[0];
             const total = latestBatch?.codes.length ?? 0;
