@@ -1,0 +1,8 @@
+[Unit]
+Description=Daily database backup for portal.helmitex.ru
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/portal_helmitex/scripts/backup.sh

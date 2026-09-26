@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily database backup for portal.helmitex.ru
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
