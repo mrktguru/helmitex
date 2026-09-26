@@ -7,6 +7,7 @@ import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { getProjectOrFail } from './projects';
 import { uploadFile } from '../services/s3';
+import { pdfQueue } from '../workers/pdfQueue';
 
 const router = Router();
 router.use(authMiddleware);
@@ -118,6 +119,14 @@ router.post('/:id/cz', upload.single('file'), async (req: AuthRequest, res: Resp
       console.error(`[cz preview] batch=${czBatch.id} page=${i} failed:`, err?.message ?? err);
       previewErrors.push(`page ${i}: ${err?.message ?? 'unknown'}`);
     }
+  }
+
+  // Decode the remaining pages in the background so that generation finds them ready.
+  // Best-effort: generation decodes on demand anyway, so a queue failure must not fail the upload.
+  try {
+    await pdfQueue.add('warm-cz-cache', { czBatchId: czBatch.id }, { jobId: `warm-${czBatch.id}` });
+  } catch (err: any) {
+    console.error(`[cz upload] could not queue cache warm-up for batch=${czBatch.id}:`, err?.message ?? err);
   }
 
   res.status(201).json({ czBatchId: czBatch.id, totalCount, pageCount, previews, previewErrors });

@@ -73,6 +73,11 @@ function wrapText(rawText: string, font: PDFFont, size: number, maxWidthPt: numb
   return result;
 }
 
+/** Background job queued right after a CZ PDF upload: decode every page ahead of generation. */
+interface WarmJobData {
+  czBatchId: string;
+}
+
 interface JobData {
   outputBatchId: string;
   projectId: string;
@@ -128,9 +133,34 @@ const connection = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379'
   maxRetriesPerRequest: null,
 });
 
+const WARM_SLICE_PAGES = 100;
+
+async function warmCzCache(czBatchId: string): Promise<void> {
+  const t0 = Date.now();
+  const batch = await prisma.czBatch.findUnique({
+    where: { id: czBatchId },
+    include: { codes: { select: { pageIndex: true }, orderBy: { pageIndex: 'asc' } } },
+  });
+  if (!batch || !batch.s3Key || batch.s3Key.startsWith('csv:')) return;
+
+  const pdf = await downloadFile(batch.s3Key);
+  const pages = batch.codes.map((c) => c.pageIndex);
+  for (let i = 0; i < pages.length; i += WARM_SLICE_PAGES) {
+    // Batch deleted while we were working: stop instead of filling the cache for nothing.
+    if (i > 0 && !(await prisma.czBatch.findUnique({ where: { id: czBatchId }, select: { id: true } }))) return;
+    await getCleanCzPngs(czBatchId, pages.slice(i, i + WARM_SLICE_PAGES), pdf);
+  }
+  console.log(`[warm] czBatch=${czBatchId} pages=${pages.length} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+}
+
 const worker = new Worker<JobData>(
   'pdf-generation',
   async (job) => {
+    if (job.name === 'warm-cz-cache') {
+      await warmCzCache((job.data as unknown as WarmJobData).czBatchId);
+      return;
+    }
+
     const { outputBatchId, projectId } = job.data;
 
     await prisma.outputBatch.update({

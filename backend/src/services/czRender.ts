@@ -23,6 +23,13 @@ async function withGsSlot<T>(fn: () => Promise<T>): Promise<T> {
 }
 const CACHE_FETCH_CONCURRENCY = 8;
 
+/**
+ * Pages currently being built by this process. The background warm-up job and a
+ * user-triggered generation can want the same pages at the same time; the second
+ * caller waits for the first instead of decoding them again.
+ */
+const inFlight = new Map<string, Promise<Buffer>>();
+
 const cacheKey = (czBatchId: string, pageIndex: number) => `${CACHE_PREFIX}/${czBatchId}/page-${pageIndex}.png`;
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -117,19 +124,57 @@ export async function getCleanCzPngs(
   });
   misses.sort((a, b) => a - b);
 
-  const chunks: number[][] = [];
-  for (let i = 0; i < misses.length; i += GS_CHUNK_PAGES) chunks.push(misses.slice(i, i + GS_CHUNK_PAGES));
+  // Pages someone else is already building: wait for them. The rest are ours.
+  const foreign: Array<Promise<void>> = [];
+  const own: number[] = [];
+  const settlers = new Map<number, { resolve: (b: Buffer) => void; reject: (e: unknown) => void }>();
+  const ownPromises = new Map<number, Promise<Buffer>>();
+  for (const pg of misses) {
+    const key = `${czBatchId}:${pg}`;
+    const other = inFlight.get(key);
+    if (other) {
+      foreign.push(other.then((png) => { result.set(pg, png); tick(); }));
+      continue;
+    }
+    own.push(pg);
+    const promise = new Promise<Buffer>((resolve, reject) => settlers.set(pg, { resolve, reject }));
+    promise.catch(() => { /* only awaited by other callers; avoid unhandled rejection when nobody is */ });
+    inFlight.set(key, promise);
+    ownPromises.set(pg, promise);
+  }
+  // Drop our in-flight entry, but never one a later call has registered for the same page.
+  const release = (pg: number) => {
+    const key = `${czBatchId}:${pg}`;
+    if (inFlight.get(key) === ownPromises.get(pg)) inFlight.delete(key);
+  };
 
-  // Enough chunks in flight to keep the decoder pool fed; withGsSlot caps real gs processes.
-  await mapLimit(chunks, GS_CONCURRENCY + 1, async (chunk) => {
-    const rasters = await withGsSlot(() => renderPdfPages(pdfBuffer, chunk, { density: RASTER_DENSITY, timeoutMs: 120_000 }));
-    await Promise.all(chunk.map(async (pg) => {
-      const raster = rasters.get(pg);
-      if (!raster) throw new Error(`Ghostscript produced no image for page ${pg}`);
-      result.set(pg, await buildCleanPng(czBatchId, pg, raster));
-      tick();
-    }));
-  });
+  const chunks: number[][] = [];
+  for (let i = 0; i < own.length; i += GS_CHUNK_PAGES) chunks.push(own.slice(i, i + GS_CHUNK_PAGES));
+
+  try {
+    // Enough chunks in flight to keep the decoder pool fed; withGsSlot caps real gs processes.
+    await mapLimit(chunks, GS_CONCURRENCY + 1, async (chunk) => {
+      const rasters = await withGsSlot(() => renderPdfPages(pdfBuffer, chunk, { density: RASTER_DENSITY, timeoutMs: 120_000 }));
+      await Promise.all(chunk.map(async (pg) => {
+        const raster = rasters.get(pg);
+        if (!raster) throw new Error(`Ghostscript produced no image for page ${pg}`);
+        const png = await buildCleanPng(czBatchId, pg, raster);
+        result.set(pg, png);
+        settlers.get(pg)?.resolve(png);
+        settlers.delete(pg);
+        release(pg);
+        tick();
+      }));
+    });
+    await Promise.all(foreign);
+  } finally {
+    // Anything we registered but did not finish (failure): release waiters with an error.
+    for (const [pg, settler] of settlers) {
+      settler.reject(new Error(`CZ page ${pg} of batch ${czBatchId} could not be prepared`));
+      release(pg);
+    }
+    settlers.clear();
+  }
 
   return result;
 }
