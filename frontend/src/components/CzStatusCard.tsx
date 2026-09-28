@@ -11,10 +11,12 @@ interface Stats { total: number; used: number; pending: number; }
  */
 export default function CzStatusCard({ projectId, onCzChange }: Props) {
   const [stats, setStats] = useState<Stats | null>(null);
+  const [layoutWithoutCz, setLayoutWithoutCz] = useState(false);
 
   // Reload stats whenever parent signals a CZ change
   useEffect(() => {
     api.getCzStats(projectId).then(setStats).catch(() => setStats(null));
+    api.getTemplate(projectId).then((t) => setLayoutWithoutCz(!t.czArea)).catch(() => setLayoutWithoutCz(false));
   }, [projectId]);
 
   function handleCzChange() {
@@ -43,6 +45,12 @@ export default function CzStatusCard({ projectId, onCzChange }: Props) {
             style={{ width: `${percent}%` }}
           />
         </div>
+      )}
+      {layoutWithoutCz && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+          В макете нет поля ЧЗ — экспорт создаёт этикетки без кодов, загруженные коды не расходуются.
+          Чтобы печатать коды, добавьте поле ЧЗ в редакторе.
+        </p>
       )}
       <CzUploadTab projectId={projectId} onUploaded={handleCzChange} />
     </div>

@@ -10,9 +10,35 @@ export default function ElementProperties({ showVars }: { showVars?: boolean } =
   }
 
   if (!store.selectedId) {
+    if (!store.czArea) {
+      return (
+        <div>
+          <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Область ЧЗ</p>
+          <p className="text-xs text-gray-500 mb-3">
+            В макете нет поля ЧЗ. Экспорт создаст нужное количество одинаковых этикеток без кодов Честного знака.
+          </p>
+          <button
+            onClick={store.addCzArea}
+            className="w-full text-sm px-3 py-1.5 border border-orange-300 text-orange-600 rounded hover:bg-orange-50"
+          >
+            + Добавить поле ЧЗ
+          </button>
+        </div>
+      );
+    }
     return (
       <div>
-        <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Область ЧЗ</p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase">Область ЧЗ</p>
+          <button
+            onClick={() => {
+              if (confirm('Удалить поле ЧЗ из макета? Экспорт будет создавать этикетки без кодов Честного знака.')) store.removeCzArea();
+            }}
+            className="text-xs text-red-500 hover:underline"
+          >
+            Удалить
+          </button>
+        </div>
         <CzAreaProps area={store.czArea} onChange={store.setCzArea} />
       </div>
     );

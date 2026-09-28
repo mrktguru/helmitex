@@ -27,15 +27,19 @@ export default function ExportSection({ projectId, czKey, onCzChange }: Props) {
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  // null until the template is loaded; false = layout without a Честный знак area
+  const [hasCz, setHasCz] = useState<boolean | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const token = useAuthStore((s) => s.accessToken);
 
   const load = useCallback(async () => {
     try {
-      const [b, s] = await Promise.all([
+      const [b, s, t] = await Promise.all([
         api.getBatches(projectId, PAGE_SIZE, page * PAGE_SIZE),
         api.getCzStats(projectId).catch(() => null),
+        api.getTemplate(projectId).catch(() => null),
       ]);
+      setHasCz(t ? !!t.czArea : null);
       setBatches(b.items);
       setTotal(b.total);
       if (s) setStats(s);
@@ -108,7 +112,10 @@ export default function ExportSection({ projectId, czKey, onCzChange }: Props) {
   }
 
   async function handleDelete(b: Batch) {
-    if (!confirm(`Удалить экспорт от ${new Date(b.createdAt).toLocaleString('ru')} (${b.count} кодов)? Коды вернутся в "Доступные".`)) return;
+    const msg = hasCz === false
+      ? `Удалить экспорт от ${new Date(b.createdAt).toLocaleString('ru')} (${b.count} этикеток)?`
+      : `Удалить экспорт от ${new Date(b.createdAt).toLocaleString('ru')} (${b.count} этикеток)? Использованные в нём коды ЧЗ вернутся в "Доступные".`;
+    if (!confirm(msg)) return;
     try {
       await api.deleteBatch(b.id);
       onCzChange?.();
@@ -135,7 +142,7 @@ export default function ExportSection({ projectId, czKey, onCzChange }: Props) {
   async function handleBulkDelete() {
     if (selected.size === 0) return;
     const totalCodes = batches.filter((b) => selected.has(b.id)).reduce((s, b) => s + b.count, 0);
-    if (!confirm(`Удалить ${selected.size} экспорт(ов) суммарно на ${totalCodes} кодов? Коды вернутся в "Доступные".`)) return;
+    if (!confirm(`Удалить ${selected.size} экспорт(ов) суммарно на ${totalCodes} этикеток? Использованные в них коды ЧЗ вернутся в "Доступные".`)) return;
     setBulkDeleting(true);
     setError('');
     try {
@@ -155,6 +162,8 @@ export default function ExportSection({ projectId, czKey, onCzChange }: Props) {
 
   const isGenerating = activeBatchId && (activeStatus === 'pending' || activeStatus === 'processing');
   const available = stats?.pending ?? 0;
+  const noCz = hasCz === false;
+  const templateMissing = hasCz === null;
   const pageCount = Math.ceil(total / PAGE_SIZE);
   const allOnPageSelected = useMemo(
     () => batches.length > 0 && batches.every((b) => selected.has(b.id)),
@@ -167,24 +176,28 @@ export default function ExportSection({ projectId, czKey, onCzChange }: Props) {
 
       <div className="flex flex-wrap items-end gap-3 mb-4">
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Количество кодов</label>
+          <label className="block text-xs text-gray-500 mb-1">{noCz ? 'Количество этикеток' : 'Количество кодов'}</label>
           <input
             type="number"
             min={1}
-            max={Math.min(2000, available || 2000)}
+            max={noCz ? 2000 : Math.min(2000, available || 2000)}
             value={batchSize}
             onChange={(e) => setBatchSize(Number(e.target.value))}
             className="w-28 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
         <div className="text-sm text-gray-500 flex-1 min-w-[140px]">
-          {available > 0
-            ? <>Доступно: <strong className="text-green-600">{available}</strong></>
-            : <span className="text-amber-600">Нет доступных кодов — загрузите ЧЗ</span>}
+          {templateMissing
+            ? <span className="text-amber-600">Сначала создайте макет в редакторе</span>
+            : noCz
+              ? <>Макет без ЧЗ — коды не расходуются</>
+              : available > 0
+                ? <>Доступно: <strong className="text-green-600">{available}</strong></>
+                : <span className="text-amber-600">Нет доступных кодов — загрузите ЧЗ</span>}
         </div>
         <button
           onClick={handleGenerate}
-          disabled={!!isGenerating || available === 0 || batchSize < 1}
+          disabled={!!isGenerating || templateMissing || (!noCz && available === 0) || batchSize < 1}
           className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg font-medium text-sm"
         >
           {isGenerating ? 'Генерация…' : 'Создать экспорт'}
@@ -235,7 +248,7 @@ export default function ExportSection({ projectId, czKey, onCzChange }: Props) {
                     />
                   </th>
                   <th className="pb-2 font-normal">Дата</th>
-                  <th className="pb-2 font-normal">Коды</th>
+                  <th className="pb-2 font-normal">Этикеток</th>
                   <th className="pb-2 font-normal">Диапазон</th>
                   <th className="pb-2 font-normal">Статус</th>
                   <th className="pb-2 pr-5 text-right font-normal"></th>

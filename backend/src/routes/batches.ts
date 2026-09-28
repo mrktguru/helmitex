@@ -21,6 +21,26 @@ router.post('/projects/:id/batches', async (req: AuthRequest, res: Response): Pr
 
   const { batchSize } = parsed.data;
 
+  const template = await prisma.labelTemplate.findUnique({ where: { projectId: req.params.id } });
+  if (!template) {
+    res.status(422).json({ error: 'Сначала создайте макет в редакторе' });
+    return;
+  }
+
+  // Layout without a Честный знак area: N identical labels, no codes consumed.
+  if (template.czArea === null) {
+    const outputBatch = await prisma.outputBatch.create({
+      data: { projectId: req.params.id, fromIndex: 1, toIndex: batchSize, count: batchSize },
+    });
+    const job = await pdfQueue.add('generate-pdf', {
+      outputBatchId: outputBatch.id,
+      projectId: req.params.id,
+      codeIds: [],
+    });
+    res.status(201).json({ outputBatchId: outputBatch.id, jobId: job.id });
+    return;
+  }
+
   // Get pending codes (lock to prevent two concurrent batch creations from claiming the same codes).
   // CzCode has no projectId column directly — join via CzBatch.
   const codes = await prisma.$queryRaw<{ id: string; pageIndex: number; czBatchId: string }[]>`

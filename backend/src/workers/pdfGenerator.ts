@@ -174,7 +174,8 @@ const worker = new Worker<JobData>(
       if (!template) throw new Error('Template not found');
 
       const elements = template.elements as unknown as LabelElement[];
-      const czArea = template.czArea as unknown as CzArea;
+      // null = layout without a Честный знак area (labels are generated without codes)
+      const czArea = template.czArea as unknown as CzArea | null;
       const templateVariables = (template.variables as Record<string, string> | null) ?? {};
       const widthPt = template.widthMm * MM_TO_PT;
       const heightPt = template.heightMm * MM_TO_PT;
@@ -185,6 +186,15 @@ const worker = new Worker<JobData>(
         include: { czBatch: true },
         orderBy: { pageIndex: 'asc' },
       });
+      const outputBatch = await prisma.outputBatch.findUnique({ where: { id: outputBatchId } });
+      // Batches for layouts without CZ carry no codes: one page per requested label.
+      const pageCount = codes.length > 0 ? codes.length : (outputBatch?.count ?? 0);
+      if (pageCount === 0) throw new Error('Nothing to generate: batch has no codes and no label count');
+      if (codes.length > 0 && !czArea) {
+        // CZ area removed from the layout while this batch waited in the queue. Printing would
+        // consume the codes without putting them on labels — fail so the catch below releases them.
+        throw new Error('Template has no CZ area but the batch has CZ codes');
+      }
 
       // Group codes by czBatch to avoid downloading same PDF multiple times.
       // CSV-sourced batches (s3Key starts with "csv:") have no PDF to download —
@@ -276,11 +286,9 @@ const worker = new Worker<JobData>(
       const eacImages = new Map<string, PDFImage>();
       const assetImages = new Map<string, PDFImage>();
 
-      for (let i = 0; i < codes.length; i++) {
-        const code = codes[i];
+      for (let i = 0; i < pageCount; i++) {
+        const code = codes[i] as (typeof codes)[number] | undefined;
         const t0 = Date.now();
-
-        const czPng = czPngMap.get(`${code.czBatchId}:${code.pageIndex}`)!;
 
         const page = outputDoc.addPage([widthPt, heightPt]);
         const { height } = page.getSize();
@@ -412,35 +420,40 @@ const worker = new Worker<JobData>(
           }
         }
 
-        // Embed CZ code as rasterized PNG (critical — never copy vector content)
-        const czImage = await outputDoc.embedPng(czPng);
-        // Fit into czArea preserving aspect ratio (letterbox / center).
-        const areaWpt = czArea.widthMm * MM_TO_PT;
-        const areaHpt = czArea.heightMm * MM_TO_PT;
-        const imgRatio = czImage.width / czImage.height;
-        const areaRatio = areaWpt / areaHpt;
-        let drawWpt: number;
-        let drawHpt: number;
-        if (imgRatio > areaRatio) {
-          drawWpt = areaWpt;
-          drawHpt = areaWpt / imgRatio;
-        } else {
-          drawHpt = areaHpt;
-          drawWpt = areaHpt * imgRatio;
+        // Embed CZ code as rasterized PNG (critical — never copy vector content).
+        // Skipped for layouts without a CZ area and for code-less batches.
+        const czPng = code && czArea ? czPngMap.get(`${code.czBatchId}:${code.pageIndex}`) : undefined;
+        if (code && czArea && !czPng) throw new Error(`CZ image missing for page ${code.pageIndex}`);
+        if (czPng && czArea) {
+          const czImage = await outputDoc.embedPng(czPng);
+          // Fit into czArea preserving aspect ratio (letterbox / center).
+          const areaWpt = czArea.widthMm * MM_TO_PT;
+          const areaHpt = czArea.heightMm * MM_TO_PT;
+          const imgRatio = czImage.width / czImage.height;
+          const areaRatio = areaWpt / areaHpt;
+          let drawWpt: number;
+          let drawHpt: number;
+          if (imgRatio > areaRatio) {
+            drawWpt = areaWpt;
+            drawHpt = areaWpt / imgRatio;
+          } else {
+            drawHpt = areaHpt;
+            drawWpt = areaHpt * imgRatio;
+          }
+          const offsetX = (areaWpt - drawWpt) / 2;
+          const offsetY = (areaHpt - drawHpt) / 2;
+          page.drawImage(czImage, {
+            x: toX(czArea.xMm) + offsetX,
+            y: toY(czArea.yMm, czArea.heightMm) + offsetY,
+            width: drawWpt,
+            height: drawHpt,
+          });
         }
-        const offsetX = (areaWpt - drawWpt) / 2;
-        const offsetY = (areaHpt - drawHpt) / 2;
-        page.drawImage(czImage, {
-          x: toX(czArea.xMm) + offsetX,
-          y: toY(czArea.yMm, czArea.heightMm) + offsetY,
-          width: drawWpt,
-          height: drawHpt,
-        });
 
-        if (i % 10 === 9 || i === codes.length - 1) {
-          await job.updateProgress(50 + Math.round(((i + 1) / codes.length) * 50));
+        if (i % 10 === 9 || i === pageCount - 1) {
+          await job.updateProgress(50 + Math.round(((i + 1) / pageCount) * 50));
         }
-        console.log(`[worker] batch=${outputBatchId} ${i + 1}/${codes.length} page=${code.pageIndex} in ${Date.now() - t0}ms`);
+        console.log(`[worker] batch=${outputBatchId} ${i + 1}/${pageCount} page=${code?.pageIndex ?? '-'} in ${Date.now() - t0}ms`);
       }
 
       const pdfBytes = await outputDoc.save();

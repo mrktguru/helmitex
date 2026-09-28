@@ -238,6 +238,11 @@ export default function Editor() {
       if ((e.key === 'Delete' || e.key === 'Backspace') && store.selectedId && !editingId) {
         const sel = store.elements.find((x) => x.id === store.selectedId);
         if (sel && !sel.locked) store.deleteElement(store.selectedId);
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && czSelected && store.czArea && !editingId) {
+        if (confirm('Удалить поле ЧЗ из макета? Экспорт будет создавать этикетки без кодов Честного знака.')) {
+          store.removeCzArea();
+          setCzSelected(false);
+        }
       }
       // Arrow keys — nudge selected element (or CZ area). Shift = 10× step.
       if (!editingId && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
@@ -253,7 +258,7 @@ export default function Editor() {
               yMm: snapToGrid(Math.max(0, el.yMm + dy)),
             } as any);
           }
-        } else if (czSelected) {
+        } else if (czSelected && store.czArea) {
           e.preventDefault();
           store.moveCzArea({
             ...store.czArea,
@@ -346,6 +351,7 @@ export default function Editor() {
   const onCzMouseDown = useCallback((e: React.MouseEvent) => {
     if (drawMode !== 'select' || e.button !== 0) return;
     e.stopPropagation();
+    if (!store.czArea) return;
     store.selectElement(null); setCzSelected(true); setEditingId(null);
     czDragging.current = { startX: e.clientX, startY: e.clientY, origX: store.czArea.xMm, origY: store.czArea.yMm };
   }, [store, drawMode]);
@@ -390,7 +396,7 @@ export default function Editor() {
       store.updateElement(id, { xMm: newX, yMm: newY, widthMm: newW, heightMm: newH } as any);
       return;
     }
-    if (czDragging.current) {
+    if (czDragging.current && store.czArea) {
       const dx = (e.clientX - czDragging.current.startX) / SCALE;
       const dy = (e.clientY - czDragging.current.startY) / SCALE;
       store.moveCzArea({ ...store.czArea, xMm: snapToGrid(Math.max(0, czDragging.current.origX + dx)), yMm: snapToGrid(Math.max(0, czDragging.current.origY + dy)) });
@@ -414,7 +420,7 @@ export default function Editor() {
 
   const onMouseUp = useCallback((e: React.MouseEvent) => {
     if (resizing.current) { resizing.current = null; return; }
-    if (czDragging.current) { czDragging.current = null; store.setCzArea(store.czArea); }
+    if (czDragging.current) { czDragging.current = null; if (store.czArea) store.setCzArea(store.czArea); }
     dragging.current = null;
     if (drawing.current && canvasRef.current) {
       const r = canvasRef.current.getBoundingClientRect();
@@ -508,6 +514,16 @@ export default function Editor() {
               />
               <ToolButton onClick={() => { addBarcode(); setShowVarsPanel(false); }} label="| Штрихкод" />
               <ToolButton onClick={() => { addEac(); setShowVarsPanel(false); }} label="✓ Знак ЕАС" />
+              <ToolButton
+                onClick={() => {
+                  setDrawMode('select'); setShowVarsPanel(false); setEditingId(null); store.selectElement(null);
+                  if (!store.czArea) store.addCzArea();
+                  setCzSelected(true);
+                }}
+                label={store.czArea ? '▦ Поле ЧЗ' : '+ Поле ЧЗ'}
+                active={czSelected && !!store.czArea}
+                hint={store.czArea ? 'Выбрать поле ЧЗ (удалить — в свойствах справа или клавишей Delete)' : 'Добавить поле для кода Честного знака'}
+              />
               <ToolButton onClick={() => { setDrawMode('rect'); store.selectElement(null); setEditingId(null); setShowVarsPanel(false); }} label="□ Прямоугольник" active={drawMode === 'rect'} />
               <label className="flex items-center gap-2 text-sm cursor-pointer px-2 py-1 rounded hover:bg-gray-100">
                 Изображение
@@ -548,22 +564,24 @@ export default function Editor() {
               }
             }}
           >
-            <div
-              style={{
-                position: 'absolute',
-                left: store.czArea.xMm * SCALE, top: store.czArea.yMm * SCALE,
-                width: store.czArea.widthMm * SCALE, height: store.czArea.heightMm * SCALE,
-                border: czSelected ? '2px solid #f97316' : '2px dashed #f97316',
-                boxSizing: 'border-box',
-                cursor: drawMode === 'select' ? 'move' : 'crosshair',
-                zIndex: 10, userSelect: 'none',
-                boxShadow: czSelected ? '0 0 0 1px #f97316' : undefined,
-              }}
-              onMouseDown={onCzMouseDown}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <span style={{ fontSize: 10, color: '#f97316', padding: '1px 3px', pointerEvents: 'none' }}>ЧЗ</span>
-            </div>
+            {store.czArea && (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: store.czArea.xMm * SCALE, top: store.czArea.yMm * SCALE,
+                  width: store.czArea.widthMm * SCALE, height: store.czArea.heightMm * SCALE,
+                  border: czSelected ? '2px solid #f97316' : '2px dashed #f97316',
+                  boxSizing: 'border-box',
+                  cursor: drawMode === 'select' ? 'move' : 'crosshair',
+                  zIndex: 10, userSelect: 'none',
+                  boxShadow: czSelected ? '0 0 0 1px #f97316' : undefined,
+                }}
+                onMouseDown={onCzMouseDown}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <span style={{ fontSize: 10, color: '#f97316', padding: '1px 3px', pointerEvents: 'none' }}>ЧЗ</span>
+              </div>
+            )}
 
             {store.elements.map((el) => (
               <CanvasElement

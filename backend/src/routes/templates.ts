@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { getProjectOrFail } from './projects';
@@ -20,7 +21,7 @@ const templateSchema = z.object({
     yMm: z.number(),
     widthMm: z.number().positive(),
     heightMm: z.number().positive(),
-  }),
+  }).nullable(), // null = layout without a Честный знак area
   barcodeValue: z.string().optional().nullable(),
   printMargins: z.object({
     topMm: z.number(), rightMm: z.number(), bottomMm: z.number(), leftMm: z.number(),
@@ -45,9 +46,11 @@ router.put('/:id/template', async (req: AuthRequest, res: Response): Promise<voi
   if (!(await getProjectOrFail(req.params.id, req, res))) return;
   const parsed = templateSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
-  const { printMargins, variables, variableDefs, ...rest } = parsed.data;
+  const { printMargins, variables, variableDefs, czArea, ...rest } = parsed.data;
   const data = {
     ...rest,
+    // czArea is a required Json column: "no CZ" is stored as JSON null.
+    czArea: czArea ?? Prisma.JsonNull,
     ...(printMargins != null ? { printMargins } : {}),
     ...(variables != null ? { variables } : {}),
     ...(variableDefs != null ? { variableDefs } : {}),

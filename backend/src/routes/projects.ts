@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 
@@ -81,7 +82,7 @@ router.post('/:id/copy', async (req: AuthRequest, res: Response): Promise<void> 
           widthMm: source.template.widthMm,
           heightMm: source.template.heightMm,
           elements: source.template.elements as any,
-          czArea: source.template.czArea as any,
+          czArea: (source.template.czArea ?? Prisma.JsonNull) as any,
           barcodeValue: source.template.barcodeValue,
           printMargins: source.template.printMargins as any,
           variables: source.template.variables as any,

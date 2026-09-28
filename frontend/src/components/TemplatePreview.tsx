@@ -15,7 +15,7 @@ interface TemplateData {
   widthMm: number;
   heightMm: number;
   elements: any[];
-  czArea: { xMm: number; yMm: number; widthMm: number; heightMm: number };
+  czArea: { xMm: number; yMm: number; widthMm: number; heightMm: number } | null;
   variables?: Record<string, string> | null;
 }
 
@@ -188,13 +188,15 @@ export default function TemplatePreview({ projectId, maxWidthPx = 900, variables
           }
           return null;
         })}
-        {/* CZ area marker */}
-        <rect
-          x={t.czArea.xMm} y={t.czArea.yMm}
-          width={t.czArea.widthMm} height={t.czArea.heightMm}
-          fill="rgba(249, 115, 22, 0.06)"
-          stroke="#f97316" strokeWidth={0.3} strokeDasharray="0.6 0.4"
-        />
+        {/* CZ area marker (absent for layouts without Честный знак) */}
+        {t.czArea && (
+          <rect
+            x={t.czArea.xMm} y={t.czArea.yMm}
+            width={t.czArea.widthMm} height={t.czArea.heightMm}
+            fill="rgba(249, 115, 22, 0.06)"
+            stroke="#f97316" strokeWidth={0.3} strokeDasharray="0.6 0.4"
+          />
+        )}
       </svg>
     </div>
   );

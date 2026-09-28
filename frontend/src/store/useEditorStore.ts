@@ -98,7 +98,7 @@ const DEFAULT_PRINT_MARGINS: PrintMargins = { topMm: 3, rightMm: 3, bottomMm: 3,
 
 interface HistoryEntry {
   elements: LabelElement[];
-  czArea: CzArea;
+  czArea: CzArea | null;
   widthMm: number;
   heightMm: number;
 }
@@ -107,7 +107,8 @@ interface EditorState {
   widthMm: number;
   heightMm: number;
   elements: LabelElement[];
-  czArea: CzArea;
+  /** Place for the Честный знак DataMatrix; null = label layout without CZ. */
+  czArea: CzArea | null;
   barcodeValue: string;
   printMargins: PrintMargins;
   variables: Record<string, string>;
@@ -125,6 +126,8 @@ interface EditorState {
   reorderElements: (newOrder: LabelElement[]) => void;
   setCzArea: (area: CzArea) => void;
   moveCzArea: (area: CzArea) => void;
+  addCzArea: () => void;
+  removeCzArea: () => void;
   setBarcodeValue: (v: string) => void;
   setVariable: (key: string, value: string) => void;
   setVariables: (vars: Record<string, string>) => void;
@@ -134,7 +137,7 @@ interface EditorState {
   removeVariableDef: (token: string) => void;
   loadTemplate: (data: {
     widthMm: number; heightMm: number;
-    elements: LabelElement[]; czArea: CzArea; barcodeValue?: string | null;
+    elements: LabelElement[]; czArea: CzArea | null; barcodeValue?: string | null;
     printMargins?: PrintMargins | null;
     variables?: Record<string, string> | null;
     variableDefs?: VariableDef[] | null;
@@ -199,6 +202,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   moveCzArea: (area) => set({ czArea: area }),
 
+  addCzArea: () => {
+    if (get().czArea) return;
+    get().pushHistory();
+    set({ czArea: DEFAULT_CZ_AREA });
+  },
+
+  removeCzArea: () => {
+    if (!get().czArea) return;
+    get().pushHistory();
+    set({ czArea: null });
+  },
+
   setBarcodeValue: (v) => set({ barcodeValue: v }),
 
   setPrintMargins: (m) => set({ printMargins: m }),
@@ -220,7 +235,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   })),
 
   loadTemplate: ({ widthMm, heightMm, elements, czArea, barcodeValue, printMargins, variables, variableDefs }) => {
-    set({ widthMm, heightMm, elements, czArea, barcodeValue: barcodeValue ?? '', printMargins: printMargins ?? DEFAULT_PRINT_MARGINS, variables: variables ?? {}, variableDefs: variableDefs ?? [], past: [], future: [] });
+    set({ widthMm, heightMm, elements, czArea: czArea ?? null, barcodeValue: barcodeValue ?? '', printMargins: printMargins ?? DEFAULT_PRINT_MARGINS, variables: variables ?? {}, variableDefs: variableDefs ?? [], past: [], future: [] });
   },
 
   undo: () => {
