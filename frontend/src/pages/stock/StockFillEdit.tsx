@@ -149,15 +149,15 @@ export default function StockFillEdit() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <Link to="/stock/fills" className="text-gray-500 hover:text-gray-900 text-sm">← Фасовка</Link>
-        <h2 className="text-xl font-semibold">Фасовка {number && <span className="font-mono text-base text-gray-500">{number}</span>}</h2>
+        <Link to="/stock/fills" className="text-slate-500 hover:text-slate-900 text-sm">← Фасовка</Link>
+        <h2 className="text-xl font-semibold">Фасовка {number && <span className="font-mono text-base text-slate-500">{number}</span>}</h2>
         {!isNew && <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', DOC_STATUS[status].cls)}>{DOC_STATUS[status].label}</span>}
       </div>
 
       <div className="bg-white rounded-xl border p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
-        <label className="flex flex-col gap-1 text-xs text-gray-500 lg:col-span-2">Бочка
+        <label className="flex flex-col gap-1 text-xs text-slate-500 lg:col-span-2">Бочка
           {readOnly ? (
-            <div className="text-sm text-gray-900 py-1.5 font-mono">{sourceLotNumber ?? '—'}</div>
+            <div className="text-sm text-slate-900 py-1.5 font-mono">{sourceLotNumber ?? '—'}</div>
           ) : (
             <select value={head.sourceLotId} onChange={(e) => setHead({ ...head, sourceLotId: e.target.value })} className={inputCls}>
               <option value="">— выберите бочку —</option>
@@ -169,10 +169,10 @@ export default function StockFillEdit() {
             </select>
           )}
         </label>
-        <label className="flex flex-col gap-1 text-xs text-gray-500">Дата
+        <label className="flex flex-col gap-1 text-xs text-slate-500">Дата
           <input type="date" disabled={readOnly} value={head.date} onChange={(e) => setHead({ ...head, date: e.target.value })} className={inputCls} />
         </label>
-        <label className="flex flex-col gap-1 text-xs text-gray-500">Комментарий
+        <label className="flex flex-col gap-1 text-xs text-slate-500">Комментарий
           <input disabled={readOnly} value={head.comment} onChange={(e) => setHead({ ...head, comment: e.target.value })} className={inputCls} />
         </label>
       </div>
@@ -181,7 +181,7 @@ export default function StockFillEdit() {
         <h3 className="px-4 pt-3 font-semibold text-sm">Продукция</h3>
         <table className="w-full text-sm tabular-nums">
           <thead>
-            <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b">
+            <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b">
               <th className="px-3 py-2 font-medium min-w-[220px]">SKU</th>
               <th className="px-3 py-2 font-medium text-right">Нетто</th>
               <th className="px-3 py-2 font-medium text-right">План, шт</th>
@@ -205,18 +205,18 @@ export default function StockFillEdit() {
                       </select>
                     )}
                   </td>
-                  <td className="px-3 py-1.5 text-right text-gray-600 whitespace-nowrap">{sp?.netQty ? `${fmtQty(sp.netQty)} кг` : '—'}</td>
+                  <td className="px-3 py-1.5 text-right text-slate-600 whitespace-nowrap">{sp?.netQty ? `${fmtQty(sp.netQty)} кг` : '—'}</td>
                   <td className="px-3 py-1.5 text-right"><input disabled={readOnly} value={o.planQty} onChange={(e) => patchOut(o.key, { planQty: e.target.value })} className={inputCls + ' w-24 text-right'} /></td>
                   <td className="px-3 py-1.5 text-right"><input disabled={readOnly} value={o.qty} onChange={(e) => patchOut(o.key, { qty: e.target.value })} className={inputCls + ' w-24 text-right'} /></td>
                   <td className="px-3 py-1.5 text-right whitespace-nowrap">{sp?.netQty ? fmtQty(q * sp.netQty, 2) : '—'}</td>
                   {readOnly && (
                     <td className="px-3 py-1.5">
-                      {o.lotId ? <Link to={`/stock/moves?lotId=${o.lotId}`} className="font-mono text-xs text-blue-700 hover:underline">{o.lotNumber}</Link> : '—'}
+                      {o.lotId ? <Link to={`/stock/warehouse?tab=moves&lotId=${o.lotId}`} className="font-mono text-xs text-brand-700 hover:underline">{o.lotNumber}</Link> : '—'}
                     </td>
                   )}
                   {!readOnly && (
                     <td className="px-2 py-1.5">
-                      <button onClick={() => setOuts((ls) => (ls.length > 1 ? ls.filter((x) => x.key !== o.key) : [newOut()]))} className="text-gray-400 hover:text-red-600" title="Удалить">✕</button>
+                      <button onClick={() => setOuts((ls) => (ls.length > 1 ? ls.filter((x) => x.key !== o.key) : [newOut()]))} className="text-slate-400 hover:text-red-600" title="Удалить">✕</button>
                     </td>
                   )}
                 </tr>
@@ -226,7 +226,7 @@ export default function StockFillEdit() {
         </table>
         {!readOnly && (
           <div className="p-3 border-t flex flex-wrap gap-4 items-center">
-            <button onClick={() => setOuts((ls) => [...ls, newOut()])} className="text-blue-600 hover:underline text-sm">+ SKU</button>
+            <button onClick={() => setOuts((ls) => [...ls, newOut()])} className="text-brand-600 hover:underline text-sm">+ SKU</button>
             <button onClick={calc} className={btnSecondary}>{mats.length ? 'Пересчитать материалы' : 'Рассчитать материалы'}</button>
           </div>
         )}
@@ -240,7 +240,7 @@ export default function StockFillEdit() {
           <h3 className="px-4 pt-3 font-semibold text-sm">Списание материалов</h3>
           <table className="w-full text-sm tabular-nums">
             <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b">
+              <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b">
                 <th className="px-3 py-2 font-medium">Материал</th>
                 <th className="px-3 py-2 font-medium text-right">По норме</th>
                 <th className="px-3 py-2 font-medium text-right">Факт</th>
@@ -254,7 +254,7 @@ export default function StockFillEdit() {
                 return (
                   <tr key={m.key} className="border-b last:border-0">
                     <td className="px-3 py-1.5">{it?.name}</td>
-                    <td className="px-3 py-1.5 text-right text-gray-600 whitespace-nowrap">{m.planQty != null ? `${fmtQty(m.planQty)} ${it?.unit ?? ''}` : '—'}</td>
+                    <td className="px-3 py-1.5 text-right text-slate-600 whitespace-nowrap">{m.planQty != null ? `${fmtQty(m.planQty)} ${it?.unit ?? ''}` : '—'}</td>
                     <td className="px-3 py-1.5 text-right"><input disabled={readOnly} value={m.qty} onChange={(e) => patchMat(m.key, { qty: e.target.value })} className={inputCls + ' w-24 text-right'} /></td>
                     <td className="px-3 py-1.5">
                       {readOnly ? <span className="font-mono text-xs">{m.lotNumber ?? '—'}</span> : (
@@ -269,7 +269,7 @@ export default function StockFillEdit() {
                     </td>
                     {!readOnly && (
                       <td className="px-2 py-1.5">
-                        <button onClick={() => setMats((ls) => ls.filter((x) => x.key !== m.key))} className="text-gray-400 hover:text-red-600" title="Удалить">✕</button>
+                        <button onClick={() => setMats((ls) => ls.filter((x) => x.key !== m.key))} className="text-slate-400 hover:text-red-600" title="Удалить">✕</button>
                       </td>
                     )}
                   </tr>
@@ -277,24 +277,24 @@ export default function StockFillEdit() {
               })}
             </tbody>
           </table>
-          {!readOnly && <p className="px-4 py-2 text-xs text-gray-500 border-t">Лоты подставлены по FEFO. Брак тары или этикеток — увеличьте факт.</p>}
+          {!readOnly && <p className="px-4 py-2 text-xs text-slate-500 border-t">Лоты подставлены по FEFO. Брак тары или этикеток — увеличьте факт.</p>}
         </div>
       )}
 
       <div className="bg-white rounded-xl border p-4 grid grid-cols-2 lg:grid-cols-5 gap-3 items-end text-sm">
-        <div><div className="text-xs text-gray-500">В бочке</div>{barrelQty != null ? `${fmtQty(barrelQty)} кг` : readOnly ? '—' : 'выберите бочку'}</div>
-        <div><div className="text-xs text-gray-500">Расход по нетто</div>{fmtQty(usedKg, 2)} кг</div>
-        <label className="flex items-center gap-2 text-sm text-gray-700 pb-1.5">
+        <div><div className="text-xs text-slate-500">В бочке</div>{barrelQty != null ? `${fmtQty(barrelQty)} кг` : readOnly ? '—' : 'выберите бочку'}</div>
+        <div><div className="text-xs text-slate-500">Расход по нетто</div>{fmtQty(usedKg, 2)} кг</div>
+        <label className="flex items-center gap-2 text-sm text-slate-700 pb-1.5">
           <input type="checkbox" disabled={readOnly} checked={head.closeBarrel} onChange={(e) => setHead({ ...head, closeBarrel: e.target.checked })} />
           Взвесить остаток
         </label>
         {head.closeBarrel ? (
-          <label className="flex flex-col gap-1 text-xs text-gray-500">Остаток в бочке, кг
+          <label className="flex flex-col gap-1 text-xs text-slate-500">Остаток в бочке, кг
             <input disabled={readOnly} value={head.remainQty} onChange={(e) => setHead({ ...head, remainQty: e.target.value })} className={inputCls + ' text-right'} placeholder="0" />
           </label>
-        ) : <div className="text-xs text-gray-500">Спишется только расход по нетто, потери не считаются</div>}
+        ) : <div className="text-xs text-slate-500">Спишется только расход по нетто, потери не считаются</div>}
         <div>
-          <div className="text-xs text-gray-500">Потери</div>
+          <div className="text-xs text-slate-500">Потери</div>
           {loss != null ? (
             <span className={clsx(loss < -1e-6 ? 'text-red-600 font-bold' : barrelQty && loss > (barrelQty - (remain ?? 0)) * 0.02 ? 'text-amber-700 font-semibold' : '')}>
               {fmtQty(loss, 2)} кг{usedKg > 0 && ` (${fmtQty((loss / (usedKg + Math.max(loss, 0))) * 100, 1)} %)`}
@@ -317,7 +317,7 @@ export default function StockFillEdit() {
       </div>
       {status === 'POSTED' && (
         <p className="text-sm text-green-800 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-          Партии ГП созданы в состоянии «без ЧЗ». Себестоимость единицы — в разделе <Link to="/stock?type=PRODUCT" className="underline">Остатки → Готовая продукция</Link>.
+          Партии ГП созданы в состоянии «без ЧЗ». Себестоимость единицы — на <Link to="/stock/warehouse?type=PRODUCT" className="underline">складе → Готовая продукция</Link>.
         </p>
       )}
     </div>

@@ -15,7 +15,8 @@ const emptyForm = (): Form => ({
   labelWidthMm: '58', labelHeightMm: '40', archived: false, materials: [],
 });
 
-export default function StockQuantTypes() {
+// productItemId — встроенный режим в карточке SKU: только типы этого SKU
+export default function StockQuantTypes({ productItemId }: { productItemId?: string } = {}) {
   const [types, setTypes] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [boxes, setBoxes] = useState<any[]>([]);
@@ -25,7 +26,7 @@ export default function StockQuantTypes() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  async function load() { setTypes(await api.getQuantTypes()); }
+  async function load() { const t = await api.getQuantTypes(); setTypes(productItemId ? t.filter((x: any) => x.productItemId === productItemId) : t); }
   useEffect(() => {
     load();
     api.getItems().then((all) => {
@@ -75,27 +76,27 @@ export default function StockQuantTypes() {
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <p className="text-sm text-gray-600">Квант — короб с фиксированным количеством единиц одного SKU. Для каждого кванта с ЧЗ выдаётся свой набор кодов.</p>
-        {!form && <button onClick={() => { setError(''); setForm(emptyForm()); }} className={btnPrimary}>+ Тип кванта</button>}
+        <p className="text-sm text-slate-600">Квант — короб с фиксированным количеством единиц одного SKU. Для каждого кванта с ЧЗ выдаётся свой набор кодов.</p>
+        {!form && <button onClick={() => { setError(''); setForm({ ...emptyForm(), productItemId: productItemId ?? '' }); }} className={btnPrimary}>+ Тип кванта</button>}
       </div>
 
       {form && (
         <div className="bg-white rounded-xl border p-4 space-y-4">
           <h3 className="font-semibold">{form.id ? 'Изменить тип кванта' : 'Новый тип кванта'}</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <label className="flex flex-col gap-1 text-xs text-gray-500">Название
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Название
               <input value={form.name} onChange={(e) => set({ name: e.target.value })} className={inputCls} placeholder="Шпатлёвка туба ×42" />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">SKU
+            <label className="flex flex-col gap-1 text-xs text-slate-500">SKU
               <select value={form.productItemId} onChange={(e) => set({ productItemId: e.target.value })} className={inputCls}>
                 <option value="">— выберите —</option>
                 {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">Единиц в кванте
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Единиц в кванте
               <input value={form.unitsPerQuant} onChange={(e) => set({ unitsPerQuant: e.target.value.replace(/\D/g, '') })} className={inputCls + ' text-right'} />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">Короб
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Короб
               <select value={form.boxItemId} onChange={(e) => set({ boxItemId: e.target.value })} className={inputCls}>
                 <option value="">— без короба —</option>
                 {boxes.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -107,22 +108,22 @@ export default function StockQuantTypes() {
             <label className="flex items-center gap-2 text-sm pb-1.5">
               <input type="checkbox" checked={form.trackCz} onChange={(e) => set({ trackCz: e.target.checked })} /> Учитывать коды ЧЗ
             </label>
-            <label className={clsx('flex flex-col gap-1 text-xs text-gray-500', !form.trackCz && 'opacity-40')}>Проект этикетки ЧЗ
+            <label className={clsx('flex flex-col gap-1 text-xs text-slate-500', !form.trackCz && 'opacity-40')}>Проект этикетки ЧЗ
               <select disabled={!form.trackCz} value={form.projectId} onChange={(e) => set({ projectId: e.target.value })} className={inputCls}>
                 <option value="">— выберите проект —</option>
                 {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">Этикетка кванта, ширина мм
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Этикетка кванта, ширина мм
               <input value={form.labelWidthMm} onChange={(e) => set({ labelWidthMm: e.target.value })} className={inputCls + ' text-right'} />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">высота мм
+            <label className="flex flex-col gap-1 text-xs text-slate-500">высота мм
               <input value={form.labelHeightMm} onChange={(e) => set({ labelHeightMm: e.target.value })} className={inputCls + ' text-right'} />
             </label>
           </div>
 
           <div>
-            <div className="text-xs text-gray-500 mb-1">Доп. материалы на 1 квант (наклейки ЧЗ, скотч, вкладыш…)</div>
+            <div className="text-xs text-slate-500 mb-1">Доп. материалы на 1 квант (наклейки ЧЗ, скотч, вкладыш…)</div>
             {form.materials.map((m) => (
               <div key={m.key} className="flex gap-2 mb-1.5 items-center">
                 <select value={m.itemId} onChange={(e) => setMat(m.key, { itemId: e.target.value })} className={inputCls + ' flex-1'}>
@@ -130,14 +131,14 @@ export default function StockQuantTypes() {
                   {mats.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
                 </select>
                 <input value={m.qtyPerQuant} onChange={(e) => setMat(m.key, { qtyPerQuant: e.target.value })} className={inputCls + ' w-24 text-right'} />
-                <span className="text-xs text-gray-500 w-8">{mats.find((i) => i.id === m.itemId)?.unit}</span>
-                <button onClick={() => set({ materials: form.materials.filter((x) => x.key !== m.key) })} className="text-gray-400 hover:text-red-600">✕</button>
+                <span className="text-xs text-slate-500 w-8">{mats.find((i) => i.id === m.itemId)?.unit}</span>
+                <button onClick={() => set({ materials: form.materials.filter((x) => x.key !== m.key) })} className="text-slate-400 hover:text-red-600">✕</button>
               </div>
             ))}
             <div className="flex gap-4">
-              <button onClick={() => set({ materials: [...form.materials, { key: String(++seq), itemId: '', qtyPerQuant: '1' }] })} className="text-blue-600 hover:underline text-sm">+ Материал</button>
+              <button onClick={() => set({ materials: [...form.materials, { key: String(++seq), itemId: '', qtyPerQuant: '1' }] })} className="text-brand-600 hover:underline text-sm">+ Материал</button>
               {form.trackCz && units > 0 && (
-                <button onClick={() => set({ materials: [...form.materials, { key: String(++seq), itemId: '', qtyPerQuant: String(units) }] })} className="text-blue-600 hover:underline text-sm">
+                <button onClick={() => set({ materials: [...form.materials, { key: String(++seq), itemId: '', qtyPerQuant: String(units) }] })} className="text-brand-600 hover:underline text-sm">
                   + Наклейки ЧЗ ({units} шт)
                 </button>
               )}
@@ -145,7 +146,7 @@ export default function StockQuantTypes() {
           </div>
 
           {form.id && (
-            <label className="flex items-center gap-2 text-sm text-gray-600">
+            <label className="flex items-center gap-2 text-sm text-slate-600">
               <input type="checkbox" checked={form.archived} onChange={(e) => set({ archived: e.target.checked })} /> В архиве (не предлагать при сборке)
             </label>
           )}
@@ -158,10 +159,10 @@ export default function StockQuantTypes() {
       )}
 
       <div className="bg-white rounded-xl border overflow-x-auto">
-        {types.length === 0 ? <p className="p-6 text-gray-500">Типов квантов пока нет.</p> : (
+        {types.length === 0 ? <p className="p-6 text-slate-500">Типов квантов пока нет.</p> : (
           <table className="w-full text-sm tabular-nums">
             <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b">
+              <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b">
                 <th className="px-3 py-2 font-medium">Тип</th>
                 <th className="px-3 py-2 font-medium">SKU</th>
                 <th className="px-3 py-2 font-medium text-right">Ед.</th>
@@ -176,19 +177,19 @@ export default function StockQuantTypes() {
               {types.map((t) => {
                 const enough = t.freeCodes == null ? null : Math.floor(t.freeCodes / t.unitsPerQuant);
                 return (
-                  <tr key={t.id} className={clsx('border-b last:border-0', t.archived && 'text-gray-400')}>
+                  <tr key={t.id} className={clsx('border-b last:border-0', t.archived && 'text-slate-400')}>
                     <td className="px-3 py-2 font-medium">{t.name}{t.archived && ' (архив)'}</td>
                     <td className="px-3 py-2">{t.productItem.name}</td>
                     <td className="px-3 py-2 text-right">{t.unitsPerQuant}</td>
                     <td className="px-3 py-2">{t.boxItem?.name ?? '—'}</td>
-                    <td className="px-3 py-2">{t.trackCz ? (t.project?.name ?? <span className="text-red-600">нет проекта</span>) : <span className="text-gray-400">не учитывается</span>}</td>
+                    <td className="px-3 py-2">{t.trackCz ? (t.project?.name ?? <span className="text-red-600">нет проекта</span>) : <span className="text-slate-400">не учитывается</span>}</td>
                     <td className="px-3 py-2 text-right">
                       {t.trackCz && t.freeCodes != null ? (
-                        <span className={clsx(enough === 0 && 'text-red-600 font-semibold')}>{t.freeCodes} <span className="text-gray-400">(на {enough} кв.)</span></span>
+                        <span className={clsx(enough === 0 && 'text-red-600 font-semibold')}>{t.freeCodes} <span className="text-slate-400">(на {enough} кв.)</span></span>
                       ) : '—'}
                     </td>
                     <td className="px-3 py-2 text-right">{t.inStock}</td>
-                    <td className="px-3 py-2 text-right"><button onClick={() => edit(t)} className="text-blue-600 hover:underline">Изменить</button></td>
+                    <td className="px-3 py-2 text-right"><button onClick={() => edit(t)} className="text-brand-600 hover:underline">Изменить</button></td>
                   </tr>
                 );
               })}

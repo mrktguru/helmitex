@@ -40,23 +40,23 @@ export default function StockQuantDoc() {
   }
 
   if (error && !doc) return <p className="text-red-600">{error}</p>;
-  if (!doc) return <p className="text-gray-500">Загрузка…</p>;
+  if (!doc) return <p className="text-slate-500">Загрузка…</p>;
   const qt = doc.quantType;
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <Link to="/stock/quants" className="text-gray-500 hover:text-gray-900 text-sm">← Кванты</Link>
-        <h2 className="text-xl font-semibold">{doc.imported ? 'Ввод квантов' : 'Сборка квантов'} <span className="font-mono text-base text-gray-500">{doc.number}</span></h2>
+        <Link to="/stock/quants" className="text-slate-500 hover:text-slate-900 text-sm">← Кванты</Link>
+        <h2 className="text-xl font-semibold">{doc.imported ? 'Ввод квантов' : 'Сборка квантов'} <span className="font-mono text-base text-slate-500">{doc.number}</span></h2>
         <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', DOC_STATUS[doc.status].cls)}>{DOC_STATUS[doc.status].label}</span>
       </div>
 
       <div className="bg-white rounded-xl border p-4 grid grid-cols-2 lg:grid-cols-5 gap-3 text-sm">
-        <div><div className="text-xs text-gray-500">Тип</div>{qt.name}</div>
-        <div><div className="text-xs text-gray-500">Партия</div><span className="font-mono text-xs">{doc.sourceLotNumber}</span> · {STATE_LABEL[doc.sourceState] || '—'}</div>
-        <div><div className="text-xs text-gray-500">Квантов × ед.</div>{doc.quantCount} × {qt.unitsPerQuant} = {doc.quantCount * qt.unitsPerQuant}</div>
-        <div><div className="text-xs text-gray-500">Дата</div>{fmtDate(doc.date)} · {doc.user.email}</div>
-        <div><div className="text-xs text-gray-500">Себестоимость кванта</div>{fmtMoney(doc.quants[0]?.unitCost)}{doc.quants[0]?.unitCost != null && ' ₽'}</div>
+        <div><div className="text-xs text-slate-500">Тип</div>{qt.name}</div>
+        <div><div className="text-xs text-slate-500">Партия</div><span className="font-mono text-xs">{doc.sourceLotNumber}</span> · {STATE_LABEL[doc.sourceState] || '—'}</div>
+        <div><div className="text-xs text-slate-500">Квантов × ед.</div>{doc.quantCount} × {qt.unitsPerQuant} = {doc.quantCount * qt.unitsPerQuant}</div>
+        <div><div className="text-xs text-slate-500">Дата</div>{fmtDate(doc.date)} · {doc.user.email}</div>
+        <div><div className="text-xs text-slate-500">Себестоимость кванта</div>{fmtMoney(doc.quants[0]?.unitCost)}{doc.quants[0]?.unitCost != null && ' ₽'}</div>
       </div>
 
       {doc.status === 'POSTED' && (
@@ -83,7 +83,7 @@ export default function StockQuantDoc() {
             )}
           </div>
           {batches.length > 0 && (
-            <p className="text-xs text-gray-500">В файле ЧЗ этикетки идут блоками по {qt.unitsPerQuant} в порядке номеров квантов: первый блок — в {doc.quants[0]?.number}, второй — в следующий и т. д.</p>
+            <p className="text-xs text-slate-500">В файле ЧЗ этикетки идут блоками по {qt.unitsPerQuant} в порядке номеров квантов: первый блок — в {doc.quants[0]?.number}, второй — в следующий и т. д.</p>
           )}
         </div>
       )}
@@ -91,7 +91,7 @@ export default function StockQuantDoc() {
       <div className="bg-white rounded-xl border overflow-x-auto">
         <table className="w-full text-sm tabular-nums">
           <thead>
-            <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b">
+            <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b">
               <th className="px-3 py-2 font-medium">Квант</th>
               <th className="px-3 py-2 font-medium text-right">Ед.</th>
               <th className="px-3 py-2 font-medium">Статус</th>
@@ -101,7 +101,7 @@ export default function StockQuantDoc() {
           <tbody>
             {doc.quants.map((q: any) => (
               <tr key={q.id} className="border-b last:border-0">
-                <td className="px-3 py-2"><Link to={`/stock/quants/${q.id}`} className="font-mono text-blue-700 hover:underline">{q.number}</Link></td>
+                <td className="px-3 py-2"><Link to={`/stock/quants/${q.id}`} className="font-mono text-brand-700 hover:underline">{q.number}</Link></td>
                 <td className="px-3 py-2 text-right">{q.units}</td>
                 <td className="px-3 py-2"><span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', QUANT_STATUS[q.status].cls)}>{QUANT_STATUS[q.status].label}</span></td>
                 <td className="px-3 py-2">{q.outputBatch ? { pending: 'в очереди', processing: 'генерируется', done: 'готовы', error: 'ошибка' }[q.outputBatch.jobStatus as string] : '—'}</td>
@@ -115,7 +115,7 @@ export default function StockQuantDoc() {
         <div className="bg-white rounded-xl border p-4 text-sm">
           <h3 className="font-semibold text-sm mb-2">Списано</h3>
           {doc.lines.map((l: any) => (
-            <div key={l.id}>{l.item.name} — {fmtQty(l.qty)} {l.item.unit} <span className="font-mono text-xs text-gray-500">{l.lotNumber}</span></div>
+            <div key={l.id}>{l.item.name} — {fmtQty(l.qty)} {l.item.unit} <span className="font-mono text-xs text-slate-500">{l.lotNumber}</span></div>
           ))}
         </div>
       )}
@@ -132,7 +132,7 @@ export default function StockQuantDoc() {
                 <button disabled={busy} onClick={() => cancel(true)} className={btnSecondary}>Не печатались — вернуть коды в пул</button>
               </>
             ) : <button disabled={busy} onClick={() => cancel(false)} className={btnSecondary}>Отменить сборку</button>}
-            <button onClick={() => setAskCancel(false)} className="text-gray-500 hover:underline px-2">Не отменять</button>
+            <button onClick={() => setAskCancel(false)} className="text-slate-500 hover:underline px-2">Не отменять</button>
           </div>
         </div>
       )}

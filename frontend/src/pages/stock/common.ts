@@ -40,27 +40,27 @@ export const STATE_LABEL: Record<string, string> = {
 };
 
 export const FBO_STATUS: Record<string, { label: string; cls: string }> = {
-  DRAFT: { label: 'Кванты подобраны', cls: 'bg-gray-100 text-gray-700' },
+  DRAFT: { label: 'Кванты подобраны', cls: 'bg-slate-100 text-slate-700' },
   OZON_DRAFT: { label: 'Черновик в Ozon', cls: 'bg-amber-100 text-amber-800' },
-  BOOKED: { label: 'Слот забронирован', cls: 'bg-blue-100 text-blue-800' },
-  CARGOES_SET: { label: 'Грузоместа переданы', cls: 'bg-blue-100 text-blue-800' },
+  BOOKED: { label: 'Слот забронирован', cls: 'bg-brand-100 text-brand-800' },
+  CARGOES_SET: { label: 'Грузоместа переданы', cls: 'bg-brand-100 text-brand-800' },
   LABELS_READY: { label: 'Этикетки готовы', cls: 'bg-indigo-100 text-indigo-800' },
   SHIPPED: { label: 'Отгружена', cls: 'bg-green-100 text-green-800' },
   COMPLETED: { label: 'Принята Ozon', cls: 'bg-green-200 text-green-900' },
-  CANCELLED: { label: 'Отменена', cls: 'bg-gray-100 text-gray-400' },
+  CANCELLED: { label: 'Отменена', cls: 'bg-slate-100 text-slate-400' },
 };
 
 export const QUANT_STATUS: Record<string, { label: string; cls: string }> = {
   ASSEMBLED: { label: 'На складе', cls: 'bg-green-100 text-green-800' },
-  RESERVED: { label: 'В поставке', cls: 'bg-blue-100 text-blue-800' },
-  SHIPPED: { label: 'Отгружен', cls: 'bg-gray-100 text-gray-600' },
-  DISASSEMBLED: { label: 'Разобран', cls: 'bg-gray-100 text-gray-400' },
+  RESERVED: { label: 'В поставке', cls: 'bg-brand-100 text-brand-800' },
+  SHIPPED: { label: 'Отгружен', cls: 'bg-slate-100 text-slate-600' },
+  DISASSEMBLED: { label: 'Разобран', cls: 'bg-slate-100 text-slate-400' },
 };
 
 export const DOC_STATUS: Record<string, { label: string; cls: string }> = {
   DRAFT: { label: 'Черновик', cls: 'bg-amber-100 text-amber-800' },
   POSTED: { label: 'Проведён', cls: 'bg-green-100 text-green-800' },
-  CANCELLED: { label: 'Отменён', cls: 'bg-gray-100 text-gray-500' },
+  CANCELLED: { label: 'Отменён', cls: 'bg-slate-100 text-slate-500' },
 };
 
 export function fmtQty(n: number | null | undefined, digits = 3): string {
@@ -85,6 +85,6 @@ export function parseNum(s: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export const inputCls = 'border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white min-w-0';
-export const btnPrimary = 'bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium';
-export const btnSecondary = 'border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium';
+export const inputCls = 'border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white min-w-0';
+export const btnPrimary = 'bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium';
+export const btnSecondary = 'border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium';

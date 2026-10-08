@@ -111,6 +111,10 @@ export const api = {
   cancelDoc: (id: string, releaseCodes = false) =>
     request<{ ok: true }>(`/stock/docs/${id}/cancel`, { method: 'POST', body: JSON.stringify({ releaseCodes }) }),
   getQuantTypes: () => request<any[]>('/stock/quant-types'),
+  getDashboard: () => request<any>('/stock/dashboard'),
+  getItem: (id: string) => request<any>(`/stock/items/${id}`),
+  importOzonProducts: (products: { offerId: string; name: string }[]) =>
+    request<{ created: number; ids: string[]; notFound: string[] }>('/stock/ozon/import-products', { method: 'POST', body: JSON.stringify({ products }) }),
   // Ozon / FBO
   getOzonSettings: () => request<{ configured: boolean; defaults: any }>('/stock/ozon/settings'),
   saveOzonSettings: (data: any) => request<any>('/stock/ozon/settings', { method: 'PUT', body: JSON.stringify(data) }),

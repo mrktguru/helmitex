@@ -10,7 +10,8 @@ let seq = 0;
 const newMat = (): Mat => ({ key: String(++seq), itemId: '', qtyPerUnit: '1' });
 const MATERIAL_TYPES = ['CONTAINER', 'LABEL', 'PACKAGING', 'RAW'];
 
-export default function StockSkus() {
+// itemId — встроенный режим в карточке позиции
+export default function StockSkus({ itemId }: { itemId?: string } = {}) {
   const [skus, setSkus] = useState<any[]>([]);
   const [semis, setSemis] = useState<any[]>([]);
   const [mats, setMats] = useState<any[]>([]);
@@ -29,7 +30,7 @@ export default function StockSkus() {
     setSkus(s);
     setSemis(semi);
     setMats(all.filter((i: any) => MATERIAL_TYPES.includes(i.type)));
-    const sel = s.find((x: any) => x.id === keep) ?? s[0];
+    const sel = s.find((x: any) => x.id === (keep ?? itemId)) ?? s[0];
     if (sel) select(sel);
   }
   useEffect(() => { load(); }, []);
@@ -82,7 +83,7 @@ export default function StockSkus() {
   }
 
   if (skus.length === 0) {
-    return <p className="text-gray-500 text-center mt-10">Нет SKU. Добавьте их в <Link to="/stock/items" className="text-blue-600 hover:underline">номенклатуре</Link> с типом «Готовая продукция».</p>;
+    return <p className="text-slate-500 text-center mt-10">Нет SKU. Добавьте их в <Link to="/stock/catalog" className="text-brand-600 hover:underline">справочниках</Link> или импортируйте из Ozon.</p>;
   }
 
   const sel = skus.find((s) => s.id === selId);
@@ -90,31 +91,31 @@ export default function StockSkus() {
     .map((t) => ({ ...t, items: mats.filter((m) => m.type === t.value) })).filter((g) => g.items.length);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] gap-4">
-      <div className="bg-white rounded-xl border p-2 h-fit">
+    <div className={clsx('grid grid-cols-1 gap-4', !itemId && 'lg:grid-cols-[280px_minmax(0,1fr)]')}>
+      <div className={clsx('bg-white rounded-xl border p-2 h-fit', itemId && 'hidden')}>
         {skus.map((s) => (
           <button key={s.id} onClick={() => select(s)}
             className={clsx('w-full text-left px-3 py-2 rounded-lg text-sm flex justify-between gap-2',
-              s.id === selId ? 'bg-blue-50 text-blue-800 font-medium' : 'hover:bg-gray-50')}>
+              s.id === selId ? 'bg-brand-50 text-brand-800 font-medium' : 'hover:bg-slate-50')}>
             <span>{s.name}</span>
             {!s.spec?.netQty ? <span className="text-xs text-amber-700 shrink-0">не заполнена</span>
-              : !s.spec?.ozonSku && <span className="text-xs text-gray-400 shrink-0">нет Ozon</span>}
+              : !s.spec?.ozonSku && <span className="text-xs text-slate-400 shrink-0">нет Ozon</span>}
           </button>
         ))}
       </div>
 
       {sel && (
         <div className="space-y-4 min-w-0">
-          <h2 className="text-xl font-semibold">{sel.name}</h2>
+          {!itemId && <h2 className="text-xl font-semibold">{sel.name}</h2>}
 
           <div className="bg-white rounded-xl border p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1 text-xs text-gray-500">Полуфабрикат
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Полуфабрикат
               <select value={semiItemId} onChange={(e) => setSemiItemId(e.target.value)} className={inputCls}>
                 <option value="">— любой —</option>
                 {semis.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">Нетто полуфабриката в 1 шт, кг
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Нетто полуфабриката в 1 шт, кг
               <input value={netQty} onChange={(e) => setNetQty(e.target.value)} className={inputCls + ' text-right'} placeholder="0,4" />
             </label>
           </div>
@@ -122,7 +123,7 @@ export default function StockSkus() {
           <div className="bg-white rounded-xl border p-4 space-y-2">
             <h3 className="font-semibold text-sm">Ozon</h3>
             <div className="flex flex-wrap gap-2 items-end">
-              <label className="flex flex-col gap-1 text-xs text-gray-500 flex-1 min-w-[260px]">Артикул (offer_id)
+              <label className="flex flex-col gap-1 text-xs text-slate-500 flex-1 min-w-[260px]">Артикул (offer_id)
                 <input list="ozon-products" value={offer} onFocus={loadOzonProducts} onChange={(e) => setOffer(e.target.value)} className={inputCls + ' font-mono'} placeholder="6429830025023" />
                 <datalist id="ozon-products">
                   {(ozonProducts ?? []).map((p) => <option key={p.offerId} value={p.offerId}>{p.name}</option>)}
@@ -131,16 +132,16 @@ export default function StockSkus() {
               <button disabled={busy || offer.trim() === (sel.spec?.ozonOfferId ?? '')} onClick={saveOzon} className={btnPrimary}>Сохранить и сверить</button>
             </div>
             {sel.spec?.ozonSku ? (
-              <p className="text-xs text-gray-600">SKU Ozon <span className="font-mono">{sel.spec.ozonSku}</span> · {sel.spec.ozonName}</p>
-            ) : sel.spec?.ozonOfferId ? <p className="text-xs text-amber-700">SKU Ozon не сверен</p> : <p className="text-xs text-gray-500">Без артикула кванты этого SKU нельзя отгрузить на FBO.</p>}
+              <p className="text-xs text-slate-600">SKU Ozon <span className="font-mono">{sel.spec.ozonSku}</span> · {sel.spec.ozonName}</p>
+            ) : sel.spec?.ozonOfferId ? <p className="text-xs text-amber-700">SKU Ozon не сверен</p> : <p className="text-xs text-slate-500">Без артикула кванты этого SKU нельзя отгрузить на FBO.</p>}
             {ozonMsg && <p className={clsx('text-sm', ozonMsg.ok ? 'text-green-700' : 'text-red-600')}>{ozonMsg.text}</p>}
           </div>
 
           <div className="bg-white rounded-xl border overflow-x-auto">
-            <h3 className="px-4 pt-3 font-semibold text-sm">Материалы на 1 шт <span className="font-normal text-gray-500">— списываются при фасовке</span></h3>
+            <h3 className="px-4 pt-3 font-semibold text-sm">Материалы на 1 шт <span className="font-normal text-slate-500">— списываются при фасовке</span></h3>
             <table className="w-full text-sm tabular-nums">
               <thead>
-                <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b">
+                <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b">
                   <th className="px-4 py-2 font-medium">Материал</th>
                   <th className="px-4 py-2 font-medium text-right w-36">На 1 шт</th>
                   <th className="w-8" />
@@ -161,26 +162,26 @@ export default function StockSkus() {
                     </td>
                     <td className="px-4 py-1.5 text-right whitespace-nowrap">
                       <input value={l.qtyPerUnit} onChange={(e) => patch(l.key, { qtyPerUnit: e.target.value })} className={inputCls + ' w-20 text-right'} />
-                      <span className="text-xs text-gray-500 ml-1">{mats.find((m) => m.id === l.itemId)?.unit}</span>
+                      <span className="text-xs text-slate-500 ml-1">{mats.find((m) => m.id === l.itemId)?.unit}</span>
                     </td>
                     <td className="px-2 py-1.5">
-                      <button onClick={() => setLines((ls) => (ls.length > 1 ? ls.filter((x) => x.key !== l.key) : [newMat()]))} className="text-gray-400 hover:text-red-600" title="Удалить">✕</button>
+                      <button onClick={() => setLines((ls) => (ls.length > 1 ? ls.filter((x) => x.key !== l.key) : [newMat()]))} className="text-slate-400 hover:text-red-600" title="Удалить">✕</button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <div className="p-3 border-t">
-              <button onClick={() => setLines((ls) => [...ls, newMat()])} className="text-blue-600 hover:underline text-sm">+ Материал</button>
+              <button onClick={() => setLines((ls) => [...ls, newMat()])} className="text-brand-600 hover:underline text-sm">+ Материал</button>
             </div>
           </div>
 
           {msg && <p className={clsx('text-sm', msg.ok ? 'text-green-700' : 'text-red-600')}>{msg.text}</p>}
           <button disabled={busy} onClick={save} className={btnPrimary}>Сохранить карточку</button>
           {parseNum(netQty) != null && (
-            <p className="text-xs text-gray-500">Из 100 кг полуфабриката выйдет около {fmtQty(Math.floor(100 / parseNum(netQty)!), 0)} шт без учёта потерь.</p>
+            <p className="text-xs text-slate-500">Из 100 кг полуфабриката выйдет около {fmtQty(Math.floor(100 / parseNum(netQty)!), 0)} шт без учёта потерь.</p>
           )}
-          <p className="text-xs text-gray-500">Короб кванта и наклейки ЧЗ сюда не входят — они списываются при сборке квантов (следующий этап).</p>
+          <p className="text-xs text-slate-500">Короб кванта и наклейки ЧЗ сюда не входят — они списываются при сборке квантов (следующий этап).</p>
         </div>
       )}
     </div>

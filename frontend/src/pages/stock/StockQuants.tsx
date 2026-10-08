@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { api, downloadFile } from '../../api/client';
+import { PageHeader } from './StockLayout';
 import { QUANT_STATUS, btnSecondary, fmtDate, inputCls } from './common';
 
 export default function StockQuants() {
@@ -35,13 +36,14 @@ export default function StockQuants() {
 
   return (
     <div className="space-y-4">
+      <PageHeader title="Кванты" hint="Квант — короб с единицами одного SKU и списком кодов ЧЗ. Из квантов собираются поставки FBO." />
       {summary.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {summary.map((t) => (
             <button key={t.id} onClick={() => setParam('typeId', typeId === t.id ? '' : t.id)}
-              className={clsx('bg-white border rounded-xl px-4 py-2 text-left', typeId === t.id && 'border-blue-500 bg-blue-50')}>
-              <div className="text-xs text-gray-500">{t.name}</div>
-              <div className="text-lg font-semibold tabular-nums">{t.inStock} <span className="text-sm font-normal text-gray-500">кв. · {t.inStock * t.unitsPerQuant} шт</span></div>
+              className={clsx('bg-white border rounded-xl px-4 py-2 text-left', typeId === t.id && 'border-brand-500 bg-brand-50')}>
+              <div className="text-xs text-slate-500">{t.name}</div>
+              <div className="text-lg font-semibold tabular-nums">{t.inStock} <span className="text-sm font-normal text-slate-500">кв. · {t.inStock * t.unitsPerQuant} шт</span></div>
             </button>
           ))}
         </div>
@@ -61,25 +63,25 @@ export default function StockQuants() {
         </div>
         <div className="flex gap-2">
           <Link to="/stock/quant/new?import=1" className={btnSecondary}>Ввод существующих</Link>
-          <Link to="/stock/quant/new" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium">+ Сборка квантов</Link>
+          <Link to="/stock/quant/new" className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium">+ Сборка квантов</Link>
         </div>
       </div>
 
       {sel.size > 0 && (
-        <div className="flex flex-wrap items-center gap-3 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-sm">
+        <div className="flex flex-wrap items-center gap-3 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2 text-sm">
           Выбрано: {sel.size}
-          <button onClick={() => dl(`/stock/quant-labels.pdf?ids=${ids}`)} className="text-blue-700 hover:underline">Этикетки квантов</button>
-          <button onClick={() => dl(`/stock/quant-codes.csv?ids=${ids}`)} className="text-blue-700 hover:underline">Список ЧЗ (CSV)</button>
-          <button onClick={() => setSel(new Set())} className="text-gray-500 hover:underline">Снять выбор</button>
+          <button onClick={() => dl(`/stock/quant-labels.pdf?ids=${ids}`)} className="text-brand-700 hover:underline">Этикетки квантов</button>
+          <button onClick={() => dl(`/stock/quant-codes.csv?ids=${ids}`)} className="text-brand-700 hover:underline">Список ЧЗ (CSV)</button>
+          <button onClick={() => setSel(new Set())} className="text-slate-500 hover:underline">Снять выбор</button>
         </div>
       )}
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="bg-white rounded-xl border overflow-x-auto">
-        {!quants ? <p className="p-6 text-gray-500">Загрузка…</p> : quants.length === 0 ? <p className="p-6 text-gray-500">Квантов нет.</p> : (
+        {!quants ? <p className="p-6 text-slate-500">Загрузка…</p> : quants.length === 0 ? <p className="p-6 text-slate-500">Квантов нет.</p> : (
           <table className="w-full text-sm tabular-nums">
             <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b">
+              <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b">
                 <th className="px-3 py-2 w-8">
                   <input type="checkbox" checked={sel.size === quants.length} onChange={(e) => setSel(e.target.checked ? new Set(quants.map((x) => x.id)) : new Set())} />
                 </th>
@@ -95,16 +97,16 @@ export default function StockQuants() {
             </thead>
             <tbody>
               {quants.map((x) => (
-                <tr key={x.id} className={clsx('border-b last:border-0', sel.has(x.id) && 'bg-blue-50/50')}>
+                <tr key={x.id} className={clsx('border-b last:border-0', sel.has(x.id) && 'bg-brand-50/50')}>
                   <td className="px-3 py-2"><input type="checkbox" checked={sel.has(x.id)} onChange={() => toggle(x.id)} /></td>
-                  <td className="px-3 py-2"><Link to={`/stock/quants/${x.id}`} className="font-mono text-blue-700 hover:underline">{x.number}</Link></td>
+                  <td className="px-3 py-2"><Link to={`/stock/quants/${x.id}`} className="font-mono text-brand-700 hover:underline">{x.number}</Link></td>
                   <td className="px-3 py-2">{x.quantType.name}</td>
                   <td className="px-3 py-2 text-right">{x.units}</td>
                   <td className={clsx('px-3 py-2 text-right', x._count.codes > 0 && x._count.codes !== x.units && 'text-red-600 font-semibold')}>{x._count.codes || '—'}</td>
                   <td className="px-3 py-2 font-mono text-xs">{x.lot.number}</td>
                   <td className="px-3 py-2">{fmtDate(x.lot.expiresAt)}</td>
                   <td className="px-3 py-2"><span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', QUANT_STATUS[x.status].cls)}>{QUANT_STATUS[x.status].label}</span></td>
-                  <td className="px-3 py-2"><Link to={`/stock/quant/${x.doc.id}`} className="font-mono text-xs text-gray-500 hover:underline">{x.doc.number}</Link></td>
+                  <td className="px-3 py-2"><Link to={`/stock/quant/${x.doc.id}`} className="font-mono text-xs text-slate-500 hover:underline">{x.doc.number}</Link></td>
                 </tr>
               ))}
             </tbody>

@@ -69,25 +69,25 @@ export default function StockQuantAssemble() {
   return (
     <div className="space-y-4 max-w-4xl">
       <div className="flex flex-wrap items-center gap-3">
-        <Link to="/stock/quants" className="text-gray-500 hover:text-gray-900 text-sm">← Кванты</Link>
+        <Link to="/stock/quants" className="text-slate-500 hover:text-slate-900 text-sm">← Кванты</Link>
         <h2 className="text-xl font-semibold">{imported ? 'Ввод существующих квантов' : 'Сборка квантов'}</h2>
       </div>
 
       {imported && (
-        <p className="text-sm text-gray-600 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+        <p className="text-sm text-slate-600 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2">
           Для квантов, собранных до запуска учёта. Единицы берутся из партии в состоянии «с ЧЗ» (внесите их начальными остатками),
           коды ЧЗ вставляются списком. Короба и материалы не списываются, этикетки не печатаются.
         </p>
       )}
 
       <div className="bg-white rounded-xl border p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <label className="flex flex-col gap-1 text-xs text-gray-500">Тип кванта
+        <label className="flex flex-col gap-1 text-xs text-slate-500">Тип кванта
           <select value={typeId} onChange={(e) => setTypeId(e.target.value)} className={inputCls}>
             <option value="">— выберите —</option>
             {types.map((t) => <option key={t.id} value={t.id}>{t.name} · {t.unitsPerQuant} шт</option>)}
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-gray-500">Партия
+        <label className="flex flex-col gap-1 text-xs text-slate-500">Партия
           <select disabled={!qt} value={lotKey} onChange={(e) => setLotKey(e.target.value)} className={inputCls}>
             <option value="">{qt && lots.length === 0 ? '— нет остатков —' : '— выберите —'}</option>
             {lots.map((b) => (
@@ -98,22 +98,22 @@ export default function StockQuantAssemble() {
           </select>
         </label>
         {!parsed && (
-          <label className="flex flex-col gap-1 text-xs text-gray-500">Количество квантов
+          <label className="flex flex-col gap-1 text-xs text-slate-500">Количество квантов
             <input value={count} onChange={(e) => setCount(e.target.value.replace(/\D/g, ''))} className={inputCls + ' text-right'} />
           </label>
         )}
-        <label className={clsx('flex flex-col gap-1 text-xs text-gray-500', parsed && 'sm:col-span-2')}>Комментарий
+        <label className={clsx('flex flex-col gap-1 text-xs text-slate-500', parsed && 'sm:col-span-2')}>Комментарий
           <input value={comment} onChange={(e) => setComment(e.target.value)} className={inputCls} />
         </label>
       </div>
 
       {parsed && (
         <div className="bg-white rounded-xl border p-4 space-y-2">
-          <label className="flex flex-col gap-1 text-xs text-gray-500">
+          <label className="flex flex-col gap-1 text-xs text-slate-500">
             Коды ЧЗ — по одному в строке, подряд по квантам ({n} кодов = 1 квант). Можно вставить из сканера или CSV-столбца.
             <textarea value={codesText} onChange={(e) => setCodesText(e.target.value)} rows={10} className={inputCls + ' font-mono text-xs'} />
           </label>
-          <p className={clsx('text-sm', parsed.total % n !== 0 ? 'text-red-600' : 'text-gray-600')}>
+          <p className={clsx('text-sm', parsed.total % n !== 0 ? 'text-red-600' : 'text-slate-600')}>
             Кодов: {parsed.total} → квантов: {Math.floor(parsed.total / n)}{parsed.total % n !== 0 && `, лишних ${parsed.total % n}`}
           </p>
         </div>
@@ -121,12 +121,12 @@ export default function StockQuantAssemble() {
 
       {qt && src && (
         <div className="bg-white rounded-xl border p-4 text-sm grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <div><div className="text-xs text-gray-500">Единиц</div>{effK * n} из {fmtQty(src.qty)}</div>
-          <div><div className="text-xs text-gray-500">Хватит на квантов</div>{maxByStock}</div>
-          {maxByCodes != null && <div><div className="text-xs text-gray-500">Свободных кодов ЧЗ</div>{qt.freeCodes} (на {maxByCodes} кв.)</div>}
-          {!imported && <div><div className="text-xs text-gray-500">Короб</div>{qt.boxItem ? `${qt.boxItem.name} × ${effK}` : '—'}</div>}
+          <div><div className="text-xs text-slate-500">Единиц</div>{effK * n} из {fmtQty(src.qty)}</div>
+          <div><div className="text-xs text-slate-500">Хватит на квантов</div>{maxByStock}</div>
+          {maxByCodes != null && <div><div className="text-xs text-slate-500">Свободных кодов ЧЗ</div>{qt.freeCodes} (на {maxByCodes} кв.)</div>}
+          {!imported && <div><div className="text-xs text-slate-500">Короб</div>{qt.boxItem ? `${qt.boxItem.name} × ${effK}` : '—'}</div>}
           {!imported && qt.materials.length > 0 && (
-            <div className="col-span-2 lg:col-span-4 text-xs text-gray-600">
+            <div className="col-span-2 lg:col-span-4 text-xs text-slate-600">
               Спишется: {qt.materials.map((m: any) => `${m.item.name} × ${fmtQty(m.qtyPerQuant * effK)}`).join(', ')}
             </div>
           )}
@@ -139,7 +139,7 @@ export default function StockQuantAssemble() {
         {busy ? 'Формирую…' : imported ? `Внести ${effK} кв.` : `Собрать ${effK} кв. и выдать коды ЧЗ`}
       </button>
       {!imported && qt?.trackCz && (
-        <p className="text-xs text-gray-500">На каждый квант выдаётся {n} кодов ЧЗ из проекта «{qt.project?.name}». После проведения появятся PDF: этикетки ЧЗ по квантам подряд и этикетки квантов.</p>
+        <p className="text-xs text-slate-500">На каждый квант выдаётся {n} кодов ЧЗ из проекта «{qt.project?.name}». После проведения появятся PDF: этикетки ЧЗ по квантам подряд и этикетки квантов.</p>
       )}
     </div>
   );

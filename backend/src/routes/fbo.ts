@@ -122,6 +122,21 @@ router.put('/specs/:itemId/ozon', h(async (req, res) => {
   res.json(offerId ? await syncSkus() : { updated: 0, notFound: [] });
 }));
 
+// Создать SKU готовой продукции из товаров Ozon (артикул и SKU Ozon заполняются сразу)
+router.post('/ozon/import-products', h(async (req, res) => {
+  const parsed = z.object({ products: z.array(z.object({ offerId: z.string().min(1), name: z.string().min(1).max(200) })).min(1).max(100) }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
+  const created: string[] = [];
+  for (const p of parsed.data.products) {
+    const exists = await prisma.productSpec.findFirst({ where: { ozonOfferId: p.offerId } });
+    if (exists) continue;
+    const item = await prisma.item.create({ data: { type: 'PRODUCT', name: p.name, unit: 'шт', spec: { create: { ozonOfferId: p.offerId } } } });
+    created.push(item.id);
+  }
+  const sync = await syncSkus();
+  res.json({ created: created.length, ids: created, notFound: sync.notFound });
+}));
+
 router.post('/ozon/sync-skus', h(async (_req, res) => { res.json(await syncSkus()); }));
 
 // ───────────── Поставки FBO ─────────────

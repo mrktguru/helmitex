@@ -92,6 +92,13 @@ router.get('/items', async (req: AuthRequest, res: Response) => {
   res.json(items);
 });
 
+// GET /api/stock/items/:id — позиция для карточки
+router.get('/items/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+  const item = await prisma.item.findUnique({ where: { id: req.params.id } });
+  if (!item) { res.status(404).json({ error: 'Not found' }); return; }
+  res.json(item);
+});
+
 // POST /api/stock/items
 router.post('/items', async (req: AuthRequest, res: Response): Promise<void> => {
   const parsed = itemSchema.safeParse(req.body);

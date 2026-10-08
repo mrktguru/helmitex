@@ -197,27 +197,27 @@ export default function StockMixEdit() {
     <>
       <div className="space-y-4 print:hidden">
         <div className="flex flex-wrap items-center gap-3">
-          <Link to="/stock/mixes" className="text-gray-500 hover:text-gray-900 text-sm">← Замесы</Link>
-          <h2 className="text-xl font-semibold">Замес {number && <span className="font-mono text-base text-gray-500">{number}</span>}</h2>
+          <Link to="/stock/mixes" className="text-slate-500 hover:text-slate-900 text-sm">← Замесы</Link>
+          <h2 className="text-xl font-semibold">Замес {number && <span className="font-mono text-base text-slate-500">{number}</span>}</h2>
           {!isNew && <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', DOC_STATUS[status].cls)}>{DOC_STATUS[status].label}</span>}
           <div className="flex-1" />
           {lines.length > 0 && <button onClick={() => window.print()} className={btnSecondary}>Печать карты A4</button>}
         </div>
 
         <div className="bg-white rounded-xl border p-4 grid grid-cols-2 lg:grid-cols-6 gap-3 items-end">
-          <label className="flex flex-col gap-1 text-xs text-gray-500 col-span-2">Полуфабрикат
+          <label className="flex flex-col gap-1 text-xs text-slate-500 col-span-2">Полуфабрикат
             <select disabled={readOnly} value={head.outputItemId} onChange={(e) => setHead({ ...head, outputItemId: e.target.value })} className={inputCls}>
               <option value="">— выберите —</option>
               {semis.map((s) => <option key={s.id} value={s.id} disabled={!s.recipe}>{s.name}{!s.recipe ? ' (нет рецептуры)' : ''}</option>)}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-xs text-gray-500">Масса замеса, кг
+          <label className="flex flex-col gap-1 text-xs text-slate-500">Масса замеса, кг
             <input disabled={readOnly} value={head.plannedQty} onChange={(e) => setHead({ ...head, plannedQty: e.target.value })} className={inputCls + ' text-right'} />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-gray-500">Бочка
+          <label className="flex flex-col gap-1 text-xs text-slate-500">Бочка
             <input disabled={readOnly} value={head.barrel} onChange={(e) => setHead({ ...head, barrel: e.target.value })} className={inputCls} placeholder="Б-07" />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-gray-500">Дата
+          <label className="flex flex-col gap-1 text-xs text-slate-500">Дата
             <input type="date" disabled={readOnly} value={head.date} onChange={(e) => setHead({ ...head, date: e.target.value })} className={inputCls} />
           </label>
           {!readOnly && <button onClick={calc} className={btnSecondary}>{lines.length ? 'Пересчитать' : 'Рассчитать'}</button>}
@@ -229,7 +229,7 @@ export default function StockMixEdit() {
           <div className="bg-white rounded-xl border overflow-x-auto">
             <table className="w-full text-sm tabular-nums">
               <thead>
-                <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b">
+                <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b">
                   <th className="px-3 py-2 font-medium min-w-[200px]">Компонент</th>
                   <th className="px-3 py-2 font-medium text-right">Норма</th>
                   <th className="px-3 py-2 font-medium text-right">Факт, кг</th>
@@ -250,9 +250,9 @@ export default function StockMixEdit() {
                   return (
                     <Fragment key={l.key}>
                       {showStage && (
-                        <tr className="bg-gray-50 border-b">
+                        <tr className="bg-slate-50 border-b">
                           <td colSpan={readOnly ? 5 : 6} className="px-3 py-1.5 font-semibold text-xs">
-                            Этап {l.stage}{stages[l.stage] && <span className="font-normal text-gray-500"> · {stages[l.stage]}</span>}
+                            Этап {l.stage}{stages[l.stage] && <span className="font-normal text-slate-500"> · {stages[l.stage]}</span>}
                           </td>
                         </tr>
                       )}
@@ -273,12 +273,12 @@ export default function StockMixEdit() {
                             </>
                           )}
                         </td>
-                        <td className="px-3 py-1.5 text-right whitespace-nowrap text-gray-600">{l.planQty != null ? kgStr(l.planQty) : '—'}</td>
+                        <td className="px-3 py-1.5 text-right whitespace-nowrap text-slate-600">{l.planQty != null ? kgStr(l.planQty) : '—'}</td>
                         <td className="px-3 py-1.5 text-right">
                           <input disabled={readOnly} value={l.qty} onChange={(e) => patch(l.key, { qty: e.target.value })} className={inputCls + ' w-24 text-right'} />
                         </td>
                         <td className="px-3 py-1.5">
-                          {it?.noStock ? <span className="text-gray-400">без учёта</span> : readOnly ? (
+                          {it?.noStock ? <span className="text-slate-400">без учёта</span> : readOnly ? (
                             <span className="font-mono text-xs">{l.lotNumber ?? '—'}</span>
                           ) : (
                             <select value={l.lotId} onChange={(e) => patch(l.key, { lotId: e.target.value })}
@@ -297,7 +297,7 @@ export default function StockMixEdit() {
                         </td>
                         {!readOnly && (
                           <td className="px-2 py-1.5">
-                            <button onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} className="text-gray-400 hover:text-red-600" title="Удалить строку">✕</button>
+                            <button onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} className="text-slate-400 hover:text-red-600" title="Удалить строку">✕</button>
                           </td>
                         )}
                       </tr>
@@ -308,8 +308,8 @@ export default function StockMixEdit() {
             </table>
             {!readOnly && (
               <div className="p-3 border-t flex flex-wrap gap-4 text-sm">
-                <button onClick={addCorrection} className="text-blue-600 hover:underline">+ Корректировка</button>
-                <span className="text-gray-500">Чтобы взять компонент из двух лотов, добавьте корректировку с тем же компонентом.</span>
+                <button onClick={addCorrection} className="text-brand-600 hover:underline">+ Корректировка</button>
+                <span className="text-slate-500">Чтобы взять компонент из двух лотов, добавьте корректировку с тем же компонентом.</span>
               </div>
             )}
           </div>
@@ -317,18 +317,18 @@ export default function StockMixEdit() {
 
         {lines.length > 0 && (
           <div className="bg-white rounded-xl border p-4 grid grid-cols-2 lg:grid-cols-6 gap-3 items-end">
-            <div className="text-sm"><div className="text-xs text-gray-500">По норме</div>{fmtQty(planTotal, 2)} кг</div>
-            <div className="text-sm"><div className="text-xs text-gray-500">Факт (с корр.)</div>{fmtQty(factTotal, 2)} кг</div>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">Выход в бочку, кг
+            <div className="text-sm"><div className="text-xs text-slate-500">По норме</div>{fmtQty(planTotal, 2)} кг</div>
+            <div className="text-sm"><div className="text-xs text-slate-500">Факт (с корр.)</div>{fmtQty(factTotal, 2)} кг</div>
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Выход в бочку, кг
               <input disabled={readOnly} value={head.yieldQty} onChange={(e) => setHead({ ...head, yieldQty: e.target.value })} className={inputCls + ' text-right'} />
             </label>
-            <div className="text-sm"><div className="text-xs text-gray-500">Потери</div>
+            <div className="text-sm"><div className="text-xs text-slate-500">Потери</div>
               {yieldQty != null ? <span className={clsx(factTotal - yieldQty > factTotal * 0.02 && 'text-amber-700 font-semibold')}>{fmtQty(factTotal - yieldQty, 2)} кг</span> : '—'}
             </div>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">Годен до
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Годен до
               <input type="date" disabled={readOnly} value={head.expiresAt} onChange={(e) => setHead({ ...head, expiresAt: e.target.value })} className={inputCls} />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">Комментарий
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Комментарий
               <input disabled={readOnly} value={head.comment} onChange={(e) => setHead({ ...head, comment: e.target.value })} className={inputCls} />
             </label>
           </div>
@@ -337,7 +337,7 @@ export default function StockMixEdit() {
         {status === 'POSTED' && output?.number && (
           <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-sm">
             Бочка <b>{head.barrel || '—'}</b> оприходована как лот{' '}
-            <Link to="/stock?type=SEMI" className="font-mono text-blue-700 hover:underline">{output.number}</Link>
+            <Link to="/stock/warehouse?type=SEMI" className="font-mono text-brand-700 hover:underline">{output.number}</Link>
             {' '}· {fmtQty(yieldQty)} кг · себестоимость {output.unitCost != null ? `${fmtMoney(output.unitCost)} ₽/кг` : 'не определена (у части сырья нет цены)'}
           </div>
         )}
@@ -355,7 +355,7 @@ export default function StockMixEdit() {
           {status === 'POSTED' && <button disabled={busy} onClick={cancel} className={btnSecondary}>Отменить проведение</button>}
         </div>
         {!readOnly && (
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-slate-500">
             Порядок работы: рассчитать → сохранить черновик → распечатать карту для оператора → внести факт и лоты с карты → указать выход → провести.
             Лоты подставлены по FEFO (ближайший срок годности первым).
           </p>
@@ -374,7 +374,7 @@ export default function StockMixEdit() {
         </div>
         <table className="w-full border-collapse">
           <thead>
-            <tr>{['№', 'Компонент', 'Норма', 'Факт', 'Лот', '✓'].map((h) => <th key={h} className="border border-gray-400 px-1.5 py-1 text-left">{h}</th>)}</tr>
+            <tr>{['№', 'Компонент', 'Норма', 'Факт', 'Лот', '✓'].map((h) => <th key={h} className="border border-slate-400 px-1.5 py-1 text-left">{h}</th>)}</tr>
           </thead>
           <tbody>
             {(() => {
@@ -383,14 +383,14 @@ export default function StockMixEdit() {
                 const head2 = l.stage !== st; st = l.stage; n += 1;
                 return (
                   <Fragment key={l.key}>
-                    {head2 && <tr><td colSpan={6} className="border border-gray-400 px-1.5 py-1 font-bold bg-gray-100">Этап {l.stage}{stages[l.stage] ? ` · ${stages[l.stage]}` : ''}</td></tr>}
+                    {head2 && <tr><td colSpan={6} className="border border-slate-400 px-1.5 py-1 font-bold bg-slate-100">Этап {l.stage}{stages[l.stage] ? ` · ${stages[l.stage]}` : ''}</td></tr>}
                     <tr>
-                      <td className="border border-gray-400 px-1.5 py-1 w-6">{n}</td>
-                      <td className="border border-gray-400 px-1.5 py-1">{rawById.get(l.itemId)?.name}</td>
-                      <td className="border border-gray-400 px-1.5 py-1 whitespace-nowrap">{kgStr(l.planQty!)}</td>
-                      <td className="border border-gray-400 px-1.5 py-1 w-20" />
-                      <td className="border border-gray-400 px-1.5 py-1 w-28 text-gray-500">{rawById.get(l.itemId)?.noStock ? '—' : l.lotNumber ?? lotsFor(l.itemId).find((b) => b.lotId === l.lotId)?.lot.number ?? ''}</td>
-                      <td className="border border-gray-400 px-1.5 py-1 w-6">☐</td>
+                      <td className="border border-slate-400 px-1.5 py-1 w-6">{n}</td>
+                      <td className="border border-slate-400 px-1.5 py-1">{rawById.get(l.itemId)?.name}</td>
+                      <td className="border border-slate-400 px-1.5 py-1 whitespace-nowrap">{kgStr(l.planQty!)}</td>
+                      <td className="border border-slate-400 px-1.5 py-1 w-20" />
+                      <td className="border border-slate-400 px-1.5 py-1 w-28 text-slate-500">{rawById.get(l.itemId)?.noStock ? '—' : l.lotNumber ?? lotsFor(l.itemId).find((b) => b.lotId === l.lotId)?.lot.number ?? ''}</td>
+                      <td className="border border-slate-400 px-1.5 py-1 w-6">☐</td>
                     </tr>
                   </Fragment>
                 );
@@ -399,9 +399,9 @@ export default function StockMixEdit() {
           </tbody>
         </table>
         <div className="mt-3">Корректировки (компонент, кг, лот, причина):</div>
-        {[1, 2, 3].map((i) => <div key={i} className="border-b border-gray-400 h-6" />)}
+        {[1, 2, 3].map((i) => <div key={i} className="border-b border-slate-400 h-6" />)}
         <div className="mt-3">Итого по норме {fmtQty(planTotal, 2)} кг · Выход в бочку ________ кг · Подпись мастера ______________</div>
-        <div className="mt-1 text-gray-600">Навески меньше 1 кг указаны в граммах. Лот — подсказка по FEFO; если берёте другой мешок, впишите его номер в «Факт/Лот».</div>
+        <div className="mt-1 text-slate-600">Навески меньше 1 кг указаны в граммах. Лот — подсказка по FEFO; если берёте другой мешок, впишите его номер в «Факт/Лот».</div>
       </div>
     </>
   );

@@ -147,26 +147,26 @@ export default function StockDocEdit() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <Link to="/stock/docs" className="text-gray-500 hover:text-gray-900 text-sm">← Документы</Link>
-        <h2 className="text-xl font-semibold">{docTypeLabel(type)} {number && <span className="font-mono text-base text-gray-500">{number}</span>}</h2>
+        <Link to="/stock/warehouse?tab=docs" className="text-slate-500 hover:text-slate-900 text-sm">← Документы склада</Link>
+        <h2 className="text-xl font-semibold">{docTypeLabel(type)} {number && <span className="font-mono text-base text-slate-500">{number}</span>}</h2>
         {!isNew && <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', DOC_STATUS[status].cls)}>{DOC_STATUS[status].label}</span>}
       </div>
 
       <div className="bg-white rounded-xl border p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <label className="flex flex-col gap-1 text-xs text-gray-500">Дата
+        <label className="flex flex-col gap-1 text-xs text-slate-500">Дата
           <input type="date" disabled={readOnly} value={head.date} onChange={(e) => setHead({ ...head, date: e.target.value })} className={inputCls} />
         </label>
         {type === 'RECEIPT' && (
           <>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">Поставщик
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Поставщик
               <input disabled={readOnly} value={head.supplier} onChange={(e) => setHead({ ...head, supplier: e.target.value })} className={inputCls} placeholder="ООО «Химпоставка»" />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">Документ
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Документ
               <input disabled={readOnly} value={head.docRef} onChange={(e) => setHead({ ...head, docRef: e.target.value })} className={inputCls} placeholder="УПД № 4417 от 06.10" />
             </label>
           </>
         )}
-        <label className={clsx('flex flex-col gap-1 text-xs text-gray-500', type !== 'RECEIPT' && 'lg:col-span-3')}>Комментарий
+        <label className={clsx('flex flex-col gap-1 text-xs text-slate-500', type !== 'RECEIPT' && 'lg:col-span-3')}>Комментарий
           <input disabled={readOnly} value={head.comment} onChange={(e) => setHead({ ...head, comment: e.target.value })} className={inputCls} />
         </label>
       </div>
@@ -174,7 +174,7 @@ export default function StockDocEdit() {
       <div className="bg-white rounded-xl border overflow-x-auto">
         <table className="w-full text-sm tabular-nums">
           <thead>
-            <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b">
+            <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b">
               <th className="px-3 py-2 font-medium min-w-[220px]">Позиция</th>
               {isAdj ? (
                 <>
@@ -246,7 +246,7 @@ export default function StockDocEdit() {
                     <>
                       <td className="px-3 py-1.5 text-right whitespace-nowrap">
                         <input disabled={readOnly} value={l.qty} onChange={(e) => patch(l.key, { qty: e.target.value })} className={inputCls + ' w-24 text-right'} />
-                        <span className="text-gray-500 ml-1 text-xs">{item?.unit}</span>
+                        <span className="text-slate-500 ml-1 text-xs">{item?.unit}</span>
                       </td>
                       <td className="px-3 py-1.5 text-right">
                         <input disabled={readOnly} value={l.unitCost} onChange={(e) => patch(l.key, { unitCost: e.target.value })} className={inputCls + ' w-24 text-right'}
@@ -268,7 +268,7 @@ export default function StockDocEdit() {
                             <option value="UNLABELED">без ЧЗ</option>
                             <option value="LABELED">с ЧЗ</option>
                           </select>
-                        ) : <span className="text-gray-400">—</span>}
+                        ) : <span className="text-slate-400">—</span>}
                       </td>
                       <td className="px-3 py-1.5 text-right pt-3 whitespace-nowrap">
                         {parseNum(l.unitCost) != null && parseNum(l.qty) != null ? fmtMoney(parseNum(l.unitCost)! * parseNum(l.qty)!) : '—'}
@@ -279,7 +279,7 @@ export default function StockDocEdit() {
                   {!readOnly && (
                     <td className="px-2 py-1.5 pt-2.5">
                       <button onClick={() => setLines((ls) => (ls.length > 1 ? ls.filter((x) => x.key !== l.key) : [emptyLine()]))}
-                        className="text-gray-400 hover:text-red-600" title="Удалить строку">✕</button>
+                        className="text-slate-400 hover:text-red-600" title="Удалить строку">✕</button>
                     </td>
                   )}
                 </tr>
@@ -298,7 +298,7 @@ export default function StockDocEdit() {
         </table>
         {!readOnly && (
           <div className="p-3 border-t">
-            <button onClick={() => setLines((ls) => [...ls, emptyLine()])} className="text-blue-600 hover:underline text-sm">+ Строка</button>
+            <button onClick={() => setLines((ls) => [...ls, emptyLine()])} className="text-brand-600 hover:underline text-sm">+ Строка</button>
           </div>
         )}
       </div>
@@ -316,7 +316,7 @@ export default function StockDocEdit() {
         {status === 'POSTED' && <button disabled={busy} onClick={cancel} className={btnSecondary}>Отменить проведение</button>}
       </div>
       {!readOnly && !isAdj && (
-        <p className="text-xs text-gray-500">При проведении на каждую строку создаётся лот со своим номером. Цену в начальных остатках можно оставить пустой.</p>
+        <p className="text-xs text-slate-500">При проведении на каждую строку создаётся лот со своим номером. Цену в начальных остатках можно оставить пустой.</p>
       )}
     </div>
   );

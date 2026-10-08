@@ -14,6 +14,7 @@ import batchesRouter from './routes/batches';
 import stockRouter from './routes/stock';
 import quantsRouter from './routes/quants';
 import fboRouter from './routes/fbo';
+import dashboardRouter from './routes/dashboard';
 import { syncAllShipments } from './services/fbo';
 import { ozonConfigured } from './services/ozon';
 import { errorHandler } from './middleware/errorHandler';
@@ -47,6 +48,7 @@ app.use('/api/projects', czRouter);
 app.use('/api/stock', stockRouter);
 app.use('/api/stock', quantsRouter);
 app.use('/api/stock', fboRouter);
+app.use('/api/stock', dashboardRouter);
 app.use('/api', batchesRouter);
 
 app.use(errorHandler);

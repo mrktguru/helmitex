@@ -9,7 +9,8 @@ interface Line { key: string; itemId: string; percent: string; stage: string }
 let seq = 0;
 const newLine = (stage = '1'): Line => ({ key: String(++seq), itemId: '', percent: '', stage });
 
-export default function StockRecipes() {
+// itemId — встроенный режим в карточке позиции: одна рецептура, без списка слева
+export default function StockRecipes({ itemId }: { itemId?: string } = {}) {
   const [semis, setSemis] = useState<any[]>([]);
   const [raws, setRaws] = useState<any[]>([]);
   const [selId, setSelId] = useState<string | null>(null);
@@ -24,7 +25,7 @@ export default function StockRecipes() {
     const [s, r] = await Promise.all([api.getRecipes(), api.getItems('RAW')]);
     setSemis(s);
     setRaws(r);
-    const id = keep ?? s[0]?.id ?? null;
+    const id = keep ?? itemId ?? s[0]?.id ?? null;
     if (id) select(s.find((x: any) => x.id === id) ?? s[0]);
   }
   useEffect(() => { load(); }, []);
@@ -63,18 +64,18 @@ export default function StockRecipes() {
   }
 
   if (semis.length === 0) {
-    return <p className="text-gray-500 text-center mt-10">Нет полуфабрикатов. Добавьте их в <Link to="/stock/items" className="text-blue-600 hover:underline">номенклатуре</Link> с типом «Полуфабрикаты».</p>;
+    return <p className="text-slate-500 text-center mt-10">Нет полуфабрикатов. Добавьте их в <Link to="/stock/catalog" className="text-brand-600 hover:underline">справочниках</Link> с типом «Полуфабрикаты».</p>;
   }
 
   const sel = semis.find((s) => s.id === selId);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] gap-4">
-      <div className="bg-white rounded-xl border p-2 h-fit">
+    <div className={clsx('grid grid-cols-1 gap-4', !itemId && 'lg:grid-cols-[260px_minmax(0,1fr)]')}>
+      <div className={clsx('bg-white rounded-xl border p-2 h-fit', itemId && 'hidden')}>
         {semis.map((s) => (
           <button key={s.id} onClick={() => select(s)}
             className={clsx('w-full text-left px-3 py-2 rounded-lg text-sm flex justify-between gap-2',
-              s.id === selId ? 'bg-blue-50 text-blue-800 font-medium' : 'hover:bg-gray-50')}>
+              s.id === selId ? 'bg-brand-50 text-brand-800 font-medium' : 'hover:bg-slate-50')}>
             <span>{s.name}</span>
             {!s.recipe && <span className="text-xs text-amber-700">нет</span>}
           </button>
@@ -84,14 +85,14 @@ export default function StockRecipes() {
       {sel && (
         <div className="space-y-4 min-w-0">
           <div className="flex flex-wrap items-baseline gap-3">
-            <h2 className="text-xl font-semibold">{sel.name}</h2>
-            {sel.recipe && <span className="text-xs text-gray-500">изменена {new Date(sel.recipe.updatedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}</span>}
+            {!itemId && <h2 className="text-xl font-semibold">{sel.name}</h2>}
+            {sel.recipe && <span className="text-xs text-slate-500">изменена {new Date(sel.recipe.updatedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}</span>}
           </div>
 
           <div className="bg-white rounded-xl border overflow-x-auto">
             <table className="w-full text-sm tabular-nums">
               <thead>
-                <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b">
+                <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b">
                   <th className="px-3 py-2 font-medium w-20">Этап</th>
                   <th className="px-3 py-2 font-medium min-w-[220px]">Компонент</th>
                   <th className="px-3 py-2 font-medium text-right w-28">%</th>
@@ -112,9 +113,9 @@ export default function StockRecipes() {
                         </select>
                       </td>
                       <td className="px-3 py-1.5 text-right"><input value={l.percent} onChange={(e) => patch(l.key, { percent: e.target.value })} className={inputCls + ' w-24 text-right'} /></td>
-                      <td className="px-3 py-1.5 text-right text-gray-600">{pct != null ? (pct < 1 ? `${fmtQty(pct * 1000, 0)} г` : `${fmtQty(pct, 2)} кг`) : '—'}</td>
+                      <td className="px-3 py-1.5 text-right text-slate-600">{pct != null ? (pct < 1 ? `${fmtQty(pct * 1000, 0)} г` : `${fmtQty(pct, 2)} кг`) : '—'}</td>
                       <td className="px-2 py-1.5">
-                        <button onClick={() => setLines((ls) => (ls.length > 1 ? ls.filter((x) => x.key !== l.key) : [newLine()]))} className="text-gray-400 hover:text-red-600" title="Удалить">✕</button>
+                        <button onClick={() => setLines((ls) => (ls.length > 1 ? ls.filter((x) => x.key !== l.key) : [newLine()]))} className="text-slate-400 hover:text-red-600" title="Удалить">✕</button>
                       </td>
                     </tr>
                   );
@@ -123,7 +124,7 @@ export default function StockRecipes() {
               <tfoot>
                 <tr className="border-t">
                   <td className="px-3 py-2">
-                    <button onClick={() => setLines((ls) => [...ls, newLine(ls[ls.length - 1]?.stage || '1')])} className="text-blue-600 hover:underline text-sm whitespace-nowrap">+ Компонент</button>
+                    <button onClick={() => setLines((ls) => [...ls, newLine(ls[ls.length - 1]?.stage || '1')])} className="text-brand-600 hover:underline text-sm whitespace-nowrap">+ Компонент</button>
                   </td>
                   <td className="px-3 py-2 text-right font-semibold">Сумма</td>
                   <td className={clsx('px-3 py-2 text-right font-semibold', Math.abs(sum - 100) > 0.005 ? 'text-red-600' : 'text-green-700')}>{fmtQty(sum, 3)} %</td>
@@ -135,10 +136,10 @@ export default function StockRecipes() {
 
           {stageNums.length > 0 && (
             <div className="bg-white rounded-xl border p-4 space-y-2">
-              <h3 className="font-semibold text-sm">Описание этапов <span className="font-normal text-gray-500">— печатается в карте замеса</span></h3>
+              <h3 className="font-semibold text-sm">Описание этапов <span className="font-normal text-slate-500">— печатается в карте замеса</span></h3>
               {stageNums.map((n) => (
                 <label key={n} className="flex items-center gap-3 text-sm">
-                  <span className="w-16 text-gray-500 shrink-0">Этап {n}</span>
+                  <span className="w-16 text-slate-500 shrink-0">Этап {n}</span>
                   <input value={stages[n] ?? ''} onChange={(e) => setStages({ ...stages, [n]: e.target.value })} className={inputCls + ' flex-1'}
                     placeholder="Напр. мин. обороты, 3 мин · стоп: pH 8,5–9,2" />
                 </label>
@@ -147,10 +148,10 @@ export default function StockRecipes() {
           )}
 
           <div className="bg-white rounded-xl border p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1 text-xs text-gray-500">Нормы ОТК
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Нормы ОТК
               <textarea value={qc} onChange={(e) => setQc(e.target.value)} rows={2} className={inputCls} placeholder="pH 8,5–9,2 · вязкость 95–110 KU · плотность 1,42–1,46" />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">Комментарий
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Комментарий
               <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2} className={inputCls} />
             </label>
           </div>

@@ -53,7 +53,7 @@ export default function StockFbo() {
   }, [s?.status, s?.ozonDraftId]);
 
   if (error && !s) return <p className="text-red-600">{error}</p>;
-  if (!s) return <p className="text-gray-500">Загрузка…</p>;
+  if (!s) return <p className="text-slate-500">Загрузка…</p>;
 
   const step = STEP_OF[s.status];
   const cancelled = s.status === 'CANCELLED';
@@ -70,10 +70,10 @@ export default function StockFbo() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <Link to="/stock/fbo" className="text-gray-500 hover:text-gray-900 text-sm">← Поставки</Link>
-        <h2 className="text-xl font-semibold">Поставка FBO <span className="font-mono text-base text-gray-500">{s.number}</span></h2>
+        <Link to="/stock/fbo" className="text-slate-500 hover:text-slate-900 text-sm">← Поставки</Link>
+        <h2 className="text-xl font-semibold">Поставка FBO <span className="font-mono text-base text-slate-500">{s.number}</span></h2>
         <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', FBO_STATUS[s.status].cls)}>{FBO_STATUS[s.status].label}</span>
-        {s.ozonOrderNumber && <span className="text-sm text-gray-600">Заявка Ozon <b className="font-mono">{s.ozonOrderNumber}</b>{s.ozonStateLabel && ` · ${s.ozonStateLabel}`}</span>}
+        {s.ozonOrderNumber && <span className="text-sm text-slate-600">Заявка Ozon <b className="font-mono">{s.ozonOrderNumber}</b>{s.ozonStateLabel && ` · ${s.ozonStateLabel}`}</span>}
         <div className="flex-1" />
         {s.ozonOrderId && <button disabled={!!busy} onClick={() => run('sync', () => api.fboAction(id!, 'sync'))} className={btnSecondary}>{busy === 'sync' ? 'Обновляю…' : 'Обновить из Ozon'}</button>}
       </div>
@@ -81,7 +81,7 @@ export default function StockFbo() {
       {!cancelled && (
         <div className="flex flex-wrap gap-1.5">
           {STEPS.map((t, i) => (
-            <span key={t} className={clsx('text-xs px-2.5 py-1 rounded', i + 1 < step || s.status === 'COMPLETED' ? 'bg-green-100 text-green-800' : i + 1 === step ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500')}>
+            <span key={t} className={clsx('text-xs px-2.5 py-1 rounded', i + 1 < step || s.status === 'COMPLETED' ? 'bg-green-100 text-green-800' : i + 1 === step ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-500')}>
               {i + 1} · {t}
             </span>
           ))}
@@ -100,7 +100,7 @@ export default function StockFbo() {
             {[...bySku.values()].map((v) => (
               <tr key={v.offer} className="border-b last:border-0">
                 <td className="py-1">{v.name}</td>
-                <td className="py-1 font-mono text-xs text-gray-500">{v.offer}</td>
+                <td className="py-1 font-mono text-xs text-slate-500">{v.offer}</td>
                 <td className="py-1 text-right">{v.boxes} кор.</td>
                 <td className="py-1 text-right">{v.units} шт</td>
               </tr>
@@ -108,7 +108,7 @@ export default function StockFbo() {
           </tbody>
         </table>
         {s.clusterName && (
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-slate-600">
             {s.supplyType === 'CROSSDOCK' ? 'Кросс-докинг' : 'Прямая'} · {s.clusterName}
             {s.dropOffName && ` · отгрузка в ${s.dropOffName}`}{s.storageName && ` · склад ${s.storageName}`}
             {s.timeslotFrom && <> · слот <b>{dayLabel(s.timeslotFrom)} {hm(s.timeslotFrom)}–{hm(s.timeslotTo)}</b></>}
@@ -128,7 +128,7 @@ export default function StockFbo() {
               onSave={(p: Place) => run('draft', () => api.fboDraft(id!, p))}
             />
           )}
-          <p className="text-xs text-gray-500">Ozon проверит товары и рассчитает склады. Черновик живёт 30 минут — после него сразу выбирайте слот.</p>
+          <p className="text-xs text-slate-500">Ozon проверит товары и рассчитает склады. Черновик живёт 30 минут — после него сразу выбирайте слот.</p>
         </div>
       )}
 
@@ -137,7 +137,7 @@ export default function StockFbo() {
         <div className="bg-white rounded-xl border p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold text-sm">Слот поставки</h3>
-            <span className="text-xs text-gray-500">черновик действует ещё ~{Math.max(0, Math.round(29 - (draftAgeMin ?? 0)))} мин</span>
+            <span className="text-xs text-slate-500">черновик действует ещё ~{Math.max(0, Math.round(29 - (draftAgeMin ?? 0)))} мин</span>
           </div>
           {s.supplyType === 'DIRECT' && (
             <div className="flex flex-wrap gap-2">
@@ -146,22 +146,22 @@ export default function StockFbo() {
                 const ok = w.availability_status?.state === 'FULL_AVAILABLE';
                 return (
                   <button key={wid} disabled={!ok} onClick={() => { setStorage({ id: wid, name: w.storage_warehouse.name }); loadSlots(wid); }}
-                    className={clsx('border rounded-lg px-3 py-2 text-left text-sm', storage?.id === wid ? 'border-blue-500 bg-blue-50' : 'hover:bg-gray-50', !ok && 'opacity-40')}>
-                    {w.storage_warehouse.name}<div className="text-xs text-gray-500">{ok ? 'доступен' : w.availability_status?.invalid_reason}</div>
+                    className={clsx('border rounded-lg px-3 py-2 text-left text-sm', storage?.id === wid ? 'border-brand-500 bg-brand-50' : 'hover:bg-slate-50', !ok && 'opacity-40')}>
+                    {w.storage_warehouse.name}<div className="text-xs text-slate-500">{ok ? 'доступен' : w.availability_status?.invalid_reason}</div>
                   </button>
                 );
               })}
             </div>
           )}
-          {busy === 'slots' && <p className="text-sm text-gray-500">Загружаю слоты…</p>}
+          {busy === 'slots' && <p className="text-sm text-slate-500">Загружаю слоты…</p>}
           {slots && (slots.days.length === 0 ? <p className="text-sm text-amber-700">Свободных слотов на 4 недели нет.</p> : (
             <div className="space-y-2 max-h-96 overflow-auto">
               {slots.days.map((d) => (
                 <div key={d.date} className="flex flex-wrap items-center gap-1.5">
-                  <span className="w-24 text-sm text-gray-600 shrink-0">{dayLabel(d.date)}</span>
+                  <span className="w-24 text-sm text-slate-600 shrink-0">{dayLabel(d.date)}</span>
                   {d.slots.map((x) => (
                     <button key={x.from} onClick={() => setSlot(x)}
-                      className={clsx('text-xs border rounded px-2 py-1 tabular-nums', slot?.from === x.from ? 'bg-blue-600 border-blue-600 text-white' : 'hover:bg-blue-50')}>
+                      className={clsx('text-xs border rounded px-2 py-1 tabular-nums', slot?.from === x.from ? 'bg-brand-600 border-brand-600 text-white' : 'hover:bg-brand-50')}>
                       {hm(x.from)}–{hm(x.to)}
                     </button>
                   ))}
@@ -169,7 +169,7 @@ export default function StockFbo() {
               ))}
             </div>
           ))}
-          {slots?.timezone && <p className="text-xs text-gray-500">Время местное для пункта отгрузки ({slots.timezone}).</p>}
+          {slots?.timezone && <p className="text-xs text-slate-500">Время местное для пункта отгрузки ({slots.timezone}).</p>}
           <div className="flex gap-2">
             <button disabled={!slot || !!busy || (s.supplyType === 'DIRECT' && !storage)}
               onClick={() => run('book', () => api.fboBook(id!, { from: slot!.from, to: slot!.to, storageWarehouseId: storage?.id ?? null, storageName: storage?.name ?? null }))}
@@ -201,7 +201,7 @@ export default function StockFbo() {
           </div>
           <table className="w-full text-sm tabular-nums">
             <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-gray-500 border-b">
+              <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b">
                 <th className="py-1.5 font-medium w-10">№</th>
                 <th className="py-1.5 font-medium">Квант (коробка)</th>
                 <th className="py-1.5 font-medium">SKU</th>
@@ -214,8 +214,8 @@ export default function StockFbo() {
               {s.cargoes.map((c: any, i: number) => (
                 <Fragment key={c.id}>
                   <tr className="border-b last:border-0">
-                    <td className="py-1 text-gray-500">{i + 1}</td>
-                    <td className="py-1"><Link to={`/stock/quants/${c.quantId}`} className="font-mono text-xs text-blue-700 hover:underline">{c.quant.number}</Link></td>
+                    <td className="py-1 text-slate-500">{i + 1}</td>
+                    <td className="py-1"><Link to={`/stock/quants/${c.quantId}`} className="font-mono text-xs text-brand-700 hover:underline">{c.quant.number}</Link></td>
                     <td className="py-1">{c.quant.quantType.productItem.name}</td>
                     <td className="py-1 text-right">{c.quant.units}</td>
                     <td className="py-1">{fmtDate(c.quant.lot.expiresAt)}</td>
@@ -225,14 +225,14 @@ export default function StockFbo() {
               ))}
             </tbody>
           </table>
-          {s.labelS3Key && <p className="text-xs text-gray-500">Стикеры Ozon в PDF идут в том же порядке, что строки таблицы: первый стикер — на коробку №1 и т. д.</p>}
+          {s.labelS3Key && <p className="text-xs text-slate-500">Стикеры Ozon в PDF идут в том же порядке, что строки таблицы: первый стикер — на коробку №1 и т. д.</p>}
 
           {['BOOKED', 'CARGOES_SET', 'LABELS_READY'].includes(s.status) && (
             <div className="border-t pt-3 flex flex-wrap items-center gap-3">
               <button disabled={!!busy || s.status !== 'LABELS_READY'} onClick={() => { if (confirm(`Отгрузить ${s.cargoes.length} коробок? Кванты будут списаны со склада.`)) run('ship', () => api.fboAction(id!, 'ship')); }} className={btnPrimary}>
                 {busy === 'ship' ? 'Списываю…' : 'Отгружено — списать со склада'}
               </button>
-              {s.status !== 'LABELS_READY' && <span className="text-xs text-gray-500">Сначала передайте грузоместа и получите стикеры.</span>}
+              {s.status !== 'LABELS_READY' && <span className="text-xs text-slate-500">Сначала передайте грузоместа и получите стикеры.</span>}
             </div>
           )}
           {(s.status === 'SHIPPED' || s.status === 'COMPLETED') && (
@@ -251,19 +251,19 @@ export default function StockFbo() {
           <span className="text-sm flex items-center gap-2">
             {s.ozonOrderId ? 'Заявка будет отменена в Ozon, кванты вернутся на склад.' : 'Кванты вернутся на склад.'}
             <button disabled={!!busy} onClick={() => { setConfirmCancel(false); run('cancel', () => api.fboAction(id!, 'cancel')); }} className="text-red-600 font-medium hover:underline">Да, отменить</button>
-            <button onClick={() => setConfirmCancel(false)} className="text-gray-500 hover:underline">Нет</button>
+            <button onClick={() => setConfirmCancel(false)} className="text-slate-500 hover:underline">Нет</button>
           </span>
         )}
-        <button onClick={async () => setLog(log ? null : await api.fboLog(id!))} className="text-sm text-gray-500 hover:underline">{log ? 'Скрыть журнал Ozon' : 'Журнал запросов Ozon'}</button>
+        <button onClick={async () => setLog(log ? null : await api.fboLog(id!))} className="text-sm text-slate-500 hover:underline">{log ? 'Скрыть журнал Ozon' : 'Журнал запросов Ozon'}</button>
       </div>
       {log && (
         <div className="bg-white rounded-xl border p-3 text-xs font-mono space-y-1 max-h-96 overflow-auto">
           {log.length === 0 ? 'Запросов не было' : log.map((l) => (
             <details key={l.id}>
-              <summary className={clsx('cursor-pointer', l.status >= 400 || l.status === 0 ? 'text-red-600' : 'text-gray-700')}>
+              <summary className={clsx('cursor-pointer', l.status >= 400 || l.status === 0 ? 'text-red-600' : 'text-slate-700')}>
                 {new Date(l.createdAt).toLocaleTimeString('ru-RU')} · {l.method} · {l.status} · {l.ms} мс
               </summary>
-              <pre className="whitespace-pre-wrap break-all text-gray-600 bg-gray-50 p-2 rounded">{JSON.stringify({ request: l.request, response: l.response }, null, 2)}</pre>
+              <pre className="whitespace-pre-wrap break-all text-slate-600 bg-slate-50 p-2 rounded">{JSON.stringify({ request: l.request, response: l.response }, null, 2)}</pre>
             </details>
           ))}
         </div>

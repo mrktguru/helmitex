@@ -46,13 +46,13 @@ export default function OzonPlacePicker({ initial, onSave, saveLabel, busy }: {
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <label className="flex flex-col gap-1 text-xs text-gray-500">Схема
+        <label className="flex flex-col gap-1 text-xs text-slate-500">Схема
           <select value={p.supplyType} onChange={(e) => setP({ ...p, supplyType: e.target.value as Place['supplyType'] })} className={inputCls}>
             <option value="CROSSDOCK">Кросс-докинг (через пункт отгрузки)</option>
             <option value="DIRECT">Прямая (на склад Ozon)</option>
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-xs text-gray-500">Кластер размещения
+        <label className="flex flex-col gap-1 text-xs text-slate-500">Кластер размещения
           <select value={p.clusterId ?? ''} onChange={(e) => setP({ ...p, clusterId: e.target.value || null, clusterName: clusters.find((c) => c.id === e.target.value)?.name ?? null })} className={inputCls}>
             <option value="">— выберите —</option>
             {clusters.filter((c) => c.country === 'Россия').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -60,11 +60,11 @@ export default function OzonPlacePicker({ initial, onSave, saveLabel, busy }: {
           </select>
         </label>
         {p.supplyType === 'CROSSDOCK' && (
-          <div className="flex flex-col gap-1 text-xs text-gray-500">Пункт отгрузки
+          <div className="flex flex-col gap-1 text-xs text-slate-500">Пункт отгрузки
             {p.dropOffWarehouseId ? (
-              <div className="flex items-center gap-2 text-sm text-gray-900 py-1.5">
+              <div className="flex items-center gap-2 text-sm text-slate-900 py-1.5">
                 <span>{p.dropOffName}</span>
-                <button onClick={() => setP({ ...p, dropOffWarehouseId: null, dropOffName: null, dropOffType: null })} className="text-xs text-blue-600 hover:underline">сменить</button>
+                <button onClick={() => setP({ ...p, dropOffWarehouseId: null, dropOffName: null, dropOffType: null })} className="text-xs text-brand-600 hover:underline">сменить</button>
               </div>
             ) : (
               <div className="relative">
@@ -73,8 +73,8 @@ export default function OzonPlacePicker({ initial, onSave, saveLabel, busy }: {
                   <div className="absolute z-10 bg-white border rounded-lg shadow mt-1 w-full max-h-60 overflow-auto">
                     {found.map((w) => (
                       <button key={w.id} onClick={() => { setP({ ...p, dropOffWarehouseId: w.id, dropOffName: w.name, dropOffType: w.type }); setSearch(''); }}
-                        className="block w-full text-left px-3 py-2 hover:bg-blue-50 text-sm text-gray-900">
-                        {w.name}<div className="text-xs text-gray-500">{w.address}</div>
+                        className="block w-full text-left px-3 py-2 hover:bg-brand-50 text-sm text-slate-900">
+                        {w.name}<div className="text-xs text-slate-500">{w.address}</div>
                       </button>
                     ))}
                   </div>
