@@ -39,6 +39,17 @@ export const STATE_LABEL: Record<string, string> = {
   IN_QUANT: 'в квантах',
 };
 
+export const FBO_STATUS: Record<string, { label: string; cls: string }> = {
+  DRAFT: { label: 'Кванты подобраны', cls: 'bg-gray-100 text-gray-700' },
+  OZON_DRAFT: { label: 'Черновик в Ozon', cls: 'bg-amber-100 text-amber-800' },
+  BOOKED: { label: 'Слот забронирован', cls: 'bg-blue-100 text-blue-800' },
+  CARGOES_SET: { label: 'Грузоместа переданы', cls: 'bg-blue-100 text-blue-800' },
+  LABELS_READY: { label: 'Этикетки готовы', cls: 'bg-indigo-100 text-indigo-800' },
+  SHIPPED: { label: 'Отгружена', cls: 'bg-green-100 text-green-800' },
+  COMPLETED: { label: 'Принята Ozon', cls: 'bg-green-200 text-green-900' },
+  CANCELLED: { label: 'Отменена', cls: 'bg-gray-100 text-gray-400' },
+};
+
 export const QUANT_STATUS: Record<string, { label: string; cls: string }> = {
   ASSEMBLED: { label: 'На складе', cls: 'bg-green-100 text-green-800' },
   RESERVED: { label: 'В поставке', cls: 'bg-blue-100 text-blue-800' },

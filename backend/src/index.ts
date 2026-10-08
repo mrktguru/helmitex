@@ -13,6 +13,9 @@ import czRouter from './routes/cz';
 import batchesRouter from './routes/batches';
 import stockRouter from './routes/stock';
 import quantsRouter from './routes/quants';
+import fboRouter from './routes/fbo';
+import { syncAllShipments } from './services/fbo';
+import { ozonConfigured } from './services/ozon';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
@@ -43,6 +46,7 @@ app.use('/api/projects', templatesRouter);
 app.use('/api/projects', czRouter);
 app.use('/api/stock', stockRouter);
 app.use('/api/stock', quantsRouter);
+app.use('/api/stock', fboRouter);
 app.use('/api', batchesRouter);
 
 app.use(errorHandler);
@@ -51,5 +55,10 @@ const PORT = Number(process.env.PORT ?? 3000);
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+// Статусы FBO-поставок из Ozon — раз в 15 минут
+if (ozonConfigured()) {
+  setInterval(() => { syncAllShipments().catch((e) => console.warn('[fbo sync]', e)); }, 15 * 60_000);
+}
 
 export default app;

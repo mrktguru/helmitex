@@ -131,3 +131,4 @@ systemctl list-timers | grep portal
 | `S3_BUCKET` / `S3_ENDPOINT` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` | MinIO/S3 |
 | `FRONTEND_URL` | CORS allowed origin |
 | `PORT` | API listen port (3100 on server) |
+| `OZON_CLIENT_ID` / `OZON_API_KEY` | Ozon Seller API for FBO supplies (server `.env` only, never in git) |

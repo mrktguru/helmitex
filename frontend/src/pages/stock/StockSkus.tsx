@@ -20,6 +20,9 @@ export default function StockSkus() {
   const [lines, setLines] = useState<Mat[]>([]);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [ozonProducts, setOzonProducts] = useState<{ offerId: string; name: string }[] | null>(null);
+  const [offer, setOffer] = useState('');
+  const [ozonMsg, setOzonMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   async function load(keep?: string) {
     const [s, semi, all] = await Promise.all([api.getSpecs(), api.getItems('SEMI'), api.getItems()]);
@@ -35,10 +38,29 @@ export default function StockSkus() {
     setSelId(sku.id);
     setMsg(null);
     setSemiItemId(sku.spec?.semiItemId ?? '');
+    setOffer(sku.spec?.ozonOfferId ?? '');
+    setOzonMsg(null);
     setNetQty(sku.spec?.netQty != null ? String(sku.spec.netQty).replace('.', ',') : '');
     setLines(sku.spec?.materials.length
       ? sku.spec.materials.map((m: any) => ({ key: String(++seq), itemId: m.itemId, qtyPerUnit: String(m.qtyPerUnit).replace('.', ',') }))
       : [newMat()]);
+  }
+
+  async function loadOzonProducts() {
+    if (ozonProducts) return;
+    try { setOzonProducts(await api.getOzonProducts()); } catch (e: any) { setOzonMsg({ ok: false, text: e.message }); }
+  }
+
+  async function saveOzon() {
+    setOzonMsg(null); setBusy(true);
+    try {
+      const r = await api.setSpecOzon(selId!, offer.trim() || null);
+      await load(selId!);
+      setOzonMsg(offer.trim() && r.notFound.includes(offer.trim())
+        ? { ok: false, text: `Артикул ${offer.trim()} не найден в Ozon` }
+        : { ok: true, text: offer.trim() ? 'Артикул сохранён, SKU Ozon сверен' : 'Связь с Ozon убрана' });
+    } catch (e: any) { setOzonMsg({ ok: false, text: e.message }); }
+    setBusy(false);
   }
 
   const patch = (key: string, p: Partial<Mat>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...p } : l)));
@@ -75,7 +97,8 @@ export default function StockSkus() {
             className={clsx('w-full text-left px-3 py-2 rounded-lg text-sm flex justify-between gap-2',
               s.id === selId ? 'bg-blue-50 text-blue-800 font-medium' : 'hover:bg-gray-50')}>
             <span>{s.name}</span>
-            {!s.spec?.netQty && <span className="text-xs text-amber-700 shrink-0">не заполнена</span>}
+            {!s.spec?.netQty ? <span className="text-xs text-amber-700 shrink-0">не заполнена</span>
+              : !s.spec?.ozonSku && <span className="text-xs text-gray-400 shrink-0">нет Ozon</span>}
           </button>
         ))}
       </div>
@@ -94,6 +117,23 @@ export default function StockSkus() {
             <label className="flex flex-col gap-1 text-xs text-gray-500">Нетто полуфабриката в 1 шт, кг
               <input value={netQty} onChange={(e) => setNetQty(e.target.value)} className={inputCls + ' text-right'} placeholder="0,4" />
             </label>
+          </div>
+
+          <div className="bg-white rounded-xl border p-4 space-y-2">
+            <h3 className="font-semibold text-sm">Ozon</h3>
+            <div className="flex flex-wrap gap-2 items-end">
+              <label className="flex flex-col gap-1 text-xs text-gray-500 flex-1 min-w-[260px]">Артикул (offer_id)
+                <input list="ozon-products" value={offer} onFocus={loadOzonProducts} onChange={(e) => setOffer(e.target.value)} className={inputCls + ' font-mono'} placeholder="6429830025023" />
+                <datalist id="ozon-products">
+                  {(ozonProducts ?? []).map((p) => <option key={p.offerId} value={p.offerId}>{p.name}</option>)}
+                </datalist>
+              </label>
+              <button disabled={busy || offer.trim() === (sel.spec?.ozonOfferId ?? '')} onClick={saveOzon} className={btnPrimary}>Сохранить и сверить</button>
+            </div>
+            {sel.spec?.ozonSku ? (
+              <p className="text-xs text-gray-600">SKU Ozon <span className="font-mono">{sel.spec.ozonSku}</span> · {sel.spec.ozonName}</p>
+            ) : sel.spec?.ozonOfferId ? <p className="text-xs text-amber-700">SKU Ozon не сверен</p> : <p className="text-xs text-gray-500">Без артикула кванты этого SKU нельзя отгрузить на FBO.</p>}
+            {ozonMsg && <p className={clsx('text-sm', ozonMsg.ok ? 'text-green-700' : 'text-red-600')}>{ozonMsg.text}</p>}
           </div>
 
           <div className="bg-white rounded-xl border overflow-x-auto">

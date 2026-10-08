@@ -18,6 +18,7 @@ export const DOC_PREFIX: Record<DocType, string> = {
   MIX: 'З',
   FILL: 'Ф',
   QUANT: 'СК',
+  SHIPMENT: 'ОТ',
 };
 
 const EPS = 1e-6;
@@ -124,6 +125,7 @@ export async function cancelDoc(tx: Tx, docId: string, opts: { releaseCodes?: bo
   const doc = await tx.stockDoc.findUnique({ where: { id: docId }, include: { moves: { include: { lot: { include: { item: true } } } } } });
   if (!doc) throw new StockError('Документ не найден');
   if (doc.status !== 'POSTED') throw new StockError('Отменить можно только проведённый документ');
+  if (doc.type === 'SHIPMENT') throw new StockError('Отгрузку FBO отменить нельзя: она уже передана в Ozon');
 
   for (const m of doc.moves) {
     if (m.qty > 0) {

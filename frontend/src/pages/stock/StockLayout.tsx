@@ -7,6 +7,7 @@ const TABS = [
   { to: '/stock/mixes', label: 'Замесы', end: false },
   { to: '/stock/fills', label: 'Фасовка', end: false },
   { to: '/stock/quants', label: 'Кванты', end: false },
+  { to: '/stock/fbo', label: 'Поставки FBO', end: false },
   { to: '/stock/recipes', label: 'Рецептуры', end: false },
   { to: '/stock/skus', label: 'Карточки SKU', end: false },
   { to: '/stock/quant-types', label: 'Типы квантов', end: false },

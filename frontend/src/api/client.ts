@@ -111,6 +111,27 @@ export const api = {
   cancelDoc: (id: string, releaseCodes = false) =>
     request<{ ok: true }>(`/stock/docs/${id}/cancel`, { method: 'POST', body: JSON.stringify({ releaseCodes }) }),
   getQuantTypes: () => request<any[]>('/stock/quant-types'),
+  // Ozon / FBO
+  getOzonSettings: () => request<{ configured: boolean; defaults: any }>('/stock/ozon/settings'),
+  saveOzonSettings: (data: any) => request<any>('/stock/ozon/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  getOzonClusters: () => request<{ id: string; name: string; country: string }[]>('/stock/ozon/clusters'),
+  searchOzonDropoff: (search: string) => request<any[]>(`/stock/ozon/dropoff?search=${encodeURIComponent(search)}`),
+  getOzonLastDropoff: () => request<any>('/stock/ozon/last-dropoff'),
+  getOzonProducts: () => request<{ offerId: string; name: string }[]>('/stock/ozon/products'),
+  setSpecOzon: (itemId: string, ozonOfferId: string | null) =>
+    request<{ updated: number; notFound: string[] }>(`/stock/specs/${itemId}/ozon`, { method: 'PUT', body: JSON.stringify({ ozonOfferId }) }),
+  syncOzonSkus: () => request<{ updated: number; notFound: string[] }>('/stock/ozon/sync-skus', { method: 'POST' }),
+  getFboList: (active = false) => request<any[]>(`/stock/fbo${active ? '?active=1' : ''}`),
+  getFbo: (id: string) => request<any>(`/stock/fbo/${id}`),
+  createFbo: (data: any) => request<any>('/stock/fbo', { method: 'POST', body: JSON.stringify(data) }),
+  fboDraft: (id: string, data: any) => request<any>(`/stock/fbo/${id}/draft`, { method: 'POST', body: JSON.stringify(data) }),
+  fboTimeslots: (id: string, storageWarehouseId?: string) =>
+    request<{ timezone: string | null; days: { date: string; slots: { from: string; to: string }[] }[] }>(
+      `/stock/fbo/${id}/timeslots${storageWarehouseId ? `?storageWarehouseId=${storageWarehouseId}` : ''}`),
+  fboBook: (id: string, data: any) => request<any>(`/stock/fbo/${id}/book`, { method: 'POST', body: JSON.stringify(data) }),
+  fboAction: (id: string, action: 'cargoes' | 'labels' | 'ship' | 'cancel' | 'sync') =>
+    request<any>(`/stock/fbo/${id}/${action}`, { method: 'POST' }),
+  fboLog: (id: string) => request<any[]>(`/stock/fbo/${id}/log`),
   saveQuantType: (id: string | null, data: any) =>
     request<any>(id ? `/stock/quant-types/${id}` : '/stock/quant-types', { method: id ? 'PUT' : 'POST', body: JSON.stringify(data) }),
   assembleQuants: (data: any) => request<any>('/stock/quant-docs', { method: 'POST', body: JSON.stringify(data) }),

@@ -51,7 +51,7 @@ router.get('/quant-types', async (_req: AuthRequest, res: Response) => {
   const types = await prisma.quantType.findMany({
     orderBy: [{ archived: 'asc' }, { name: 'asc' }],
     include: {
-      productItem: true, boxItem: true, project: { select: { id: true, name: true } },
+      productItem: { include: { spec: true } }, boxItem: true, project: { select: { id: true, name: true } },
       materials: { include: { item: true }, orderBy: { sort: 'asc' } },
       _count: { select: { quants: { where: { status: 'ASSEMBLED' } } } },
     },

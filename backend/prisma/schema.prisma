@@ -8,14 +8,15 @@ datasource db {
 }
 
 model User {
-  id           String     @id @default(uuid())
-  email        String     @unique
-  login        String?    @unique
+  id           String        @id @default(uuid())
+  email        String        @unique
+  login        String?       @unique
   passwordHash String
-  role         Role       @default(OPERATOR)
-  createdAt    DateTime   @default(now())
+  role         Role          @default(OPERATOR)
+  createdAt    DateTime      @default(now())
   projects     Project[]
   stockDocs    StockDoc[]
+  fboShipments FboShipment[]
 }
 
 enum Role {
@@ -163,6 +164,7 @@ enum DocType {
   MIX // замес полуфабриката
   FILL // фасовка
   QUANT // сборка квантов
+  SHIPMENT // отгрузка (FBO)
 }
 
 enum DocStatus {
@@ -261,14 +263,17 @@ model RecipeLine {
 
 // Карточка SKU готовой продукции: из чего и как фасуется
 model ProductSpec {
-  id         String            @id @default(uuid())
-  itemId     String            @unique
-  item       Item              @relation("SpecProduct", fields: [itemId], references: [id])
-  semiItemId String?
-  semiItem   Item?             @relation("SpecSemi", fields: [semiItemId], references: [id])
-  netQty     Float? // кг полуфабриката в 1 шт
-  updatedAt  DateTime          @updatedAt
-  materials  ProductMaterial[]
+  id          String            @id @default(uuid())
+  itemId      String            @unique
+  item        Item              @relation("SpecProduct", fields: [itemId], references: [id])
+  semiItemId  String?
+  semiItem    Item?             @relation("SpecSemi", fields: [semiItemId], references: [id])
+  netQty      Float? // кг полуфабриката в 1 шт
+  ozonOfferId String? // артикул в Ozon
+  ozonSku     String? // SKU Ozon (из /v3/product/info/list)
+  ozonName    String?
+  updatedAt   DateTime          @updatedAt
+  materials   ProductMaterial[]
 }
 
 model ProductMaterial {
@@ -335,6 +340,7 @@ model Quant {
   outputBatch   OutputBatch? @relation(fields: [outputBatchId], references: [id])
   createdAt     DateTime     @default(now())
   codes         QuantCode[]
+  fboCargoes    FboCargo[]
 
   @@index([status, quantTypeId])
 }
@@ -352,4 +358,80 @@ model QuantCode {
 
   @@index([czCodeId])
   @@index([code])
+}
+
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+enum FboStatus {
+  DRAFT // кванты подобраны и зарезервированы
+  OZON_DRAFT // черновик в Ozon создан, склады рассчитаны
+  BOOKED // заявка создана, слот забронирован
+  CARGOES_SET // грузоместа переданы
+  LABELS_READY // этикетки грузомест получены
+  SHIPPED // отгружено, кванты списаны
+  COMPLETED // принято Ozon
+  CANCELLED
+}
+
+model FboShipment {
+  id                 String     @id @default(uuid())
+  number             String     @unique // ПС-261008-01
+  status             FboStatus  @default(DRAFT)
+  supplyType         String     @default("CROSSDOCK") // CROSSDOCK | DIRECT
+  clusterId          String?
+  clusterName        String?
+  dropOffWarehouseId String?
+  dropOffName        String?
+  dropOffType        String?
+  storageWarehouseId String?
+  storageName        String?
+  ozonDraftId        String?
+  draftCreatedAt     DateTime?
+  draftWarehouses    Json? // ответ /v2/draft/create/info: склады кластера
+  ozonOrderId        String?
+  ozonOrderNumber    String?
+  ozonSupplyId       String?
+  ozonState          String?
+  ozonStateAt        DateTime?
+  timeslotFrom       String? // время склада, как отдаёт Ozon
+  timeslotTo         String?
+  labelS3Key         String?
+  lastError          String?
+  stockDocId         String?
+  comment            String?
+  userId             String
+  user               User       @relation(fields: [userId], references: [id])
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  shippedAt          DateTime?
+  cargoes            FboCargo[]
+}
+
+model FboCargo {
+  id          String      @id @default(uuid())
+  shipmentId  String
+  shipment    FboShipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  quantId     String
+  quant       Quant       @relation(fields: [quantId], references: [id])
+  ozonCargoId String?
+  sort        Int         @default(0)
+
+  @@unique([shipmentId, quantId])
+}
+
+model OzonApiLog {
+  id         String   @id @default(uuid())
+  shipmentId String?
+  method     String
+  status     Int
+  request    Json?
+  response   Json?
+  ms         Int
+  createdAt  DateTime @default(now())
+
+  @@index([shipmentId])
 }
