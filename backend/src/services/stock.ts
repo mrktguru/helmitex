@@ -234,18 +234,22 @@ async function postFill(tx: Tx, doc: DocWithLines): Promise<void> {
   await consume(tx, doc.id, barrel.id, 'NONE', round(consumeKg), barrel.item.name);
 
   // Материалы и их средняя цена в этом документе
-  const matCost = new Map<string, { cost: number | null; qty: number }>();
+  const matCost = new Map<string, { cost: number | null }>();
   for (const m of materials) {
     if (!m.lotId) throw new StockError(`«${m.item.name}»: не выбран лот`);
     const lot = await tx.lot.findUnique({ where: { id: m.lotId } });
     if (lot?.itemId !== m.itemId) throw new StockError(`«${m.item.name}»: лот от другой позиции`);
     await consume(tx, doc.id, m.lotId, 'NONE', m.qty, m.item.name);
-    const c = matCost.get(m.itemId) ?? { cost: 0, qty: 0 };
+    const c = matCost.get(m.itemId) ?? { cost: 0 };
     c.cost = c.cost == null || lot.unitCost == null ? null : c.cost + lot.unitCost * m.qty;
-    c.qty += m.qty;
     matCost.set(m.itemId, c);
   }
 
+  // Полная стоимость материала (включая брак) делится на его норму по всем выпущенным SKU
+  const matNorm = new Map<string, number>();
+  for (const o of outputs) {
+    for (const pm of specOf.get(o.itemId)!.materials) matNorm.set(pm.itemId, (matNorm.get(pm.itemId) ?? 0) + o.qty * pm.qtyPerUnit);
+  }
   const semiKgCost = barrel.unitCost == null ? null : (barrel.unitCost * consumeKg) / usedKg;
   for (const o of outputs) {
     const sp = specOf.get(o.itemId)!;
@@ -253,7 +257,7 @@ async function postFill(tx: Tx, doc: DocWithLines): Promise<void> {
     for (const pm of sp.materials) {
       const c = matCost.get(pm.itemId);
       if (!c) continue;
-      unitCost = unitCost == null || c.cost == null ? null : unitCost + (c.cost / c.qty) * pm.qtyPerUnit;
+      unitCost = unitCost == null || c.cost == null ? null : unitCost + (c.cost / matNorm.get(pm.itemId)!) * pm.qtyPerUnit;
     }
     const lot = await tx.lot.create({
       data: {
