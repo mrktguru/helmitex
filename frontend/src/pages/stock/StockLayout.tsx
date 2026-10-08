@@ -108,3 +108,19 @@ export function PageHeader({ title, hint, children }: { title: React.ReactNode; 
     </div>
   );
 }
+
+// Блок страницы с заголовком и подсказкой
+export function Section({ title, hint, children, right }: { title: string; hint?: string; children: React.ReactNode; right?: React.ReactNode }) {
+  return (
+    <section className="bg-white rounded-xl border border-slate-200">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 px-5 pt-4 pb-3 border-b border-slate-100">
+        <div>
+          <h2 className="font-semibold">{title}</h2>
+          {hint && <p className="text-xs text-slate-500 mt-0.5">{hint}</p>}
+        </div>
+        {right}
+      </div>
+      <div className="p-5">{children}</div>
+    </section>
+  );
+}

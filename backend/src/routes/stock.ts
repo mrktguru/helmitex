@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { ItemType, Prisma } from '@prisma/client';
 import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
-import { allocateFefo, cancelDoc, lotBalance, nextDocNumber, postDoc, PdfJob, StockError } from '../services/stock';
+import { addMonths, allocateFefo, cancelDoc, lotBalance, nextDocNumber, postDoc, PdfJob, StockError } from '../services/stock';
 import { enqueuePdfJobs } from './quants';
 
 const router = Router();
@@ -231,6 +231,9 @@ router.get('/mix/plan', async (req: AuthRequest, res: Response): Promise<void> =
 const specSchema = z.object({
   semiItemId: z.string().uuid().nullable(),
   netQty: z.number().positive().nullable(),
+  shelfLifeMonths: z.number().int().min(1).max(120).nullable().optional(),
+  requiresCz: z.boolean().optional(),
+  czProjectId: z.string().uuid().nullable().optional(),
   materials: z.array(z.object({ itemId: z.string().uuid(), qtyPerUnit: z.number().positive() })).max(30),
 });
 
@@ -239,7 +242,7 @@ router.get('/specs', async (_req: AuthRequest, res: Response) => {
   const items = await prisma.item.findMany({
     where: { type: 'PRODUCT', archived: false },
     orderBy: { name: 'asc' },
-    include: { spec: { include: { semiItem: true, materials: { include: { item: true }, orderBy: { sort: 'asc' } } } } },
+    include: { spec: { include: { semiItem: true, czProject: { select: { id: true, name: true } }, materials: { include: { item: true }, orderBy: { sort: 'asc' } } } } },
   });
   res.json(items);
 });
@@ -251,13 +254,34 @@ router.put('/specs/:itemId', async (req: AuthRequest, res: Response): Promise<vo
   const item = await prisma.item.findUnique({ where: { id: req.params.itemId } });
   if (item?.type !== 'PRODUCT') { res.status(400).json({ error: 'Карточка задаётся только для готовой продукции' }); return; }
   const { materials, ...data } = parsed.data;
-  const spec = await prisma.$transaction(async (tx) => {
+  if (data.requiresCz && !data.czProjectId) { res.status(400).json({ error: 'Для маркировки ЧЗ выберите проект этикетки' }); return; }
+  const result = await prisma.$transaction(async (tx) => {
+    const before = await tx.productSpec.findUnique({ where: { itemId: item.id } });
     const sp = await tx.productSpec.upsert({ where: { itemId: item.id }, create: { itemId: item.id, ...data }, update: data });
     await tx.productMaterial.deleteMany({ where: { specId: sp.id } });
     await tx.productMaterial.createMany({ data: materials.map((m, i) => ({ ...m, specId: sp.id, sort: i })) });
-    return sp;
+    // Все варианты квантов SKU наследуют требование ЧЗ и проект этикетки
+    if (data.requiresCz !== undefined) {
+      await tx.quantType.updateMany({
+        where: { productItemId: item.id },
+        data: { trackCz: sp.requiresCz, projectId: sp.requiresCz ? sp.czProjectId : null },
+      });
+    }
+    // Срок годности изменился — пересчитываем партии, выпущенные фасовкой
+    let recalculated = 0;
+    if (data.shelfLifeMonths !== undefined && data.shelfLifeMonths !== before?.shelfLifeMonths && sp.shelfLifeMonths) {
+      const lines = await tx.stockDocLine.findMany({
+        where: { itemId: item.id, lotId: { not: null }, doc: { type: 'FILL', status: 'POSTED' } },
+        include: { doc: { select: { date: true } } },
+      });
+      for (const l of lines) {
+        await tx.lot.update({ where: { id: l.lotId! }, data: { expiresAt: addMonths(l.doc.date, sp.shelfLifeMonths) } });
+        recalculated++;
+      }
+    }
+    return { spec: sp, recalculated };
   });
-  res.json(spec);
+  res.json(result);
 });
 
 // ───────────── Фасовка ─────────────

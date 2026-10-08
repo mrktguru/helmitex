@@ -112,6 +112,7 @@ export const api = {
     request<{ ok: true }>(`/stock/docs/${id}/cancel`, { method: 'POST', body: JSON.stringify({ releaseCodes }) }),
   getQuantTypes: () => request<any[]>('/stock/quant-types'),
   getDashboard: () => request<any>('/stock/dashboard'),
+  getCzProjects: () => request<{ id: string; name: string; hasCzArea: boolean; freeCodes: number }[]>('/stock/cz-projects'),
   getItem: (id: string) => request<any>(`/stock/items/${id}`),
   importOzonProducts: (products: { offerId: string; name: string }[]) =>
     request<{ created: number; ids: string[]; notFound: string[] }>('/stock/ozon/import-products', { method: 'POST', body: JSON.stringify({ products }) }),

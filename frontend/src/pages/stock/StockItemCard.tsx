@@ -2,18 +2,16 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { api } from '../../api/client';
-import { PageHeader } from './StockLayout';
+import { PageHeader, Section } from './StockLayout';
 import { TypeChip } from './StockWarehouse';
 import StockRecipes from './StockRecipes';
-import StockSkus from './StockSkus';
-import StockQuantTypes from './StockQuantTypes';
+import SkuSheet from './SkuSheet';
 import { STATE_LABEL, btnPrimary, btnSecondary, fmtDate, fmtMoney, fmtQty, inputCls, parseNum } from './common';
 
-// Единая карточка позиции: основное, остатки, и по типу — рецептура / карточка SKU, Ozon, кванты
+// Единая карточка позиции на одном листе: основное → (рецептура | производство, ЧЗ, Ozon, кванты) → остатки
 export default function StockItemCard() {
   const { id } = useParams<{ id: string }>();
   const [item, setItem] = useState<any>(null);
-  const [tab, setTab] = useState('main');
   const [error, setError] = useState('');
 
   async function load() { try { setItem(await api.getItem(id!)); } catch (e: any) { setError(e.message); } }
@@ -22,28 +20,16 @@ export default function StockItemCard() {
   if (error && !item) return <p className="text-red-600">{error}</p>;
   if (!item) return <p className="text-slate-500">Загрузка…</p>;
 
-  const tabs = [
-    ['main', 'Основное'],
-    ...(item.type === 'SEMI' ? [['recipe', 'Рецептура']] : []),
-    ...(item.type === 'PRODUCT' ? [['spec', 'Фасовка и Ozon'], ['quants', 'Кванты']] : []),
-    ['stock', 'Остатки'],
-  ];
-
   return (
-    <div>
+    <div className="max-w-5xl">
       <Link to="/stock/catalog" className="text-sm text-slate-500 hover:text-slate-900">← Справочники</Link>
-      <PageHeader title={<span className="flex flex-wrap items-center gap-3">{item.name} <TypeChip type={item.type} /></span>} />
-      <div className="flex gap-1 border-b border-slate-200 mb-4 -mt-2">
-        {tabs.map(([k, l]) => (
-          <button key={k} onClick={() => setTab(k)}
-            className={clsx('px-3 py-2 text-sm font-medium border-b-2 -mb-px', tab === k ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500 hover:text-slate-800')}>{l}</button>
-        ))}
+      <PageHeader title={<span className="flex flex-wrap items-center gap-3">{item.name} <TypeChip type={item.type} />{item.archived && <span className="text-sm font-normal text-slate-400">архив</span>}</span>} />
+      <div className="space-y-4">
+        <Section title="Основное"><MainForm item={item} onSaved={load} /></Section>
+        {item.type === 'SEMI' && <Section title="Рецептура" hint="Состав в % от массы замеса, этапы и нормы ОТК — печатаются в карте замеса."><StockRecipes itemId={item.id} /></Section>}
+        {item.type === 'PRODUCT' && <SkuSheet item={item} />}
+        <Section title="Остатки по лотам"><ItemStock item={item} /></Section>
       </div>
-      {tab === 'main' && <MainForm item={item} onSaved={load} />}
-      {tab === 'recipe' && <StockRecipes itemId={item.id} />}
-      {tab === 'spec' && <StockSkus itemId={item.id} />}
-      {tab === 'quants' && <StockQuantTypes productItemId={item.id} />}
-      {tab === 'stock' && <ItemStock item={item} />}
     </div>
   );
 }
@@ -63,7 +49,7 @@ function MainForm({ item, onSaved }: { item: any; onSaved: () => void }) {
     onSaved();
   }
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4 max-w-3xl">
+    <div className="space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-[1fr_100px_140px] gap-3">
         <label className="flex flex-col gap-1 text-xs text-slate-500">Наименование
           <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} className={inputCls} />
@@ -97,7 +83,7 @@ function ItemStock({ item }: { item: any }) {
   if (!rows) return <p className="text-slate-500">Загрузка…</p>;
   const total = rows.reduce((t, r) => t + r.qty, 0);
   return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto max-w-4xl">
+    <div className="overflow-x-auto -m-5">
       {rows.length === 0 ? <p className="p-6 text-sm text-slate-500">Нет остатков. Внесите их <Link to="/stock/docs/new?type=OPENING" className="text-brand-700 hover:underline">начальными остатками</Link> или приходом.</p> : (
         <table className="w-full text-sm tabular-nums">
           <thead className="bg-slate-50/80">

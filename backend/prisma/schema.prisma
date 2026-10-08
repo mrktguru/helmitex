@@ -35,6 +35,7 @@ model Project {
   czBatches     CzBatch[]
   outputBatches OutputBatch[]
   quantTypes    QuantType[]
+  czSpecs       ProductSpec[]  @relation("SpecCzProject")
 }
 
 model LabelTemplate {
@@ -263,17 +264,21 @@ model RecipeLine {
 
 // Карточка SKU готовой продукции: из чего и как фасуется
 model ProductSpec {
-  id          String            @id @default(uuid())
-  itemId      String            @unique
-  item        Item              @relation("SpecProduct", fields: [itemId], references: [id])
-  semiItemId  String?
-  semiItem    Item?             @relation("SpecSemi", fields: [semiItemId], references: [id])
-  netQty      Float? // кг полуфабриката в 1 шт
-  ozonOfferId String? // артикул в Ozon
-  ozonSku     String? // SKU Ozon (из /v3/product/info/list)
-  ozonName    String?
-  updatedAt   DateTime          @updatedAt
-  materials   ProductMaterial[]
+  id              String            @id @default(uuid())
+  itemId          String            @unique
+  item            Item              @relation("SpecProduct", fields: [itemId], references: [id])
+  semiItemId      String?
+  semiItem        Item?             @relation("SpecSemi", fields: [semiItemId], references: [id])
+  netQty          Float? // кг полуфабриката в 1 шт
+  ozonOfferId     String? // артикул в Ozon
+  ozonSku         String? // SKU Ozon (из /v3/product/info/list)
+  ozonName        String?
+  shelfLifeMonths Int? // срок годности ГП от даты фасовки
+  requiresCz      Boolean           @default(false) // обязательна маркировка Честный знак
+  czProjectId     String? // проект портала с макетом этикетки ЧЗ
+  czProject       Project?          @relation("SpecCzProject", fields: [czProjectId], references: [id])
+  updatedAt       DateTime          @updatedAt
+  materials       ProductMaterial[]
 }
 
 model ProductMaterial {

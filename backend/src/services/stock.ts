@@ -154,6 +154,14 @@ export async function consume(tx: Tx, docId: string, lotId: string, state: Produ
   }
 }
 
+// Дата + N месяцев (31.01 + 1 мес → 28/29.02)
+export function addMonths(d: Date, months: number): Date {
+  const r = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + months, 1));
+  const last = new Date(Date.UTC(r.getUTCFullYear(), r.getUTCMonth() + 1, 0)).getUTCDate();
+  r.setUTCDate(Math.min(d.getUTCDate(), last));
+  return r;
+}
+
 export const round = (n: number) => Math.round(n * 1e6) / 1e6;
 
 // Замес: списывает сырьё по фактическим лотам, создаёт бочку полуфабриката с выходом и себестоимостью.
@@ -276,11 +284,12 @@ async function postFill(tx: Tx, doc: DocWithLines): Promise<void> {
       if (!c) continue;
       unitCost = unitCost == null || c.cost == null ? null : unitCost + (c.cost / matNorm.get(pm.itemId)!) * pm.qtyPerUnit;
     }
+    // Срок годности ГП: от даты фасовки по карточке SKU, иначе — как у бочки
     const lot = await tx.lot.create({
       data: {
         number: await nextLotNumber(tx, 'PRODUCT'),
         itemId: o.itemId,
-        expiresAt: barrel.expiresAt,
+        expiresAt: sp.shelfLifeMonths ? addMonths(doc.date, sp.shelfLifeMonths) : barrel.expiresAt,
         unitCost: unitCost == null ? null : round(unitCost),
         parentLotId: barrel.id,
       },

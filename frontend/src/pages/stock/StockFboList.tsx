@@ -72,7 +72,7 @@ export default function StockFboList() {
             <table className="w-full text-sm tabular-nums">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b">
-                  <th className="py-2 font-medium">Тип кванта</th>
+                  <th className="py-2 font-medium">Вариант кванта</th>
                   <th className="py-2 font-medium">Артикул Ozon</th>
                   <th className="py-2 font-medium text-right">На складе</th>
                   <th className="py-2 font-medium text-right w-32">В поставку, кв.</th>

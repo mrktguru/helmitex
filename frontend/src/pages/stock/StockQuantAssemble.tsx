@@ -50,7 +50,7 @@ export default function StockQuantAssemble() {
 
   async function submit() {
     setError('');
-    if (!qt || !src) { setError('Выберите тип кванта и партию'); return; }
+    if (!qt || !src) { setError('Выберите вариант кванта и партию'); return; }
     if (parsed) {
       if (parsed.total % n !== 0) { setError(`Кодов ${parsed.total} — не делится на ${n} (единиц в кванте)`); return; }
       if (parsed.quants.length === 0) { setError('Вставьте коды ЧЗ'); return; }
@@ -81,7 +81,7 @@ export default function StockQuantAssemble() {
       )}
 
       <div className="bg-white rounded-xl border p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <label className="flex flex-col gap-1 text-xs text-slate-500">Тип кванта
+        <label className="flex flex-col gap-1 text-xs text-slate-500">Вариант кванта
           <select value={typeId} onChange={(e) => setTypeId(e.target.value)} className={inputCls}>
             <option value="">— выберите —</option>
             {types.map((t) => <option key={t.id} value={t.id}>{t.name} · {t.unitsPerQuant} шт</option>)}

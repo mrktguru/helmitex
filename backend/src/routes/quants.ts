@@ -67,9 +67,14 @@ async function saveType(req: AuthRequest, res: Response, id?: string): Promise<v
   const parsed = typeSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
   const { materials, ...data } = parsed.data;
-  if (data.trackCz && !data.projectId) { res.status(400).json({ error: 'Для учёта ЧЗ выберите проект этикетки' }); return; }
-  const product = await prisma.item.findUnique({ where: { id: data.productItemId } });
+  const product = await prisma.item.findUnique({ where: { id: data.productItemId }, include: { spec: true } });
   if (product?.type !== 'PRODUCT') { res.status(400).json({ error: 'Выберите SKU готовой продукции' }); return; }
+  // ЧЗ задаётся на уровне SKU: вариант кванта его наследует
+  if (product.spec) {
+    data.trackCz = product.spec.requiresCz;
+    data.projectId = product.spec.requiresCz ? product.spec.czProjectId : null;
+  }
+  if (data.trackCz && !data.projectId) { res.status(400).json({ error: 'Для маркировки ЧЗ выберите проект этикетки в карточке SKU' }); return; }
   try {
     const t = await prisma.$transaction(async (tx) => {
       if (id) {
@@ -90,6 +95,16 @@ async function saveType(req: AuthRequest, res: Response, id?: string): Promise<v
 
 router.post('/quant-types', (req: AuthRequest, res: Response) => saveType(req, res));
 router.put('/quant-types/:id', (req: AuthRequest, res: Response) => saveType(req, res, req.params.id));
+
+// GET /api/stock/cz-projects — проекты этикеток с полем ЧЗ и числом свободных кодов
+router.get('/cz-projects', async (_req: AuthRequest, res: Response) => {
+  const projects = await prisma.project.findMany({ orderBy: { name: 'asc' }, include: { template: { select: { czArea: true } } } });
+  const out = [];
+  for (const p of projects) {
+    out.push({ id: p.id, name: p.name, hasCzArea: p.template?.czArea != null, freeCodes: await availableCodes(prisma, p.id) });
+  }
+  res.json(out);
+});
 
 // ───────────── Сборка квантов ─────────────
 
@@ -206,10 +221,10 @@ router.get('/quants', async (req: AuthRequest, res: Response) => {
     ];
   }
   const quants = await prisma.quant.findMany({
-    where, orderBy: { number: 'desc' }, take: 500,
+    where, orderBy: { number: 'desc' }, take: 5000,
     include: {
       lot: { select: { number: true, expiresAt: true } },
-      quantType: { select: { name: true } },
+      quantType: { select: { name: true, unitsPerQuant: true, productItem: { select: { id: true, name: true, spec: { select: { ozonOfferId: true } } } } } },
       doc: { select: { id: true, number: true } },
       _count: { select: { codes: { where: { active: true } } } },
     },

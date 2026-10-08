@@ -14,10 +14,14 @@ const TYPE_CHIP: Record<string, string> = {
   LABEL: 'bg-violet-50 text-violet-800 ring-violet-200',
   SEMI: 'bg-teal-50 text-teal-800 ring-teal-200',
   PRODUCT: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+  QUANT: 'bg-indigo-50 text-indigo-800 ring-indigo-200',
 };
 
+// Фильтр склада: типы номенклатуры + «Кванты» (короба с единицами ГП)
+const FILTER_TYPES = [...ITEM_TYPES.map((t) => ({ value: t.value as string, label: t.label as string })), { value: 'QUANT', label: 'Кванты' }];
+
 export function TypeChip({ type }: { type: string }) {
-  return <span className={clsx('inline-block text-[11px] font-medium px-1.5 py-0.5 rounded ring-1 ring-inset whitespace-nowrap', TYPE_CHIP[type])}>{typeLabel(type)}</span>;
+  return <span className={clsx('inline-block text-[11px] font-medium px-1.5 py-0.5 rounded ring-1 ring-inset whitespace-nowrap', TYPE_CHIP[type])}>{type === 'QUANT' ? 'Кванты' : typeLabel(type)}</span>;
 }
 
 const DOC_MENU = [
@@ -90,12 +94,41 @@ function StockTable() {
   const types = (params.get('type') ?? '').split(',').filter(Boolean);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [items, setItems] = useState<any[]>([]);
+  const [quants, setQuants] = useState<any[]>([]);
   const [q, setQ] = useState('');
   const [onlyStock, setOnlyStock] = useState(true);
   const [onlyLow, setOnlyLow] = useState(false);
   const [open, setOpen] = useState<Set<string>>(new Set());
 
-  useEffect(() => { Promise.all([api.getBalances(), api.getItems()]).then(([b, i]) => { setRows(b); setItems(i); }); }, []);
+  useEffect(() => {
+    Promise.all([api.getBalances(), api.getItems(), api.getQuants({})]).then(([b, i, qs]) => {
+      // Единицы «в квантах» показываем строками квантов, а не в строке SKU
+      setRows(b.filter((r: any) => r.state !== 'IN_QUANT'));
+      setItems(i);
+      setQuants(qs.filter((x: any) => x.status === 'ASSEMBLED' || x.status === 'RESERVED'));
+    });
+  }, []);
+
+  // Кванты по вариантам: количество, единицы, в поставке, ближайший срок
+  const quantGroups = useMemo(() => {
+    if (types.length && !types.includes('QUANT')) return [];
+    const s = q.trim().toLowerCase();
+    type QG = { id: string; name: string; sku: string; productId: string; quants: any[]; units: number; reserved: number; nearest: number | null; value: number };
+    const m = new Map<string, QG>();
+    for (const x of quants) {
+      const g: QG = m.get(x.quantTypeId) ?? { id: x.quantTypeId, name: x.quantType.name, sku: x.quantType.productItem.name, productId: x.quantType.productItem.id, quants: [], units: 0, reserved: 0, nearest: null, value: 0 };
+      g.quants.push(x);
+      g.units += x.units;
+      if (x.status === 'RESERVED') g.reserved++;
+      g.value += x.unitCost ?? 0;
+      const exp = x.lot.expiresAt ? Date.parse(x.lot.expiresAt) : null;
+      if (exp && (g.nearest == null || exp < g.nearest)) g.nearest = exp;
+      m.set(x.quantTypeId, g);
+    }
+    return [...m.values()]
+      .filter((g) => !s || g.name.toLowerCase().includes(s) || g.sku.toLowerCase().includes(s) || g.quants.some((x) => x.number.toLowerCase().includes(s)))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+  }, [quants, types.join(), q]);
 
   const toggleType = (t: string) => {
     const next = types.includes(t) ? types.filter((x) => x !== t) : [...types, t];
@@ -120,7 +153,7 @@ function StockTable() {
     }
     const s = q.trim().toLowerCase();
     return [...byItem.values()]
-      .filter((g) => !types.length || types.includes(g.item.type))
+      .filter((g) => (!types.length || types.includes(g.item.type)) && !(types.length === 1 && types[0] === 'QUANT'))
       .filter((g) => !onlyStock || Math.abs(g.total) > 1e-9)
       .filter((g) => !onlyLow || (g.item.minStock != null && g.total < g.item.minStock))
       .filter((g) => !s || g.item.name.toLowerCase().includes(s) || g.rows.some((r) => r.lot.number.toLowerCase().includes(s) || (r.lot.barrel ?? '').toLowerCase().includes(s)))
@@ -130,10 +163,11 @@ function StockTable() {
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
     for (const it of items) c[it.type] = (c[it.type] ?? 0) + 1;
+    c.QUANT = new Set(quants.map((x) => x.quantTypeId)).size;
     return c;
-  }, [items]);
+  }, [items, quants]);
 
-  const total = groups.reduce((t, g) => t + g.value, 0);
+  const total = groups.reduce((t, g) => t + g.value, 0) + quantGroups.reduce((t, g) => t + g.value, 0);
   const soon = Date.now() + 30 * 86400_000;
 
   function action(g: (typeof groups)[number]) {
@@ -152,7 +186,7 @@ function StockTable() {
           className={clsx('px-3 py-1.5 rounded-full text-sm border', !types.length ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-400')}>
           Все <span className="opacity-60">{items.length}</span>
         </button>
-        {ITEM_TYPES.map((t) => (
+        {FILTER_TYPES.map((t) => (
           <button key={t.value} onClick={() => toggleType(t.value)}
             className={clsx('px-3 py-1.5 rounded-full text-sm border', types.includes(t.value) ? 'bg-brand-600 text-white border-brand-600' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-400')}>
             {t.label} <span className="opacity-60">{counts[t.value] ?? 0}</span>
@@ -167,7 +201,7 @@ function StockTable() {
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
-        {!rows ? <p className="p-6 text-slate-500">Загрузка…</p> : groups.length === 0 ? (
+        {!rows ? <p className="p-6 text-slate-500">Загрузка…</p> : groups.length === 0 && quantGroups.length === 0 ? (
           <div className="p-8 text-center text-slate-500 text-sm">
             {items.length === 0 ? <>Номенклатура пуста. <Link to="/stock/catalog" className="text-brand-700 hover:underline">Заведите позиции</Link>, затем внесите остатки документом.</> : 'Ничего не найдено. Снимите фильтры или отключите «Только в наличии».'}
           </div>
@@ -236,6 +270,49 @@ function StockTable() {
                         </tr>
                       );
                     })}
+                  </Fragment>
+                );
+              })}
+              {quantGroups.map((g) => {
+                const key = 'q:' + g.id;
+                const isOpen = open.has(key);
+                return (
+                  <Fragment key={key}>
+                    <tr onClick={() => setOpen((s) => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; })}
+                      className={clsx('border-b border-slate-100 cursor-pointer hover:bg-slate-50', isOpen && 'bg-slate-50')}>
+                      <td className="pl-4 pr-2 py-2.5 text-slate-400">{isOpen ? '▾' : '▸'}</td>
+                      <td className="px-2 py-2.5">
+                        <Link to={`/stock/quants?typeId=${g.id}`} onClick={(e) => e.stopPropagation()} className="font-medium hover:text-brand-700">{g.name}</Link>
+                        <div className="text-xs text-slate-500">{g.sku}</div>
+                      </td>
+                      <td className="px-3 py-2.5"><TypeChip type="QUANT" /></td>
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                        <span className="font-semibold">{g.quants.length} кв.</span>
+                        <div className="text-[11px] text-slate-500">{fmtQty(g.units, 0)} шт{g.reserved ? ` · ${g.reserved} в поставке` : ''}</div>
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-slate-500">{new Set(g.quants.map((x) => x.lot.number)).size}</td>
+                      <td className={clsx('px-3 py-2.5 whitespace-nowrap', g.nearest && g.nearest < Date.now() ? 'text-red-600 font-medium' : g.nearest && g.nearest < soon ? 'text-amber-700' : 'text-slate-600')}>
+                        {g.nearest ? new Date(g.nearest).toLocaleDateString('ru-RU') : '—'}
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-slate-600">{g.value ? fmtMoney(g.value) : '—'}</td>
+                      <td className="px-4 py-2.5 text-right">
+                        {g.quants.length > g.reserved && <Link to="/stock/fbo" onClick={(e) => e.stopPropagation()} className="text-xs border border-slate-200 rounded-md px-2.5 py-1 hover:border-brand-500 hover:text-brand-700 whitespace-nowrap">Отгрузить</Link>}
+                      </td>
+                    </tr>
+                    {isOpen && g.quants.map((x) => (
+                      <tr key={x.id} className="border-b border-slate-100 bg-slate-50/60 text-[13px]">
+                        <td />
+                        <td className="px-2 py-1.5 pl-6" colSpan={2}>
+                          <Link to={`/stock/quants/${x.id}`} className="font-mono text-xs text-brand-700 hover:underline">{x.number}</Link>
+                          <span className="text-slate-500 ml-2 text-xs">партия {x.lot.number}{x.status === 'RESERVED' ? ' · в поставке' : ''}{x._count.codes ? ` · ЧЗ ${x._count.codes}` : ''}</span>
+                        </td>
+                        <td className="px-3 py-1.5 text-right">{x.units} шт</td>
+                        <td />
+                        <td className="px-3 py-1.5 text-slate-500">{fmtDate(x.lot.expiresAt)}</td>
+                        <td className="px-3 py-1.5 text-right text-slate-500">{x.unitCost != null ? fmtMoney(x.unitCost) : ''}</td>
+                        <td />
+                      </tr>
+                    ))}
                   </Fragment>
                 );
               })}
