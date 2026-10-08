@@ -71,6 +71,27 @@ export const api = {
     request<{ ok: true }>(`/batches/${batchId}`, { method: 'DELETE' }),
   getBatchStatus: (batchId: string) => request<{ status: string; downloadUrl?: string }>(`/batches/${batchId}/status`),
 
+  // Stock
+  getItems: (type?: string, archived = false) =>
+    request<any[]>(`/stock/items?${new URLSearchParams({ ...(type ? { type } : {}), ...(archived ? { archived: '1' } : {}) })}`),
+  createItem: (data: { type: string; name: string; unit: string; minStock?: number | null }) =>
+    request<any>('/stock/items', { method: 'POST', body: JSON.stringify(data) }),
+  updateItem: (id: string, data: Partial<{ name: string; unit: string; minStock: number | null; archived: boolean }>) =>
+    request<any>(`/stock/items/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  getBalances: (params: { type?: string; itemId?: string } = {}) =>
+    request<any[]>(`/stock/balances?${new URLSearchParams(params as Record<string, string>)}`),
+  getMoves: (params: { lotId?: string; limit?: number } = {}) =>
+    request<any[]>(`/stock/moves?${new URLSearchParams(params as Record<string, string>)}`),
+  getDocs: (type?: string) => request<any[]>(`/stock/docs${type ? `?type=${type}` : ''}`),
+  getDoc: (id: string) => request<any>(`/stock/docs/${id}`),
+  createDoc: (data: any, post = false) =>
+    request<any>(`/stock/docs${post ? '?post=1' : ''}`, { method: 'POST', body: JSON.stringify(data) }),
+  updateDoc: (id: string, data: any) =>
+    request<any>(`/stock/docs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  postDoc: (id: string) => request<{ ok: true }>(`/stock/docs/${id}/post`, { method: 'POST' }),
+  cancelDoc: (id: string) => request<{ ok: true }>(`/stock/docs/${id}/cancel`, { method: 'POST' }),
+  deleteDoc: (id: string) => request<{ ok: true }>(`/stock/docs/${id}`, { method: 'DELETE' }),
+
   // Users (admin)
   getUsers: () => request<any[]>('/users'),
   createUser: (data: { email: string; password: string; role: 'ADMIN' | 'OPERATOR' }) =>

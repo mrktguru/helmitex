@@ -8,13 +8,14 @@ datasource db {
 }
 
 model User {
-  id           String    @id @default(uuid())
-  email        String    @unique
-  login        String?   @unique
+  id           String     @id @default(uuid())
+  email        String     @unique
+  login        String?    @unique
   passwordHash String
-  role         Role      @default(OPERATOR)
-  createdAt    DateTime  @default(now())
+  role         Role       @default(OPERATOR)
+  createdAt    DateTime   @default(now())
   projects     Project[]
+  stockDocs    StockDoc[]
 }
 
 enum Role {
@@ -40,23 +41,23 @@ model LabelTemplate {
   project      Project  @relation(fields: [projectId], references: [id])
   widthMm      Float
   heightMm     Float
-  elements     Json     // array of LabelElement objects
-  czArea       Json     // { xMm, yMm, widthMm, heightMm }
+  elements     Json // array of LabelElement objects
+  czArea       Json // { xMm, yMm, widthMm, heightMm }
   barcodeValue String?
-  printMargins Json?    // { topMm, rightMm, bottomMm, leftMm }
-  variables    Json?    // { [token: string]: string } — current values
-  variableDefs Json?    // [{ token: string, name: string }] — declared variables
+  printMargins Json? // { topMm, rightMm, bottomMm, leftMm }
+  variables    Json? // { [token: string]: string } — current values
+  variableDefs Json? // [{ token: string, name: string }] — declared variables
   updatedAt    DateTime @updatedAt
 }
 
 model CzBatch {
-  id         String    @id @default(uuid())
+  id         String   @id @default(uuid())
   projectId  String
-  project    Project   @relation(fields: [projectId], references: [id])
+  project    Project  @relation(fields: [projectId], references: [id])
   s3Key      String
   totalCount Int
   fileHash   String?
-  uploadedAt DateTime  @default(now())
+  uploadedAt DateTime @default(now())
   codes      CzCode[]
 
   @@unique([projectId, fileHash])
@@ -90,4 +91,108 @@ model OutputBatch {
   count     Int
   createdAt DateTime @default(now())
   codes     CzCode[]
+}
+
+// ─────────────────────────── Склад ───────────────────────────
+
+enum ItemType {
+  RAW // сырьё, кг
+  CONTAINER // тара: тубы, банки, вёдра
+  PACKAGING // короба
+  LABEL // этикетки, наклейки
+  SEMI // полуфабрикат (бочки)
+  PRODUCT // готовая продукция (SKU)
+}
+
+enum ProductState {
+  NONE // для всего, кроме ГП
+  UNLABELED // расфасовано, без ЧЗ
+  LABELED // оклеено ЧЗ, россыпью
+}
+
+model Item {
+  id        String         @id @default(uuid())
+  type      ItemType
+  name      String
+  unit      String // "кг" | "шт" | "л"
+  minStock  Float?
+  archived  Boolean        @default(false)
+  createdAt DateTime       @default(now())
+  lots      Lot[]
+  docLines  StockDocLine[]
+
+  @@unique([type, name])
+}
+
+model Lot {
+  id          String      @id @default(uuid())
+  number      String      @unique // С-1007-01, П-1007-01, Г-1007-01
+  itemId      String
+  item        Item        @relation(fields: [itemId], references: [id])
+  supplierLot String?
+  expiresAt   DateTime?
+  unitCost    Float? // ₽ за единицу учёта, null = не задана
+  barrel      String? // номер бочки для полуфабриката
+  createdAt   DateTime    @default(now())
+  moves       StockMove[]
+
+  @@index([itemId])
+}
+
+enum DocType {
+  RECEIPT // приход
+  OPENING // ввод начальных остатков
+  ADJUSTMENT // корректировка / инвентаризация
+}
+
+enum DocStatus {
+  DRAFT
+  POSTED
+  CANCELLED
+}
+
+model StockDoc {
+  id        String         @id @default(uuid())
+  number    String         @unique
+  type      DocType
+  status    DocStatus      @default(DRAFT)
+  date      DateTime       @default(now())
+  supplier  String?
+  docRef    String? // УПД № 4417 от 06.10
+  comment   String?
+  userId    String
+  user      User           @relation(fields: [userId], references: [id])
+  postedAt  DateTime?
+  createdAt DateTime       @default(now())
+  lines     StockDocLine[]
+  moves     StockMove[]
+}
+
+model StockDocLine {
+  id          String       @id @default(uuid())
+  docId       String
+  doc         StockDoc     @relation(fields: [docId], references: [id], onDelete: Cascade)
+  itemId      String
+  item        Item         @relation(fields: [itemId], references: [id])
+  lotId       String? // для корректировки — существующий лот; для прихода заполняется при проведении
+  qty         Float // для прихода > 0; для корректировки — со знаком
+  unitCost    Float?
+  supplierLot String?
+  expiresAt   DateTime?
+  barrel      String?
+  state       ProductState @default(NONE)
+  reason      String?
+}
+
+model StockMove {
+  id        String       @id @default(uuid())
+  docId     String
+  doc       StockDoc     @relation(fields: [docId], references: [id])
+  lotId     String
+  lot       Lot          @relation(fields: [lotId], references: [id])
+  state     ProductState @default(NONE)
+  qty       Float // + приход, − расход
+  createdAt DateTime     @default(now())
+
+  @@index([lotId, state])
 }

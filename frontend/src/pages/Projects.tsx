@@ -60,6 +60,7 @@ export default function Projects() {
         <h1 className="text-lg sm:text-xl font-bold">LabelStudio</h1>
         <div className="flex items-center gap-3 sm:gap-4 text-sm">
           <span className="hidden sm:inline text-gray-600 truncate max-w-[140px]">{user?.email}</span>
+          <button onClick={() => navigate('/stock')} className="text-blue-600 hover:text-blue-800 hover:underline border-none p-0 font-inherit cursor-pointer">Склад</button>
           {user?.role === 'ADMIN' && (
             <button onClick={() => navigate('/admin')} className="text-blue-600 hover:text-blue-800 hover:underline border-none p-0 font-inherit cursor-pointer">Админ</button>
           )}
