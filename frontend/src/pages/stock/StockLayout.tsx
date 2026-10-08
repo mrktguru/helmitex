@@ -5,7 +5,9 @@ const TABS = [
   { to: '/stock', label: 'Остатки', end: true },
   { to: '/stock/docs', label: 'Документы', end: false },
   { to: '/stock/mixes', label: 'Замесы', end: false },
+  { to: '/stock/fills', label: 'Фасовка', end: false },
   { to: '/stock/recipes', label: 'Рецептуры', end: false },
+  { to: '/stock/skus', label: 'Карточки SKU', end: false },
   { to: '/stock/items', label: 'Номенклатура', end: false },
   { to: '/stock/moves', label: 'Журнал движений', end: false },
 ];

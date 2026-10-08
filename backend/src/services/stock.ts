@@ -16,6 +16,7 @@ export const DOC_PREFIX: Record<DocType, string> = {
   OPENING: 'НО',
   ADJUSTMENT: 'КР',
   MIX: 'З',
+  FILL: 'Ф',
 };
 
 const EPS = 1e-6;
@@ -71,6 +72,10 @@ export async function postDoc(tx: Tx, docId: string): Promise<void> {
 
   if (doc.type === 'MIX') {
     await postMix(tx, doc);
+    return;
+  }
+  if (doc.type === 'FILL') {
+    await postFill(tx, doc);
     return;
   }
 
@@ -189,4 +194,78 @@ export async function allocateFefo(tx: Tx, itemId: string, need: number): Promis
     left -= take;
   }
   return { allocations, shortage: left > EPS ? round(left) : 0 };
+}
+
+// Фасовка: из бочки в единицы ГП «без ЧЗ», списание тары и этикеток.
+// Себестоимость единицы = полуфабрикат (с учётом потерь) + материалы по карточке SKU.
+async function postFill(tx: Tx, doc: DocWithLines): Promise<void> {
+  if (!doc.sourceLotId) throw new StockError('Не выбрана бочка');
+  const barrel = await tx.lot.findUnique({ where: { id: doc.sourceLotId }, include: { item: true } });
+  if (barrel?.item.type !== 'SEMI') throw new StockError('Источник фасовки — не бочка полуфабриката');
+
+  const outputs = doc.lines.filter((l) => l.item.type === 'PRODUCT' && l.qty > 0);
+  const materials = doc.lines.filter((l) => l.item.type !== 'PRODUCT' && l.qty > 0);
+  if (outputs.length === 0) throw new StockError('Нет фасованной продукции');
+
+  const specs = await tx.productSpec.findMany({
+    where: { itemId: { in: outputs.map((o) => o.itemId) } },
+    include: { materials: true },
+  });
+  const specOf = new Map(specs.map((sp) => [sp.itemId, sp]));
+  let usedKg = 0;
+  for (const o of outputs) {
+    const sp = specOf.get(o.itemId);
+    if (!sp?.netQty) throw new StockError(`«${o.item.name}»: в карточке SKU не задано нетто`);
+    if (sp.semiItemId && sp.semiItemId !== barrel.itemId) {
+      throw new StockError(`«${o.item.name}» фасуется не из «${barrel.item.name}»`);
+    }
+    usedKg += o.qty * sp.netQty;
+  }
+
+  // Бочка: списываем расход либо всё, кроме указанного остатка (разница — потери)
+  const balance = await lotBalance(tx, barrel.id, 'NONE');
+  let consumeKg = usedKg;
+  if (doc.remainQty != null) {
+    consumeKg = balance - doc.remainQty;
+    if (consumeKg < usedKg - EPS) {
+      throw new StockError(`В бочке ${round(balance)} кг: расход ${round(usedKg)} кг + остаток ${doc.remainQty} кг больше, чем было`);
+    }
+  }
+  await consume(tx, doc.id, barrel.id, 'NONE', round(consumeKg), barrel.item.name);
+
+  // Материалы и их средняя цена в этом документе
+  const matCost = new Map<string, { cost: number | null; qty: number }>();
+  for (const m of materials) {
+    if (!m.lotId) throw new StockError(`«${m.item.name}»: не выбран лот`);
+    const lot = await tx.lot.findUnique({ where: { id: m.lotId } });
+    if (lot?.itemId !== m.itemId) throw new StockError(`«${m.item.name}»: лот от другой позиции`);
+    await consume(tx, doc.id, m.lotId, 'NONE', m.qty, m.item.name);
+    const c = matCost.get(m.itemId) ?? { cost: 0, qty: 0 };
+    c.cost = c.cost == null || lot.unitCost == null ? null : c.cost + lot.unitCost * m.qty;
+    c.qty += m.qty;
+    matCost.set(m.itemId, c);
+  }
+
+  const semiKgCost = barrel.unitCost == null ? null : (barrel.unitCost * consumeKg) / usedKg;
+  for (const o of outputs) {
+    const sp = specOf.get(o.itemId)!;
+    let unitCost: number | null = semiKgCost == null ? null : semiKgCost * sp.netQty!;
+    for (const pm of sp.materials) {
+      const c = matCost.get(pm.itemId);
+      if (!c) continue;
+      unitCost = unitCost == null || c.cost == null ? null : unitCost + (c.cost / c.qty) * pm.qtyPerUnit;
+    }
+    const lot = await tx.lot.create({
+      data: {
+        number: await nextLotNumber(tx, 'PRODUCT'),
+        itemId: o.itemId,
+        expiresAt: barrel.expiresAt,
+        unitCost: unitCost == null ? null : round(unitCost),
+        parentLotId: barrel.id,
+      },
+    });
+    await tx.stockDocLine.update({ where: { id: o.id }, data: { lotId: lot.id, state: 'UNLABELED' } });
+    await tx.stockMove.create({ data: { docId: doc.id, lotId: lot.id, state: 'UNLABELED', qty: o.qty } });
+  }
+  await tx.stockDoc.update({ where: { id: doc.id }, data: { status: 'POSTED', postedAt: new Date() } });
 }

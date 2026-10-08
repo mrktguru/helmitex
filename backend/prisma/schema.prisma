@@ -111,19 +111,22 @@ enum ProductState {
 }
 
 model Item {
-  id          String         @id @default(uuid())
+  id          String            @id @default(uuid())
   type        ItemType
   name        String
   unit        String // "кг" | "шт" | "л"
   minStock    Float?
-  noStock     Boolean        @default(false) // не учитывается на складе (вода)
-  archived    Boolean        @default(false)
-  createdAt   DateTime       @default(now())
+  noStock     Boolean           @default(false) // не учитывается на складе (вода)
+  archived    Boolean           @default(false)
+  createdAt   DateTime          @default(now())
   lots        Lot[]
   docLines    StockDocLine[]
-  recipe      Recipe?        @relation("RecipeOutput")
+  recipe      Recipe?           @relation("RecipeOutput")
   recipeLines RecipeLine[]
-  outputDocs  StockDoc[]     @relation("DocOutputItem")
+  outputDocs  StockDoc[]        @relation("DocOutputItem")
+  spec        ProductSpec?      @relation("SpecProduct")
+  specsAsSemi ProductSpec[]     @relation("SpecSemi")
+  materialOf  ProductMaterial[] @relation("MaterialItem")
 
   @@unique([type, name])
 }
@@ -137,6 +140,7 @@ model Lot {
   expiresAt   DateTime?
   unitCost    Float? // ₽ за единицу учёта, null = не задана
   barrel      String? // номер бочки для полуфабриката
+  parentLotId String? // для ГП — бочка, из которой фасовали
   createdAt   DateTime    @default(now())
   moves       StockMove[]
 
@@ -148,6 +152,7 @@ enum DocType {
   OPENING // ввод начальных остатков
   ADJUSTMENT // корректировка / инвентаризация
   MIX // замес полуфабриката
+  FILL // фасовка
 }
 
 enum DocStatus {
@@ -180,6 +185,8 @@ model StockDoc {
   yieldQty     Float?
   barrel       String?
   expiresAt    DateTime?
+  sourceLotId  String? // фасовка: бочка
+  remainQty    Float? // фасовка: остаток в бочке после фасовки (null — бочку не закрывать)
 }
 
 model StockDocLine {
@@ -234,4 +241,26 @@ model RecipeLine {
   percent  Float
   stage    Int    @default(1)
   sort     Int    @default(0)
+}
+
+// Карточка SKU готовой продукции: из чего и как фасуется
+model ProductSpec {
+  id         String            @id @default(uuid())
+  itemId     String            @unique
+  item       Item              @relation("SpecProduct", fields: [itemId], references: [id])
+  semiItemId String?
+  semiItem   Item?             @relation("SpecSemi", fields: [semiItemId], references: [id])
+  netQty     Float? // кг полуфабриката в 1 шт
+  updatedAt  DateTime          @updatedAt
+  materials  ProductMaterial[]
+}
+
+model ProductMaterial {
+  id         String      @id @default(uuid())
+  specId     String
+  spec       ProductSpec @relation(fields: [specId], references: [id], onDelete: Cascade)
+  itemId     String
+  item       Item        @relation("MaterialItem", fields: [itemId], references: [id])
+  qtyPerUnit Float       @default(1)
+  sort       Int         @default(0)
 }

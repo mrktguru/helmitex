@@ -14,10 +14,12 @@ export const DOC_TYPES = [
   { value: 'OPENING', label: 'Ввод начальных остатков', short: 'Нач. остатки' },
   { value: 'ADJUSTMENT', label: 'Корректировка / инвентаризация', short: 'Корректировка' },
   { value: 'MIX', label: 'Замес', short: 'Замес' },
+  { value: 'FILL', label: 'Фасовка', short: 'Фасовка' },
 ] as const;
 
-export const docPath = (d: { id: string; type: string }) => (d.type === 'MIX' ? `/stock/mix/${d.id}` : `/stock/docs/${d.id}`);
-export const newDocPath = (type: string) => (type === 'MIX' ? '/stock/mix/new' : `/stock/docs/new?type=${type}`);
+const DOC_ROUTE: Record<string, string> = { MIX: 'mix', FILL: 'fill' };
+export const docPath = (d: { id: string; type: string }) => `/stock/${DOC_ROUTE[d.type] ?? 'docs'}/${d.id}`;
+export const newDocPath = (type: string) => (DOC_ROUTE[type] ? `/stock/${DOC_ROUTE[type]}/new` : `/stock/docs/new?type=${type}`);
 
 // Отклонение факта от нормы: > 1 % — внимание, > 3 % — критично
 export function deviation(plan: number | null | undefined, fact: number | null): { pct: number; cls: string } | null {

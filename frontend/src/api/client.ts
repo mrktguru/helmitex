@@ -94,6 +94,12 @@ export const api = {
   getRecipes: () => request<any[]>('/stock/recipes'),
   saveRecipe: (itemId: string, data: any) =>
     request<any>(`/stock/recipes/${itemId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getSpecs: () => request<any[]>('/stock/specs'),
+  saveSpec: (itemId: string, data: any) =>
+    request<any>(`/stock/specs/${itemId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getBarrels: () => request<any[]>('/stock/barrels'),
+  getFillPlan: (data: { sourceLotId: string; outputs: { itemId: string; qty: number }[] }) =>
+    request<any>('/stock/fill/plan', { method: 'POST', body: JSON.stringify(data) }),
   getMixPlan: (itemId: string, qty: number) =>
     request<any>(`/stock/mix/plan?${new URLSearchParams({ itemId, qty: String(qty) })}`),
 

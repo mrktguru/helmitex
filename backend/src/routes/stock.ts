@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { ItemType, Prisma } from '@prisma/client';
 import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
-import { allocateFefo, cancelDoc, nextDocNumber, postDoc, StockError } from '../services/stock';
+import { allocateFefo, cancelDoc, lotBalance, nextDocNumber, postDoc, StockError } from '../services/stock';
 
 const router = Router();
 router.use(authMiddleware);
@@ -33,7 +33,7 @@ const lineSchema = z.object({
   planQty: z.number().nonnegative().nullable().optional(),
   stage: z.number().int().nullable().optional(),
 });
-const docTypes = ['RECEIPT', 'OPENING', 'ADJUSTMENT', 'MIX'] as const;
+const docTypes = ['RECEIPT', 'OPENING', 'ADJUSTMENT', 'MIX', 'FILL'] as const;
 const docSchema = z.object({
   type: z.enum(docTypes),
   date: z.string().optional(),
@@ -45,6 +45,8 @@ const docSchema = z.object({
   yieldQty: z.number().nonnegative().nullable().optional(),
   barrel: z.string().max(50).nullable().optional(),
   expiresAt: z.string().nullable().optional(),
+  sourceLotId: z.string().uuid().nullable().optional(),
+  remainQty: z.number().nonnegative().nullable().optional(),
   lines: z.array(lineSchema).max(500),
 });
 
@@ -216,6 +218,93 @@ router.get('/mix/plan', async (req: AuthRequest, res: Response): Promise<void> =
   res.json({ stages: recipe.stages, qc: recipe.qc, lines });
 });
 
+// ───────────── Карточки SKU ─────────────
+
+const specSchema = z.object({
+  semiItemId: z.string().uuid().nullable(),
+  netQty: z.number().positive().nullable(),
+  materials: z.array(z.object({ itemId: z.string().uuid(), qtyPerUnit: z.number().positive() })).max(30),
+});
+
+// GET /api/stock/specs — все SKU с карточками
+router.get('/specs', async (_req: AuthRequest, res: Response) => {
+  const items = await prisma.item.findMany({
+    where: { type: 'PRODUCT', archived: false },
+    orderBy: { name: 'asc' },
+    include: { spec: { include: { semiItem: true, materials: { include: { item: true }, orderBy: { sort: 'asc' } } } } },
+  });
+  res.json(items);
+});
+
+// PUT /api/stock/specs/:itemId
+router.put('/specs/:itemId', async (req: AuthRequest, res: Response): Promise<void> => {
+  const parsed = specSchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
+  const item = await prisma.item.findUnique({ where: { id: req.params.itemId } });
+  if (item?.type !== 'PRODUCT') { res.status(400).json({ error: 'Карточка задаётся только для готовой продукции' }); return; }
+  const { materials, ...data } = parsed.data;
+  const spec = await prisma.$transaction(async (tx) => {
+    const sp = await tx.productSpec.upsert({ where: { itemId: item.id }, create: { itemId: item.id, ...data }, update: data });
+    await tx.productMaterial.deleteMany({ where: { specId: sp.id } });
+    await tx.productMaterial.createMany({ data: materials.map((m, i) => ({ ...m, specId: sp.id, sort: i })) });
+    return sp;
+  });
+  res.json(spec);
+});
+
+// ───────────── Фасовка ─────────────
+
+// GET /api/stock/barrels — бочки с остатком
+router.get('/barrels', async (_req: AuthRequest, res: Response) => {
+  const groups = await prisma.stockMove.groupBy({
+    by: ['lotId'], where: { lot: { item: { type: 'SEMI' } } }, _sum: { qty: true },
+  });
+  const live = groups.filter((g) => (g._sum.qty ?? 0) > 1e-6);
+  const lots = await prisma.lot.findMany({ where: { id: { in: live.map((g) => g.lotId) } }, include: { item: true }, orderBy: { createdAt: 'asc' } });
+  const qty = new Map(live.map((g) => [g.lotId, g._sum.qty ?? 0]));
+  res.json(lots.map((l) => ({ ...l, qty: Math.round(qty.get(l.id)! * 1e6) / 1e6 })));
+});
+
+const fillPlanSchema = z.object({
+  sourceLotId: z.string().uuid(),
+  outputs: z.array(z.object({ itemId: z.string().uuid(), qty: z.number().nonnegative() })).max(50),
+});
+
+// POST /api/stock/fill/plan — расход полуфабриката и материалов, лоты материалов по FEFO
+router.post('/fill/plan', async (req: AuthRequest, res: Response): Promise<void> => {
+  const parsed = fillPlanSchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
+  const barrel = await prisma.lot.findUnique({ where: { id: parsed.data.sourceLotId }, include: { item: true } });
+  if (!barrel) { res.status(404).json({ error: 'Бочка не найдена' }); return; }
+  const balance = await lotBalance(prisma, barrel.id, 'NONE');
+  const specs = await prisma.productSpec.findMany({
+    where: { itemId: { in: parsed.data.outputs.map((o) => o.itemId) } },
+    include: { item: true, materials: { include: { item: true }, orderBy: { sort: 'asc' } } },
+  });
+  const specOf = new Map(specs.map((sp) => [sp.itemId, sp]));
+  const errors: string[] = [];
+  const need = new Map<string, { item: any; qty: number }>();
+  let usedKg = 0;
+  for (const o of parsed.data.outputs) {
+    const sp = specOf.get(o.itemId);
+    if (!sp?.netQty) { errors.push('Не заполнена карточка SKU (нетто)'); continue; }
+    if (sp.semiItemId && sp.semiItemId !== barrel.itemId) errors.push(`«${sp.item.name}» фасуется не из «${barrel.item.name}»`);
+    usedKg += o.qty * sp.netQty;
+    for (const m of sp.materials) {
+      const n = need.get(m.itemId) ?? { item: m.item, qty: 0 };
+      n.qty += o.qty * m.qtyPerUnit;
+      need.set(m.itemId, n);
+    }
+  }
+  const materials = [];
+  for (const [itemId, n] of need) {
+    const qty = Math.round(n.qty * 1e6) / 1e6;
+    materials.push({ item: n.item, need: qty, ...(await allocateFefo(prisma, itemId, qty)) });
+  }
+  if (usedKg > balance + 1e-6) errors.push(`В бочке ${Math.round(balance * 1000) / 1000} кг, нужно ${Math.round(usedKg * 1000) / 1000} кг`);
+  res.json({ balance, usedKg: Math.round(usedKg * 1e6) / 1e6, materials, errors });
+});
+
 // ───────────── Документы ─────────────
 
 // GET /api/stock/docs?type=RECEIPT
@@ -250,12 +339,13 @@ router.get('/docs/:id', async (req: AuthRequest, res: Response): Promise<void> =
     },
   });
   if (!doc) { res.status(404).json({ error: 'Not found' }); return; }
-  const lotIds = [...doc.lines.map((l) => l.lotId), doc.outputLotId].filter((x): x is string => !!x);
+  const lotIds = [...doc.lines.map((l) => l.lotId), doc.outputLotId, doc.sourceLotId].filter((x): x is string => !!x);
   const lots = await prisma.lot.findMany({ where: { id: { in: lotIds } }, select: { id: true, number: true } });
   const num = new Map(lots.map((l) => [l.id, l.number]));
   res.json({
     ...doc,
     outputLotNumber: doc.outputLotId ? num.get(doc.outputLotId) ?? null : null,
+    sourceLotNumber: doc.sourceLotId ? num.get(doc.sourceLotId) ?? null : null,
     lines: doc.lines.map((l) => ({ ...l, lotNumber: l.lotId ? num.get(l.lotId) ?? null : null })),
   });
 });
