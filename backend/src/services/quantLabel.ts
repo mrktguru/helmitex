@@ -17,6 +17,8 @@ export interface QuantLabelData {
   createdAt: Date;
 }
 
+export const barcodeText = (number: string) => number.replace(/^К/, 'K');
+
 function fitText(text: string, font: PDFFont, maxSize: number, maxWidth: number): number {
   let size = maxSize;
   while (size > 4 && font.widthOfTextAtSize(text, size) > maxWidth) size -= 0.5;
@@ -27,8 +29,8 @@ function fitText(text: string, font: PDFFont, maxSize: number, maxWidth: number)
 export async function renderQuantLabels(quants: QuantLabelData[], widthMm: number, heightMm: number): Promise<Buffer> {
   const doc = await PDFDocument.create();
   doc.registerFontkit(fontkit);
-  const regular = await doc.embedFont(fs.readFileSync(path.join(FONT_DIR, 'PTSans-Regular.ttf')), { subset: true });
-  const bold = await doc.embedFont(fs.readFileSync(path.join(FONT_DIR, 'PTSans-Bold.ttf')), { subset: true });
+  const regular = await doc.embedFont(fs.readFileSync(path.join(FONT_DIR, 'PTSans-Regular.ttf')), { subset: false });
+  const bold = await doc.embedFont(fs.readFileSync(path.join(FONT_DIR, 'PTSans-Bold.ttf')), { subset: false });
   const W = widthMm * MM_TO_PT;
   const H = heightMm * MM_TO_PT;
   const pad = 2.5 * MM_TO_PT;
@@ -44,7 +46,8 @@ export async function renderQuantLabels(quants: QuantLabelData[], widthMm: numbe
     y -= numSize * 0.8;
     page.drawText(q.number, { x: pad, y, size: numSize, font: bold, color: black });
 
-    const png = await bwipjs.toBuffer({ bcid: 'code128', text: q.number, scale: 4, height: 10, includetext: false });
+    // Code128 не кодирует кириллицу: в штрихкоде «К» заменяется латинской K (поиск понимает оба варианта)
+    const png = await bwipjs.toBuffer({ bcid: 'code128', text: barcodeText(q.number), scale: 4, height: 10, includetext: false });
     const img = await doc.embedPng(png);
     const bcH = H * 0.3;
     y -= 1.5 * MM_TO_PT + bcH;

@@ -193,7 +193,8 @@ router.get('/batches/:id/pdf', async (req: AuthRequest, res: Response): Promise<
 
 // GET /api/stock/quants?status=ASSEMBLED&typeId=…&q=К-2610 или код ЧЗ
 router.get('/quants', async (req: AuthRequest, res: Response) => {
-  const q = String(req.query.q ?? '').trim();
+  // Сканер этикетки кванта даёт латинскую K вместо «К»
+  const q = String(req.query.q ?? '').trim().replace(/^[Kk]-/, 'К-');
   const where: Prisma.QuantWhereInput = {
     status: req.query.status ? (String(req.query.status) as any) : undefined,
     quantTypeId: req.query.typeId ? String(req.query.typeId) : undefined,
