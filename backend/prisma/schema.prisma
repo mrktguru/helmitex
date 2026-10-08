@@ -33,6 +33,7 @@ model Project {
   template      LabelTemplate?
   czBatches     CzBatch[]
   outputBatches OutputBatch[]
+  quantTypes    QuantType[]
 }
 
 model LabelTemplate {
@@ -73,11 +74,13 @@ model CzCode {
   usedAt        DateTime?
   outputBatchId String?
   outputBatch   OutputBatch? @relation(fields: [outputBatchId], references: [id])
+  quantCodes    QuantCode[]
 }
 
 enum CodeStatus {
   PENDING
   USED
+  SPOILED // этикетка испорчена, код выведен из кванта
 }
 
 model OutputBatch {
@@ -91,6 +94,7 @@ model OutputBatch {
   count     Int
   createdAt DateTime @default(now())
   codes     CzCode[]
+  quant     Quant?
 }
 
 // ─────────────────────────── Склад ───────────────────────────
@@ -108,25 +112,29 @@ enum ProductState {
   NONE // для всего, кроме ГП
   UNLABELED // расфасовано, без ЧЗ
   LABELED // оклеено ЧЗ, россыпью
+  IN_QUANT // уложено в квант
 }
 
 model Item {
-  id          String            @id @default(uuid())
+  id          String              @id @default(uuid())
   type        ItemType
   name        String
   unit        String // "кг" | "шт" | "л"
   minStock    Float?
-  noStock     Boolean           @default(false) // не учитывается на складе (вода)
-  archived    Boolean           @default(false)
-  createdAt   DateTime          @default(now())
+  noStock     Boolean             @default(false) // не учитывается на складе (вода)
+  archived    Boolean             @default(false)
+  createdAt   DateTime            @default(now())
   lots        Lot[]
   docLines    StockDocLine[]
-  recipe      Recipe?           @relation("RecipeOutput")
+  recipe      Recipe?             @relation("RecipeOutput")
   recipeLines RecipeLine[]
-  outputDocs  StockDoc[]        @relation("DocOutputItem")
-  spec        ProductSpec?      @relation("SpecProduct")
-  specsAsSemi ProductSpec[]     @relation("SpecSemi")
-  materialOf  ProductMaterial[] @relation("MaterialItem")
+  outputDocs  StockDoc[]          @relation("DocOutputItem")
+  spec        ProductSpec?        @relation("SpecProduct")
+  specsAsSemi ProductSpec[]       @relation("SpecSemi")
+  materialOf  ProductMaterial[]   @relation("MaterialItem")
+  quantTypes  QuantType[]         @relation("QuantProduct")
+  quantBoxes  QuantType[]         @relation("QuantBox")
+  quantMats   QuantTypeMaterial[]
 
   @@unique([type, name])
 }
@@ -143,6 +151,7 @@ model Lot {
   parentLotId String? // для ГП — бочка, из которой фасовали
   createdAt   DateTime    @default(now())
   moves       StockMove[]
+  quants      Quant[]
 
   @@index([itemId])
 }
@@ -153,6 +162,7 @@ enum DocType {
   ADJUSTMENT // корректировка / инвентаризация
   MIX // замес полуфабриката
   FILL // фасовка
+  QUANT // сборка квантов
 }
 
 enum DocStatus {
@@ -179,7 +189,7 @@ model StockDoc {
 
   // замес: что получаем
   outputItemId String?
-  outputItem   Item?     @relation("DocOutputItem", fields: [outputItemId], references: [id])
+  outputItem   Item?         @relation("DocOutputItem", fields: [outputItemId], references: [id])
   outputLotId  String?
   plannedQty   Float?
   yieldQty     Float?
@@ -187,6 +197,12 @@ model StockDoc {
   expiresAt    DateTime?
   sourceLotId  String? // фасовка: бочка
   remainQty    Float? // фасовка: остаток в бочке после фасовки (null — бочку не закрывать)
+  quantTypeId  String?
+  quantType    QuantType?    @relation(fields: [quantTypeId], references: [id])
+  quantCount   Int?
+  sourceState  ProductState? // сборка квантов: из «без ЧЗ» или «с ЧЗ»
+  imported     Boolean       @default(false) // ввод существующих квантов
+  quants       Quant[]
 }
 
 model StockDocLine {
@@ -263,4 +279,77 @@ model ProductMaterial {
   item       Item        @relation("MaterialItem", fields: [itemId], references: [id])
   qtyPerUnit Float       @default(1)
   sort       Int         @default(0)
+}
+
+// Тип кванта: сколько единиц какого SKU в какой короб и с какими этикетками
+model QuantType {
+  id            String              @id @default(uuid())
+  name          String              @unique
+  productItemId String
+  productItem   Item                @relation("QuantProduct", fields: [productItemId], references: [id])
+  unitsPerQuant Int
+  boxItemId     String?
+  boxItem       Item?               @relation("QuantBox", fields: [boxItemId], references: [id])
+  trackCz       Boolean             @default(true)
+  projectId     String? // проект портала с макетом этикетки ЧЗ
+  project       Project?            @relation(fields: [projectId], references: [id])
+  labelWidthMm  Float               @default(58)
+  labelHeightMm Float               @default(40)
+  archived      Boolean             @default(false)
+  createdAt     DateTime            @default(now())
+  materials     QuantTypeMaterial[]
+  quants        Quant[]
+  docs          StockDoc[]
+}
+
+model QuantTypeMaterial {
+  id          String    @id @default(uuid())
+  quantTypeId String
+  quantType   QuantType @relation(fields: [quantTypeId], references: [id], onDelete: Cascade)
+  itemId      String
+  item        Item      @relation(fields: [itemId], references: [id])
+  qtyPerQuant Float
+  sort        Int       @default(0)
+}
+
+enum QuantStatus {
+  ASSEMBLED // собран, на складе
+  RESERVED // в поставке
+  SHIPPED // отгружен
+  DISASSEMBLED // разобран / отменён
+}
+
+model Quant {
+  id            String       @id @default(uuid())
+  number        String       @unique // К-261008-001
+  quantTypeId   String
+  quantType     QuantType    @relation(fields: [quantTypeId], references: [id])
+  lotId         String
+  lot           Lot          @relation(fields: [lotId], references: [id])
+  docId         String
+  doc           StockDoc     @relation(fields: [docId], references: [id])
+  units         Int
+  status        QuantStatus  @default(ASSEMBLED)
+  unitCost      Float? // себестоимость кванта целиком
+  outputBatchId String?      @unique
+  outputBatch   OutputBatch? @relation(fields: [outputBatchId], references: [id])
+  createdAt     DateTime     @default(now())
+  codes         QuantCode[]
+
+  @@index([status, quantTypeId])
+}
+
+// Коды ЧЗ, лежащие в кванте. Замена испорченной этикетки: старая строка active=false, новая — active=true.
+model QuantCode {
+  id        String   @id @default(uuid())
+  quantId   String
+  quant     Quant    @relation(fields: [quantId], references: [id], onDelete: Cascade)
+  czCodeId  String?
+  czCode    CzCode?  @relation(fields: [czCodeId], references: [id])
+  code      String? // текст кода; для введённых вручную — единственный источник
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([czCodeId])
+  @@index([code])
 }

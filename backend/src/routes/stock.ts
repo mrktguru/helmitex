@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { ItemType, Prisma } from '@prisma/client';
 import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
-import { allocateFefo, cancelDoc, lotBalance, nextDocNumber, postDoc, StockError } from '../services/stock';
+import { allocateFefo, cancelDoc, lotBalance, nextDocNumber, postDoc, PdfJob, StockError } from '../services/stock';
+import { enqueuePdfJobs } from './quants';
 
 const router = Router();
 router.use(authMiddleware);
@@ -33,7 +34,7 @@ const lineSchema = z.object({
   planQty: z.number().nonnegative().nullable().optional(),
   stage: z.number().int().nullable().optional(),
 });
-const docTypes = ['RECEIPT', 'OPENING', 'ADJUSTMENT', 'MIX', 'FILL'] as const;
+const docTypes = ['RECEIPT', 'OPENING', 'ADJUSTMENT', 'MIX', 'FILL', 'QUANT'] as const;
 const docSchema = z.object({
   type: z.enum(docTypes),
   date: z.string().optional(),
@@ -356,6 +357,7 @@ router.post('/docs', async (req: AuthRequest, res: Response): Promise<void> => {
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
   const { lines, date, ...head } = parsed.data;
   try {
+    let jobs: PdfJob[] = [];
     const doc = await prisma.$transaction(async (tx) => {
       const created = await tx.stockDoc.create({
         data: {
@@ -366,9 +368,10 @@ router.post('/docs', async (req: AuthRequest, res: Response): Promise<void> => {
           lines: { create: lines.map((l, i) => lineData(l, i)) },
         },
       });
-      if (req.query.post === '1') await postDoc(tx, created.id);
+      if (req.query.post === '1') jobs = await postDoc(tx, created.id);
       return created;
     }, { isolationLevel: 'Serializable' });
+    await enqueuePdfJobs(jobs);
     res.status(201).json(doc);
   } catch (err) { sendError(res, err); }
 });
@@ -400,7 +403,8 @@ router.put('/docs/:id', async (req: AuthRequest, res: Response): Promise<void> =
 // POST /api/stock/docs/:id/post
 router.post('/docs/:id/post', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    await prisma.$transaction((tx) => postDoc(tx, req.params.id), { isolationLevel: 'Serializable' });
+    const jobs = await prisma.$transaction((tx) => postDoc(tx, req.params.id), { isolationLevel: 'Serializable' });
+    await enqueuePdfJobs(jobs);
     res.json({ ok: true });
   } catch (err) { sendError(res, err); }
 });
@@ -408,7 +412,8 @@ router.post('/docs/:id/post', async (req: AuthRequest, res: Response): Promise<v
 // POST /api/stock/docs/:id/cancel
 router.post('/docs/:id/cancel', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    await prisma.$transaction((tx) => cancelDoc(tx, req.params.id), { isolationLevel: 'Serializable' });
+    const releaseCodes = req.body?.releaseCodes === true;
+    await prisma.$transaction((tx) => cancelDoc(tx, req.params.id, { releaseCodes }), { isolationLevel: 'Serializable' });
     res.json({ ok: true });
   } catch (err) { sendError(res, err); }
 });

@@ -17,6 +17,11 @@ import StockRecipes from './pages/stock/StockRecipes';
 import StockMixEdit from './pages/stock/StockMixEdit';
 import StockFillEdit from './pages/stock/StockFillEdit';
 import StockSkus from './pages/stock/StockSkus';
+import StockQuantTypes from './pages/stock/StockQuantTypes';
+import StockQuants from './pages/stock/StockQuants';
+import StockQuantAssemble from './pages/stock/StockQuantAssemble';
+import StockQuantDoc from './pages/stock/StockQuantDoc';
+import StockQuantDetail from './pages/stock/StockQuantDetail';
 import { PrivateRoute } from './components/PrivateRoute';
 import { AdminRoute } from './components/AdminRoute';
 
@@ -44,6 +49,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="fill/new" element={<StockFillEdit />} />
             <Route path="fill/:id" element={<StockFillEdit />} />
             <Route path="skus" element={<StockSkus />} />
+            <Route path="quant-types" element={<StockQuantTypes />} />
+            <Route path="quants" element={<StockQuants />} />
+            <Route path="quants/:id" element={<StockQuantDetail />} />
+            <Route path="quant/new" element={<StockQuantAssemble />} />
+            <Route path="quant/:id" element={<StockQuantDoc />} />
           </Route>
         </Route>
         <Route element={<AdminRoute />}>

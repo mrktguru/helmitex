@@ -12,6 +12,7 @@ import templatesRouter from './routes/templates';
 import czRouter from './routes/cz';
 import batchesRouter from './routes/batches';
 import stockRouter from './routes/stock';
+import quantsRouter from './routes/quants';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
@@ -41,6 +42,7 @@ app.use('/api/projects', projectsRouter);
 app.use('/api/projects', templatesRouter);
 app.use('/api/projects', czRouter);
 app.use('/api/stock', stockRouter);
+app.use('/api/stock', quantsRouter);
 app.use('/api', batchesRouter);
 
 app.use(errorHandler);

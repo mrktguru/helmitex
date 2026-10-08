@@ -35,6 +35,25 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// Скачивание файла с авторизацией (PDF, CSV): fetch → blob → <a download>
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const token = useAuthStore.getState().accessToken;
+  const res = await fetch(BASE + path, { headers: token ? { Authorization: `Bearer ${token}` } : {}, credentials: 'include' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(body.error ?? `HTTP ${res.status}`);
+  }
+  const cd = res.headers.get('Content-Disposition') ?? '';
+  const m = cd.match(/filename\*=UTF-8''([^;]+)/);
+  const name = m ? decodeURIComponent(m[1]) : fallbackName;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 export const api = {
   // Auth
   login: (login: string, password: string) =>
@@ -89,7 +108,18 @@ export const api = {
   updateDoc: (id: string, data: any) =>
     request<any>(`/stock/docs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   postDoc: (id: string) => request<{ ok: true }>(`/stock/docs/${id}/post`, { method: 'POST' }),
-  cancelDoc: (id: string) => request<{ ok: true }>(`/stock/docs/${id}/cancel`, { method: 'POST' }),
+  cancelDoc: (id: string, releaseCodes = false) =>
+    request<{ ok: true }>(`/stock/docs/${id}/cancel`, { method: 'POST', body: JSON.stringify({ releaseCodes }) }),
+  getQuantTypes: () => request<any[]>('/stock/quant-types'),
+  saveQuantType: (id: string | null, data: any) =>
+    request<any>(id ? `/stock/quant-types/${id}` : '/stock/quant-types', { method: id ? 'PUT' : 'POST', body: JSON.stringify(data) }),
+  assembleQuants: (data: any) => request<any>('/stock/quant-docs', { method: 'POST', body: JSON.stringify(data) }),
+  getQuantDoc: (id: string) => request<any>(`/stock/quant-docs/${id}`),
+  getQuants: (params: { status?: string; typeId?: string; q?: string } = {}) =>
+    request<any[]>(`/stock/quants?${new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][])}`),
+  getQuant: (id: string) => request<any>(`/stock/quants/${id}`),
+  replaceQuantCode: (quantId: string, quantCodeId: string) =>
+    request<{ outputBatchId: string }>(`/stock/quants/${quantId}/replace-code`, { method: 'POST', body: JSON.stringify({ quantCodeId }) }),
   deleteDoc: (id: string) => request<{ ok: true }>(`/stock/docs/${id}`, { method: 'DELETE' }),
   getRecipes: () => request<any[]>('/stock/recipes'),
   saveRecipe: (itemId: string, data: any) =>

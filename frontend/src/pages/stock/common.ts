@@ -15,9 +15,10 @@ export const DOC_TYPES = [
   { value: 'ADJUSTMENT', label: 'Корректировка / инвентаризация', short: 'Корректировка' },
   { value: 'MIX', label: 'Замес', short: 'Замес' },
   { value: 'FILL', label: 'Фасовка', short: 'Фасовка' },
+  { value: 'QUANT', label: 'Сборка квантов', short: 'Кванты' },
 ] as const;
 
-const DOC_ROUTE: Record<string, string> = { MIX: 'mix', FILL: 'fill' };
+const DOC_ROUTE: Record<string, string> = { MIX: 'mix', FILL: 'fill', QUANT: 'quant' };
 export const docPath = (d: { id: string; type: string }) => `/stock/${DOC_ROUTE[d.type] ?? 'docs'}/${d.id}`;
 export const newDocPath = (type: string) => (DOC_ROUTE[type] ? `/stock/${DOC_ROUTE[type]}/new` : `/stock/docs/new?type=${type}`);
 
@@ -35,6 +36,14 @@ export const STATE_LABEL: Record<string, string> = {
   NONE: '',
   UNLABELED: 'без ЧЗ',
   LABELED: 'с ЧЗ',
+  IN_QUANT: 'в квантах',
+};
+
+export const QUANT_STATUS: Record<string, { label: string; cls: string }> = {
+  ASSEMBLED: { label: 'На складе', cls: 'bg-green-100 text-green-800' },
+  RESERVED: { label: 'В поставке', cls: 'bg-blue-100 text-blue-800' },
+  SHIPPED: { label: 'Отгружен', cls: 'bg-gray-100 text-gray-600' },
+  DISASSEMBLED: { label: 'Разобран', cls: 'bg-gray-100 text-gray-400' },
 };
 
 export const DOC_STATUS: Record<string, { label: string; cls: string }> = {

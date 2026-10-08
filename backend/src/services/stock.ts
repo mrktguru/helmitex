@@ -17,6 +17,7 @@ export const DOC_PREFIX: Record<DocType, string> = {
   ADJUSTMENT: 'КР',
   MIX: 'З',
   FILL: 'Ф',
+  QUANT: 'СК',
 };
 
 const EPS = 1e-6;
@@ -29,14 +30,15 @@ function datePart(d = new Date()): string {
 }
 
 // Следующий номер вида «С-261007-03»: префикс + дата + порядковый за день.
-async function nextNumber(
+export async function nextNumber(
   prefix: string,
   findLast: (startsWith: string) => Promise<string | null>,
+  pad = 2,
 ): Promise<string> {
   const base = `${prefix}-${datePart()}-`;
   const last = await findLast(base);
   const n = last ? parseInt(last.slice(base.length), 10) + 1 : 1;
-  return base + String(n).padStart(2, '0');
+  return base + String(n).padStart(pad, '0');
 }
 
 export function nextLotNumber(tx: Tx, type: ItemType) {
@@ -60,24 +62,31 @@ export async function lotBalance(tx: Tx, lotId: string, state: ProductState): Pr
 
 export class StockError extends Error {}
 
+// Задание на генерацию PDF этикеток ЧЗ — ставится в очередь после коммита транзакции
+export interface PdfJob { outputBatchId: string; projectId: string; codeIds: string[] }
+
 // Проводит черновик: приход и начальные остатки создают лоты, корректировка двигает существующие.
-export async function postDoc(tx: Tx, docId: string): Promise<void> {
+export async function postDoc(tx: Tx, docId: string): Promise<PdfJob[]> {
   const doc = await tx.stockDoc.findUnique({
     where: { id: docId },
     include: { lines: { include: { item: true } } },
   });
   if (!doc) throw new StockError('Документ не найден');
   if (doc.status !== 'DRAFT') throw new StockError('Провести можно только черновик');
-  if (doc.lines.length === 0) throw new StockError('В документе нет строк');
 
   if (doc.type === 'MIX') {
     await postMix(tx, doc);
-    return;
+    return [];
   }
   if (doc.type === 'FILL') {
     await postFill(tx, doc);
-    return;
+    return [];
   }
+  if (doc.type === 'QUANT') {
+    const { postQuant } = await import('./quants');
+    return postQuant(tx, docId);
+  }
+  if (doc.lines.length === 0) throw new StockError('В документе нет строк');
 
   for (const line of doc.lines) {
     if (doc.type === 'ADJUSTMENT') {
@@ -107,10 +116,11 @@ export async function postDoc(tx: Tx, docId: string): Promise<void> {
   }
 
   await tx.stockDoc.update({ where: { id: docId }, data: { status: 'POSTED', postedAt: new Date() } });
+  return [];
 }
 
 // Отмена проведённого документа: сторно всех его движений, если остатки позволяют.
-export async function cancelDoc(tx: Tx, docId: string): Promise<void> {
+export async function cancelDoc(tx: Tx, docId: string, opts: { releaseCodes?: boolean } = {}): Promise<void> {
   const doc = await tx.stockDoc.findUnique({ where: { id: docId }, include: { moves: { include: { lot: { include: { item: true } } } } } });
   if (!doc) throw new StockError('Документ не найден');
   if (doc.status !== 'POSTED') throw new StockError('Отменить можно только проведённый документ');
@@ -124,12 +134,16 @@ export async function cancelDoc(tx: Tx, docId: string): Promise<void> {
     }
     await tx.stockMove.create({ data: { docId, lotId: m.lotId, state: m.state, qty: -m.qty } });
   }
+  if (doc.type === 'QUANT') {
+    const { cancelQuants } = await import('./quants');
+    await cancelQuants(tx, docId, opts.releaseCodes ?? false);
+  }
   await tx.stockDoc.update({ where: { id: docId }, data: { status: 'CANCELLED' } });
 }
 
 type DocWithLines = Prisma.StockDocGetPayload<{ include: { lines: { include: { item: true } } } }>;
 
-async function consume(tx: Tx, docId: string, lotId: string, state: ProductState, qty: number, name: string) {
+export async function consume(tx: Tx, docId: string, lotId: string, state: ProductState, qty: number, name: string) {
   await tx.stockMove.create({ data: { docId, lotId, state, qty: -qty } });
   const balance = await lotBalance(tx, lotId, state);
   if (balance < -EPS) {
@@ -138,11 +152,12 @@ async function consume(tx: Tx, docId: string, lotId: string, state: ProductState
   }
 }
 
-const round = (n: number) => Math.round(n * 1e6) / 1e6;
+export const round = (n: number) => Math.round(n * 1e6) / 1e6;
 
 // Замес: списывает сырьё по фактическим лотам, создаёт бочку полуфабриката с выходом и себестоимостью.
 async function postMix(tx: Tx, doc: DocWithLines): Promise<void> {
   if (!doc.outputItemId) throw new StockError('Не выбран полуфабрикат');
+  if (!doc.lines.some((l) => l.qty > 0)) throw new StockError('В замесе нет компонентов');
   if (!doc.yieldQty || doc.yieldQty <= 0) throw new StockError('Укажите выход в бочку, кг');
 
   let cost: number | null = 0;
