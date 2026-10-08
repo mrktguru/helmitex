@@ -22,8 +22,13 @@ async function load(id: string) {
 }
 type Shipment = Awaited<ReturnType<typeof load>>;
 
+const STATUS_LABEL: Record<FboStatus, string> = {
+  DRAFT: 'кванты подобраны', OZON_DRAFT: 'черновик в Ozon', BOOKED: 'слот забронирован', CARGOES_SET: 'грузоместа переданы',
+  LABELS_READY: 'этикетки готовы', SHIPPED: 'отгружена', COMPLETED: 'принята Ozon', CANCELLED: 'отменена',
+};
+
 function expect(s: Shipment, ...allowed: FboStatus[]) {
-  if (!allowed.includes(s.status)) throw new StockError(`Действие недоступно в статусе ${s.status}`);
+  if (!allowed.includes(s.status)) throw new StockError(`Сейчас это действие недоступно: поставка в статусе «${STATUS_LABEL[s.status]}»`);
 }
 
 async function fail(id: string, err: unknown): Promise<never> {
