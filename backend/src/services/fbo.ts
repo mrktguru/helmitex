@@ -52,7 +52,10 @@ function itemsBySku(s: Shipment) {
 }
 
 // 1. Подбор и резерв квантов: по каждому типу — нужное количество, старые партии первыми (FEFO)
-export async function createShipment(userId: string, picks: { quantTypeId: string; count: number }[], comment?: string | null) {
+export async function createShipment(
+  userId: string, picks: { quantTypeId: string; count: number }[], comment?: string | null,
+  cluster?: { id: string; name: string } | null,
+) {
   return prisma.$transaction(async (tx) => {
     const quantIds: string[] = [];
     for (const p of picks.filter((x) => x.count > 0)) {
@@ -82,6 +85,7 @@ export async function createShipment(userId: string, picks: { quantTypeId: strin
     return tx.fboShipment.create({
       data: {
         number, userId, comment: comment || null,
+        clusterId: cluster?.id ?? null, clusterName: cluster?.name ?? null,
         cargoes: { create: quantIds.map((quantId, sort) => ({ quantId, sort })) },
       },
     });

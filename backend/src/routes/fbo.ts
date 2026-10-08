@@ -8,6 +8,7 @@ import {
 } from '../services/ozon';
 import { book, cancelShipment, createOzonDraft, createShipment, getTimeslots, makeLabels, setCargoes, ship, syncShipment, syncSkus } from '../services/fbo';
 import { downloadFile } from '../services/s3';
+import { getDemand } from '../services/demand';
 
 const router = Router();
 router.use(authMiddleware);
@@ -140,6 +141,50 @@ router.post('/ozon/import-products', h(async (req, res) => {
 router.post('/ozon/sync-skus', h(async (_req, res) => { res.json(await syncSkus()); }));
 
 // ───────────── Поставки FBO ─────────────
+
+// Потребность Ozon по кластерам (кэш 10 мин, ?refresh=1 — заново)
+router.get('/fbo/demand', h(async (req, res) => { res.json(await getDemand(req.query.refresh === '1')); }));
+
+// Поставки из плана: по одной на кластер, большие делятся по 30 коробок
+router.post('/fbo/plan', h(async (req, res) => {
+  const parsed = z.object({
+    items: z.array(z.object({
+      clusterId: z.string().min(1), clusterName: z.string().min(1),
+      quantTypeId: z.string().uuid(), count: z.number().int().min(1).max(1000),
+    })).min(1).max(500),
+  }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
+  const byCluster = new Map<string, { name: string; picks: { quantTypeId: string; count: number }[] }>();
+  for (const it of parsed.data.items) {
+    const g = byCluster.get(it.clusterId) ?? { name: it.clusterName, picks: [] };
+    g.picks.push({ quantTypeId: it.quantTypeId, count: it.count });
+    byCluster.set(it.clusterId, g);
+  }
+  const created: { id: string; number: string; clusterName: string; boxes: number }[] = [];
+  const failed: { clusterName: string; error: string }[] = [];
+  for (const [clusterId, g] of byCluster) {
+    // Делим состав на поставки по 30 коробок
+    const queue = g.picks.map((p) => ({ ...p }));
+    while (queue.some((p) => p.count > 0)) {
+      let room = 30;
+      const chunk: { quantTypeId: string; count: number }[] = [];
+      for (const p of queue) {
+        if (!room || !p.count) continue;
+        const take = Math.min(room, p.count);
+        chunk.push({ quantTypeId: p.quantTypeId, count: take });
+        p.count -= take; room -= take;
+      }
+      try {
+        const s = await createShipment(req.user!.id, chunk, 'Из плана по потребности Ozon', { id: clusterId, name: g.name });
+        created.push({ id: s.id, number: s.number, clusterName: g.name, boxes: 30 - room });
+      } catch (e) {
+        failed.push({ clusterName: g.name, error: (e as Error).message });
+        break;
+      }
+    }
+  }
+  res.status(created.length ? 201 : 400).json({ created, failed, ...(created.length ? {} : { error: failed.map((f) => `${f.clusterName}: ${f.error}`).join('; ') }) });
+}));
 
 router.get('/fbo', h(async (req, res) => {
   const list = await prisma.fboShipment.findMany({

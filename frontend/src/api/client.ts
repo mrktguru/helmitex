@@ -135,6 +135,9 @@ export const api = {
   setSpecOzon: (itemId: string, ozonOfferId: string | null) =>
     request<{ updated: number; notFound: string[] }>(`/stock/specs/${itemId}/ozon`, { method: 'PUT', body: JSON.stringify({ ozonOfferId }) }),
   syncOzonSkus: () => request<{ updated: number; notFound: string[] }>('/stock/ozon/sync-skus', { method: 'POST' }),
+  getFboDemand: (refresh = false) => request<any>(`/stock/fbo/demand${refresh ? '?refresh=1' : ''}`),
+  createFboPlan: (items: { clusterId: string; clusterName: string; quantTypeId: string; count: number }[]) =>
+    request<any>('/stock/fbo/plan', { method: 'POST', body: JSON.stringify({ items }) }),
   getFboList: (active = false) => request<any[]>(`/stock/fbo${active ? '?active=1' : ''}`),
   getFbo: (id: string) => request<any>(`/stock/fbo/${id}`),
   createFbo: (data: any) => request<any>('/stock/fbo', { method: 'POST', body: JSON.stringify(data) }),

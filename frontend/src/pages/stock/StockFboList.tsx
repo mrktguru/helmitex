@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { api } from '../../api/client';
 import { PageHeader } from './StockLayout';
 import { FBO_STATUS, btnPrimary, btnSecondary, fmtDate, inputCls } from './common';
 import OzonPlacePicker, { Place } from './OzonPlacePicker';
+import FboPlan from './FboPlan';
 
 export default function StockFboList() {
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') ?? 'plan';
   const navigate = useNavigate();
   const [list, setList] = useState<any[] | null>(null);
   const [types, setTypes] = useState<any[]>([]);
@@ -47,14 +50,24 @@ export default function StockFboList() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Отгрузки FBO" hint="Поставки на склады Ozon: кванты → черновик → слот → грузоместа → стикеры → отгрузка." />
+      <PageHeader title="Отгрузки FBO" hint="План по потребности Ozon → поставки по кластерам → черновик, слот, грузоместа, стикеры → отгрузка." />
+      <div className="flex gap-1 border-b border-slate-200">
+        {[['plan', 'План поставок'], ['list', 'Поставки']].map(([k, l]) => (
+          <button key={k} onClick={() => setParams(k === 'plan' ? {} : { tab: k })}
+            className={clsx('px-3 py-2 text-sm font-medium border-b-2 -mb-px', tab === k ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500 hover:text-slate-800')}>
+            {l}{k === 'list' && list && list.filter((s) => !['CANCELLED', 'COMPLETED'].includes(s.status)).length > 0 && <span className="ml-1.5 text-xs bg-brand-100 text-brand-800 rounded-full px-1.5">{list.filter((s) => !['CANCELLED', 'COMPLETED'].includes(s.status)).length}</span>}
+          </button>
+        ))}
+      </div>
+      {tab === 'plan' && <FboPlan />}
+      {tab === 'list' && <>
       {settings && !settings.configured && (
         <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">Ozon API не настроен на сервере (OZON_CLIENT_ID / OZON_API_KEY).</p>
       )}
 
       <div className="bg-white rounded-xl border p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="font-semibold">Новая поставка FBO</h3>
+          <h3 className="font-semibold">Новая поставка вручную</h3>
           <div className="text-sm text-slate-600">
             По умолчанию: {d?.clusterName ? <>{d.supplyType === 'CROSSDOCK' ? 'кросс-докинг' : 'прямая'} · {d.clusterName}{d.dropOffName && ` · через ${d.dropOffName}`}</> : 'не задано'}
             <button onClick={() => setShowSettings((v) => !v)} className="ml-3 text-brand-600 hover:underline">{showSettings ? 'Скрыть' : 'Настроить'}</button>
@@ -143,6 +156,7 @@ export default function StockFboList() {
         )}
       </div>
       <button onClick={load} className={btnSecondary}>Обновить</button>
+      </>}
     </div>
   );
 }

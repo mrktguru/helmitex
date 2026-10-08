@@ -122,7 +122,9 @@ export default function StockFbo() {
           <h3 className="font-semibold text-sm">{draftExpired ? 'Черновик Ozon устарел — создайте заново' : 'Куда везём'}</h3>
           {defaults !== null && (
             <OzonPlacePicker
-              initial={s.clusterId ? { supplyType: s.supplyType, clusterId: s.clusterId, clusterName: s.clusterName, dropOffWarehouseId: s.dropOffWarehouseId, dropOffName: s.dropOffName, dropOffType: s.dropOffType } : defaults}
+              initial={s.ozonDraftId
+                ? { supplyType: s.supplyType, clusterId: s.clusterId, clusterName: s.clusterName, dropOffWarehouseId: s.dropOffWarehouseId, dropOffName: s.dropOffName, dropOffType: s.dropOffType }
+                : { ...defaults, ...(s.clusterId ? { clusterId: s.clusterId, clusterName: s.clusterName } : {}) }}
               busy={!!busy}
               saveLabel={busy === 'draft' ? 'Создаю черновик в Ozon…' : 'Создать черновик в Ozon'}
               onSave={(p: Place) => run('draft', () => api.fboDraft(id!, p))}
