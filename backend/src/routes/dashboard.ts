@@ -6,6 +6,8 @@ import { availableCodes } from '../services/quants';
 const router = Router();
 router.use(authMiddleware);
 
+const n = (x: number) => x.toLocaleString('ru-RU', { maximumFractionDigits: 3 });
+
 interface Alert { level: 'crit' | 'warn' | 'info'; title: string; text: string; action?: { label: string; to: string } }
 
 // GET /api/stock/dashboard — цепочка «сырьё → бочки → ГП → кванты → FBO» и что требует внимания
@@ -37,7 +39,7 @@ router.get('/dashboard', async (_req: AuthRequest, res: Response) => {
   for (const it of items) {
     const have = sum(rows.filter((r) => r.lot.itemId === it.id));
     if (have < it.minStock!) {
-      alerts.push({ level: have === 0 ? 'crit' : 'warn', title: `${it.name} — ниже минимума`, text: `Остаток ${have} ${it.unit} при минимуме ${it.minStock} ${it.unit}`, action: { label: 'Приход', to: '/stock/docs/new?type=RECEIPT' } });
+      alerts.push({ level: have === 0 ? 'crit' : 'warn', title: `${it.name} — ниже минимума`, text: `Остаток ${n(have)} ${it.unit} при минимуме ${n(it.minStock!)} ${it.unit}`, action: { label: 'Приход', to: '/stock/docs/new?type=RECEIPT' } });
     }
   }
   // Сроки годности
@@ -49,7 +51,7 @@ router.get('/dashboard', async (_req: AuthRequest, res: Response) => {
     alerts.push({
       level: expired ? 'crit' : 'warn',
       title: `${r.lot.item.name} · лот ${r.lot.number}${r.lot.barrel ? ` (${r.lot.barrel})` : ''}`,
-      text: `${expired ? 'Просрочен' : 'Истекает'} ${r.lot.expiresAt!.toLocaleDateString('ru-RU')} · остаток ${Math.round(r.qty * 1000) / 1000} ${r.lot.item.unit}`,
+      text: `${expired ? 'Просрочен' : 'Истекает'} ${r.lot.expiresAt!.toLocaleDateString('ru-RU')} · остаток ${n(r.qty)} ${r.lot.item.unit}`,
       action: { label: 'Открыть', to: `/stock/moves?lotId=${r.lot.id}` },
     });
   }
@@ -63,7 +65,7 @@ router.get('/dashboard', async (_req: AuthRequest, res: Response) => {
   for (const [itemId, v] of unlabeled) {
     const qt = quantTypes.find((t) => t.productItemId === itemId);
     alerts.push({
-      level: 'info', title: `${v.name}: ${Math.round(v.qty)} шт ждут сборки`,
+      level: 'info', title: `${v.name}: ${n(Math.round(v.qty))} шт ждут сборки`,
       text: qt ? `Хватит на ${Math.floor(v.qty / qt.unitsPerQuant)} кв. «${qt.name}»` : 'Для SKU не настроен тип кванта',
       action: qt ? { label: 'Собрать кванты', to: '/stock/quant/new' } : { label: 'Настроить', to: `/stock/catalog/${itemId}` },
     });
