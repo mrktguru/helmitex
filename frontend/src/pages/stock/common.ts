@@ -44,7 +44,7 @@ export const FBO_STATUS: Record<string, { label: string; cls: string }> = {
   OZON_DRAFT: { label: 'Черновик в Ozon', cls: 'bg-amber-100 text-amber-800' },
   BOOKED: { label: 'Слот забронирован', cls: 'bg-brand-100 text-brand-800' },
   CARGOES_SET: { label: 'Грузоместа переданы', cls: 'bg-brand-100 text-brand-800' },
-  LABELS_READY: { label: 'Этикетки готовы', cls: 'bg-indigo-100 text-indigo-800' },
+  LABELS_READY: { label: 'Ожидает отгрузки', cls: 'bg-indigo-100 text-indigo-800' },
   SHIPPED: { label: 'Отгружена', cls: 'bg-green-100 text-green-800' },
   COMPLETED: { label: 'Принята Ozon', cls: 'bg-green-200 text-green-900' },
   CANCELLED: { label: 'Отменена', cls: 'bg-slate-100 text-slate-400' },

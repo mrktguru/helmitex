@@ -24,7 +24,7 @@ type Shipment = Awaited<ReturnType<typeof load>>;
 
 const STATUS_LABEL: Record<FboStatus, string> = {
   DRAFT: 'кванты подобраны', OZON_DRAFT: 'черновик в Ozon', BOOKED: 'слот забронирован', CARGOES_SET: 'грузоместа переданы',
-  LABELS_READY: 'этикетки готовы', SHIPPED: 'отгружена', COMPLETED: 'принята Ozon', CANCELLED: 'отменена',
+  LABELS_READY: 'ожидает отгрузки', SHIPPED: 'отгружена', COMPLETED: 'принята Ozon', CANCELLED: 'отменена',
 };
 
 function expect(s: Shipment, ...allowed: FboStatus[]) {
