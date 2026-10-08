@@ -201,7 +201,7 @@ export default function StockDocEdit() {
           <tbody>
             {lines.map((l) => {
               const item = itemById.get(l.itemId);
-              const lotOptions = isAdj ? balances.filter((b) => b.lot.item.id === l.itemId) : [];
+              const lotOptions = isAdj ? balances.filter((b) => b.lot.item.id === l.itemId && b.state !== 'IN_QUANT') : [];
               const bal = isAdj && l.lotKey ? balanceOf(l.lotKey) : null;
               const delta = parseNum(l.qty);
               return (
@@ -315,6 +315,9 @@ export default function StockDocEdit() {
         )}
         {status === 'POSTED' && <button disabled={busy} onClick={cancel} className={btnSecondary}>Отменить проведение</button>}
       </div>
+      {!readOnly && isAdj && (
+        <p className="text-xs text-slate-500">Единицы в квантах здесь не корректируются: в разделе <Link to="/stock/quants" className="text-brand-700 hover:underline">Кванты</Link> отметьте лишние кванты и нажмите «Списать» или «Разобрать».</p>
+      )}
       {!readOnly && !isAdj && (
         <p className="text-xs text-slate-500">При проведении на каждую строку создаётся лот со своим номером. Цену в начальных остатках можно оставить пустой.</p>
       )}

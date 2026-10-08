@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
-import { PdfJob, StockError, nextDocNumber } from '../services/stock';
+import { PdfJob, StockError, consume, nextDocNumber } from '../services/stock';
 import { availableCodes, postQuant, replaceCode } from '../services/quants';
 import { mergePdfs, renderQuantLabels } from '../services/quantLabel';
 import { downloadFile } from '../services/s3';
@@ -271,6 +271,45 @@ router.get('/quants/:id', async (req: AuthRequest, res: Response): Promise<void>
     codes: quant.codes.map((c) => ({ id: c.id, active: c.active, code: codeText(c), czStatus: c.czCode?.status ?? null, outputBatchId: c.czCode?.outputBatchId ?? null, createdAt: c.createdAt })),
     trace,
   });
+});
+
+// POST /api/stock/quants/remove { ids, mode, reason } — списать (потеря, порча) или разобрать кванты (единицы — россыпью на склад)
+router.post('/quants/remove', async (req: AuthRequest, res: Response): Promise<void> => {
+  const parsed = z.object({
+    ids: z.array(z.string().uuid()).min(1).max(500),
+    mode: z.enum(['WRITEOFF', 'UNPACK']),
+    reason: z.string().trim().min(1, 'Укажите причину').max(300),
+  }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
+  const { ids, mode, reason } = parsed.data;
+  try {
+    const doc = await prisma.$transaction(async (tx) => {
+      const quants = await tx.quant.findMany({ where: { id: { in: ids } }, include: { quantType: { include: { productItem: true } }, codes: { where: { active: true } } } });
+      const busy = quants.find((q) => q.status !== 'ASSEMBLED');
+      if (busy) throw new StockError(`Квант ${busy.number} не на складе (в поставке, отгружен или разобран)`);
+      const doc = await tx.stockDoc.create({
+        data: {
+          type: 'ADJUSTMENT', status: 'POSTED', postedAt: new Date(), number: await nextDocNumber(tx, 'ADJUSTMENT'), userId: req.user!.id,
+          comment: `${mode === 'WRITEOFF' ? 'Списание' : 'Разборка'} квантов (${quants.length}): ${reason}`,
+        },
+      });
+      let sort = 0;
+      for (const q of quants) {
+        await consume(tx, doc.id, q.lotId, 'IN_QUANT', q.units, q.quantType.productItem.name);
+        await tx.stockDocLine.create({ data: { docId: doc.id, itemId: q.quantType.productItemId, lotId: q.lotId, qty: -q.units, state: 'IN_QUANT', reason: `${q.number}: ${reason}`, sort: sort++ } });
+        if (mode === 'UNPACK') {
+          // Единицы с этикетками ЧЗ возвращаются «с ЧЗ», без маркировки — «без ЧЗ»
+          const state = q.codes.length ? 'LABELED' : 'UNLABELED';
+          await tx.stockMove.create({ data: { docId: doc.id, lotId: q.lotId, state, qty: q.units } });
+          await tx.stockDocLine.create({ data: { docId: doc.id, itemId: q.quantType.productItemId, lotId: q.lotId, qty: q.units, state, reason: `${q.number}: разобран`, sort: sort++ } });
+        }
+      }
+      await tx.quantCode.updateMany({ where: { quantId: { in: ids } }, data: { active: false } });
+      await tx.quant.updateMany({ where: { id: { in: ids } }, data: { status: 'DISASSEMBLED' } });
+      return doc;
+    }, { isolationLevel: 'Serializable' });
+    res.json(doc);
+  } catch (err) { sendError(res, err); }
 });
 
 // POST /api/stock/quants/:id/replace-code { quantCodeId }

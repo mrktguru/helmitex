@@ -21,6 +21,9 @@ export default function StockQuants() {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [error, setError] = useState('');
+  const [removing, setRemoving] = useState<null | 'WRITEOFF' | 'UNPACK'>(null);
+  const [reason, setReason] = useState('');
+  const [reload, setReload] = useState(0);
 
   useEffect(() => { api.getQuantTypes().then(setTypes); }, []);
   useEffect(() => {
@@ -29,13 +32,23 @@ export default function StockQuants() {
     const t = setTimeout(() => api.getQuants({ status: st, typeId, q }).then((qs) =>
       setQuants(status === 'ACTIVE' ? qs.filter((x: any) => x.status === 'ASSEMBLED' || x.status === 'RESERVED') : qs)), q ? 300 : 0);
     return () => clearTimeout(t);
-  }, [status, typeId, q]);
+  }, [status, typeId, q, reload]);
 
   // Поиск по коду ЧЗ — раскрываем найденные группы сразу
   useEffect(() => { if (q && quants) setOpen(new Set(groups.map((g) => g.key))); }, [quants]);
 
   const setParam = (k: string, v: string) => { const p = new URLSearchParams(params); if (v) p.set(k, v); else p.delete(k); setParams(p); };
   const ids = [...sel].join(',');
+
+  async function remove() {
+    setError('');
+    try {
+      await api.removeQuants([...sel], removing!, reason);
+      setRemoving(null); setReason(''); setReload((v) => v + 1);
+    } catch (e: any) { setError(e.message); }
+  }
+
+  const selAssembled = (quants ?? []).filter((x) => sel.has(x.id) && x.status === 'ASSEMBLED').length;
 
   async function dl(path: string) {
     setError('');
@@ -93,7 +106,26 @@ export default function StockQuants() {
           Выбрано: {sel.size}
           <button onClick={() => dl(`/stock/quant-labels.pdf?ids=${ids}`)} className="text-brand-700 hover:underline">Этикетки квантов</button>
           <button onClick={() => dl(`/stock/quant-codes.csv?ids=${ids}`)} className="text-brand-700 hover:underline">Список ЧЗ (CSV)</button>
-          <button onClick={() => setSel(new Set())} className="text-slate-500 hover:underline">Снять выбор</button>
+          <span className="w-px h-4 bg-brand-200" />
+          <button disabled={selAssembled !== sel.size} onClick={() => setRemoving('UNPACK')} className="text-slate-700 hover:underline disabled:opacity-40" title={selAssembled !== sel.size ? 'Только кванты со статусом «На складе»' : ''}>Разобрать</button>
+          <button disabled={selAssembled !== sel.size} onClick={() => setRemoving('WRITEOFF')} className="text-red-700 hover:underline disabled:opacity-40">Списать</button>
+          <button onClick={() => setSel(new Set())} className="text-slate-500 hover:underline ml-auto">Снять выбор</button>
+        </div>
+      )}
+      {removing && (
+        <div className="bg-white border border-amber-200 rounded-xl p-4 space-y-3">
+          <p className="text-sm">
+            {removing === 'WRITEOFF'
+              ? <>Списать <b>{sel.size}</b> кв. — единицы уйдут со склада (потеря, порча, недостача при инвентаризации).</>
+              : <>Разобрать <b>{sel.size}</b> кв. — единицы вернутся на склад россыпью («с ЧЗ», если были коды, иначе «без ЧЗ»), короба не возвращаются.</>}
+          </p>
+          <div className="flex flex-wrap gap-2 items-center">
+            <input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Причина: инвентаризация, повреждение…" className={inputCls + ' flex-1 min-w-[260px]'} />
+            <button disabled={!reason.trim()} onClick={remove} className={removing === 'WRITEOFF' ? 'bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium' : 'bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium'}>
+              {removing === 'WRITEOFF' ? 'Списать' : 'Разобрать'}
+            </button>
+            <button onClick={() => setRemoving(null)} className={btnSecondary}>Отмена</button>
+          </div>
         </div>
       )}
       {error && <p className="text-sm text-red-600">{error}</p>}

@@ -126,6 +126,9 @@ export async function cancelDoc(tx: Tx, docId: string, opts: { releaseCodes?: bo
   if (!doc) throw new StockError('Документ не найден');
   if (doc.status !== 'POSTED') throw new StockError('Отменить можно только проведённый документ');
   if (doc.type === 'SHIPMENT') throw new StockError('Отгрузку FBO отменить нельзя: она уже передана в Ozon');
+  if (doc.moves.some((m) => m.state === 'IN_QUANT') && doc.type === 'ADJUSTMENT') {
+    throw new StockError('Списание или разборку квантов отменить нельзя — соберите кванты заново');
+  }
 
   for (const m of doc.moves) {
     if (m.qty > 0) {

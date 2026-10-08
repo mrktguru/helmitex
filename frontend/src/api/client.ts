@@ -28,11 +28,20 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({})) as { error?: string };
-    throw new Error(body.error ?? `HTTP ${res.status}`);
+    const body = await res.json().catch(() => ({})) as { error?: unknown };
+    throw new Error(errorText(body.error) ?? `HTTP ${res.status}`);
   }
 
   return res.json() as Promise<T>;
+}
+
+// Ошибка API — строка или результат zod flatten() { formErrors, fieldErrors }
+function errorText(e: unknown): string | null {
+  if (!e) return null;
+  if (typeof e === 'string') return e;
+  const z = e as { formErrors?: string[]; fieldErrors?: Record<string, string[]> };
+  const parts = [...(z.formErrors ?? []), ...Object.entries(z.fieldErrors ?? {}).map(([k, v]) => `${k}: ${v.join(', ')}`)];
+  return parts.length ? `Проверка данных: ${parts.join('; ')}` : JSON.stringify(e);
 }
 
 // Скачивание файла с авторизацией (PDF, CSV): fetch → blob → <a download>
@@ -144,6 +153,8 @@ export const api = {
   getQuants: (params: { status?: string; typeId?: string; q?: string } = {}) =>
     request<any[]>(`/stock/quants?${new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][])}`),
   getQuant: (id: string) => request<any>(`/stock/quants/${id}`),
+  removeQuants: (ids: string[], mode: 'WRITEOFF' | 'UNPACK', reason: string) =>
+    request<any>('/stock/quants/remove', { method: 'POST', body: JSON.stringify({ ids, mode, reason }) }),
   replaceQuantCode: (quantId: string, quantCodeId: string) =>
     request<{ outputBatchId: string }>(`/stock/quants/${quantId}/replace-code`, { method: 'POST', body: JSON.stringify({ quantCodeId }) }),
   deleteDoc: (id: string) => request<{ ok: true }>(`/stock/docs/${id}`, { method: 'DELETE' }),
