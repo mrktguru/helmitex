@@ -13,6 +13,8 @@ import StockItems from './pages/stock/StockItems';
 import StockDocs from './pages/stock/StockDocs';
 import StockDocEdit from './pages/stock/StockDocEdit';
 import StockMoves from './pages/stock/StockMoves';
+import StockRecipes from './pages/stock/StockRecipes';
+import StockMixEdit from './pages/stock/StockMixEdit';
 import { PrivateRoute } from './components/PrivateRoute';
 import { AdminRoute } from './components/AdminRoute';
 
@@ -32,6 +34,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="docs/new" element={<StockDocEdit />} />
             <Route path="docs/:id" element={<StockDocEdit />} />
             <Route path="moves" element={<StockMoves />} />
+            <Route path="recipes" element={<StockRecipes />} />
+            <Route path="mixes" element={<StockDocs fixedType="MIX" />} />
+            <Route path="mix/new" element={<StockMixEdit />} />
+            <Route path="mix/:id" element={<StockMixEdit />} />
           </Route>
         </Route>
         <Route element={<AdminRoute />}>

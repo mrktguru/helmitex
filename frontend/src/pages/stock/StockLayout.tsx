@@ -4,6 +4,8 @@ import clsx from 'clsx';
 const TABS = [
   { to: '/stock', label: 'Остатки', end: true },
   { to: '/stock/docs', label: 'Документы', end: false },
+  { to: '/stock/mixes', label: 'Замесы', end: false },
+  { to: '/stock/recipes', label: 'Рецептуры', end: false },
   { to: '/stock/items', label: 'Номенклатура', end: false },
   { to: '/stock/moves', label: 'Журнал движений', end: false },
 ];
@@ -11,8 +13,8 @@ const TABS = [
 export default function StockLayout() {
   const navigate = useNavigate();
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm px-4 sm:px-6 pt-3 sm:pt-4">
+    <div className="min-h-screen bg-gray-50 print:bg-white">
+      <header className="bg-white shadow-sm px-4 sm:px-6 pt-3 sm:pt-4 print:hidden">
         <div className="flex items-center gap-3 sm:gap-4 mb-2">
           <button onClick={() => navigate('/projects')} className="text-gray-500 hover:text-gray-900 shrink-0">← Проекты</button>
           <h1 className="text-lg sm:text-xl font-bold">Склад</h1>
@@ -33,7 +35,7 @@ export default function StockLayout() {
           ))}
         </nav>
       </header>
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6 print:p-0 print:max-w-none">
         <Outlet />
       </main>
     </div>

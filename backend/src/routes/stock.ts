@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { ItemType, Prisma } from '@prisma/client';
 import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
-import { cancelDoc, nextDocNumber, postDoc, StockError } from '../services/stock';
+import { allocateFefo, cancelDoc, nextDocNumber, postDoc, StockError } from '../services/stock';
 
 const router = Router();
 router.use(authMiddleware);
@@ -16,31 +16,45 @@ const itemSchema = z.object({
   name: z.string().trim().min(1).max(200),
   unit: z.string().trim().min(1).max(10),
   minStock: z.number().nonnegative().nullable().optional(),
+  noStock: z.boolean().optional(),
 });
 const itemPatchSchema = itemSchema.partial().extend({ archived: z.boolean().optional() });
 
 const lineSchema = z.object({
   itemId: z.string().uuid(),
   lotId: z.string().uuid().nullable().optional(),
-  qty: z.number().refine((v) => v !== 0, 'Количество не может быть нулём'),
+  qty: z.number(),
   unitCost: z.number().nonnegative().nullable().optional(),
   supplierLot: z.string().max(100).nullable().optional(),
   expiresAt: z.string().nullable().optional(),
   barrel: z.string().max(50).nullable().optional(),
   state: z.enum(states).optional(),
   reason: z.string().max(300).nullable().optional(),
+  planQty: z.number().nonnegative().nullable().optional(),
+  stage: z.number().int().nullable().optional(),
 });
+const docTypes = ['RECEIPT', 'OPENING', 'ADJUSTMENT', 'MIX'] as const;
 const docSchema = z.object({
-  type: z.enum(['RECEIPT', 'OPENING', 'ADJUSTMENT']),
+  type: z.enum(docTypes),
   date: z.string().optional(),
   supplier: z.string().max(200).nullable().optional(),
   docRef: z.string().max(200).nullable().optional(),
   comment: z.string().max(1000).nullable().optional(),
+  outputItemId: z.string().uuid().nullable().optional(),
+  plannedQty: z.number().positive().nullable().optional(),
+  yieldQty: z.number().nonnegative().nullable().optional(),
+  barrel: z.string().max(50).nullable().optional(),
+  expiresAt: z.string().nullable().optional(),
   lines: z.array(lineSchema).max(500),
 });
 
-function lineData(l: z.infer<typeof lineSchema>) {
+function headData<T extends { expiresAt?: string | null }>(h: T) {
+  return { ...h, expiresAt: h.expiresAt ? new Date(h.expiresAt) : h.expiresAt === undefined ? undefined : null };
+}
+
+function lineData(l: z.infer<typeof lineSchema>, sort: number) {
   return {
+    sort,
     itemId: l.itemId,
     lotId: l.lotId ?? null,
     qty: l.qty,
@@ -50,6 +64,8 @@ function lineData(l: z.infer<typeof lineSchema>) {
     barrel: l.barrel || null,
     state: l.state ?? 'NONE',
     reason: l.reason || null,
+    planQty: l.planQty ?? null,
+    stage: l.stage ?? null,
   };
 }
 
@@ -136,18 +152,82 @@ router.get('/moves', async (req: AuthRequest, res: Response) => {
   res.json(moves);
 });
 
+// ───────────── Рецептуры ─────────────
+
+const recipeSchema = z.object({
+  stages: z.record(z.string().max(300)).nullable().optional(),
+  qc: z.string().max(2000).nullable().optional(),
+  comment: z.string().max(2000).nullable().optional(),
+  lines: z.array(z.object({
+    itemId: z.string().uuid(),
+    percent: z.number().positive().max(100),
+    stage: z.number().int().min(1).max(99),
+  })).min(1).max(100),
+});
+
+// GET /api/stock/recipes — все полуфабрикаты с рецептурами (если есть)
+router.get('/recipes', async (_req: AuthRequest, res: Response) => {
+  const items = await prisma.item.findMany({
+    where: { type: 'SEMI', archived: false },
+    orderBy: { name: 'asc' },
+    include: { recipe: { include: { lines: { include: { item: true }, orderBy: [{ stage: 'asc' }, { sort: 'asc' }] } } } },
+  });
+  res.json(items);
+});
+
+// PUT /api/stock/recipes/:itemId
+router.put('/recipes/:itemId', async (req: AuthRequest, res: Response): Promise<void> => {
+  const parsed = recipeSchema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
+  const item = await prisma.item.findUnique({ where: { id: req.params.itemId } });
+  if (item?.type !== 'SEMI') { res.status(400).json({ error: 'Рецептура задаётся только для полуфабриката' }); return; }
+  const { lines, stages, ...rest } = parsed.data;
+  const recipe = await prisma.$transaction(async (tx) => {
+    const data = { ...rest, stages: stages ?? Prisma.JsonNull };
+    const r = await tx.recipe.upsert({
+      where: { itemId: item.id },
+      create: { itemId: item.id, ...data },
+      update: data,
+    });
+    await tx.recipeLine.deleteMany({ where: { recipeId: r.id } });
+    await tx.recipeLine.createMany({ data: lines.map((l, i) => ({ ...l, recipeId: r.id, sort: i })) });
+    return r;
+  });
+  res.json(recipe);
+});
+
+// GET /api/stock/mix/plan?itemId=…&qty=400 — нормы по рецептуре и лоты по FEFO
+router.get('/mix/plan', async (req: AuthRequest, res: Response): Promise<void> => {
+  const qty = Number(req.query.qty);
+  if (!(qty > 0)) { res.status(400).json({ error: 'Укажите массу замеса' }); return; }
+  const recipe = await prisma.recipe.findUnique({
+    where: { itemId: String(req.query.itemId) },
+    include: { lines: { include: { item: true }, orderBy: [{ stage: 'asc' }, { sort: 'asc' }] } },
+  });
+  if (!recipe || recipe.lines.length === 0) { res.status(400).json({ error: 'Для полуфабриката нет рецептуры' }); return; }
+  const lines = [];
+  for (const l of recipe.lines) {
+    const need = Math.round(qty * l.percent) / 100;
+    const alloc = l.item.noStock
+      ? { allocations: [{ lotId: null, lotNumber: null, qty: need }], shortage: 0 }
+      : await allocateFefo(prisma, l.itemId, need);
+    lines.push({ item: l.item, stage: l.stage, percent: l.percent, need, ...alloc });
+  }
+  res.json({ stages: recipe.stages, qc: recipe.qc, lines });
+});
+
 // ───────────── Документы ─────────────
 
 // GET /api/stock/docs?type=RECEIPT
 router.get('/docs', async (req: AuthRequest, res: Response) => {
-  const type = ['RECEIPT', 'OPENING', 'ADJUSTMENT'].includes(req.query.type as string)
-    ? (req.query.type as 'RECEIPT') : undefined;
+  const type = docTypes.includes(req.query.type as any) ? (req.query.type as (typeof docTypes)[number]) : undefined;
   const docs = await prisma.stockDoc.findMany({
     where: { type },
     orderBy: { createdAt: 'desc' },
     take: 200,
     include: {
       user: { select: { email: true } },
+      outputItem: { select: { name: true } },
       lines: { select: { qty: true, unitCost: true } },
     },
   });
@@ -165,14 +245,19 @@ router.get('/docs/:id', async (req: AuthRequest, res: Response): Promise<void> =
     where: { id: req.params.id },
     include: {
       user: { select: { email: true } },
-      lines: { include: { item: true }, orderBy: { id: 'asc' } },
+      outputItem: true,
+      lines: { include: { item: true }, orderBy: { sort: 'asc' } },
     },
   });
   if (!doc) { res.status(404).json({ error: 'Not found' }); return; }
-  const lotIds = doc.lines.map((l) => l.lotId).filter((x): x is string => !!x);
+  const lotIds = [...doc.lines.map((l) => l.lotId), doc.outputLotId].filter((x): x is string => !!x);
   const lots = await prisma.lot.findMany({ where: { id: { in: lotIds } }, select: { id: true, number: true } });
   const num = new Map(lots.map((l) => [l.id, l.number]));
-  res.json({ ...doc, lines: doc.lines.map((l) => ({ ...l, lotNumber: l.lotId ? num.get(l.lotId) ?? null : null })) });
+  res.json({
+    ...doc,
+    outputLotNumber: doc.outputLotId ? num.get(doc.outputLotId) ?? null : null,
+    lines: doc.lines.map((l) => ({ ...l, lotNumber: l.lotId ? num.get(l.lotId) ?? null : null })),
+  });
 });
 
 // POST /api/stock/docs — создаёт черновик; ?post=1 сразу проводит
@@ -184,11 +269,11 @@ router.post('/docs', async (req: AuthRequest, res: Response): Promise<void> => {
     const doc = await prisma.$transaction(async (tx) => {
       const created = await tx.stockDoc.create({
         data: {
-          ...head,
+          ...headData(head),
           number: await nextDocNumber(tx, head.type),
           date: date ? new Date(date) : new Date(),
           userId: req.user!.id,
-          lines: { create: lines.map(lineData) },
+          lines: { create: lines.map((l, i) => lineData(l, i)) },
         },
       });
       if (req.query.post === '1') await postDoc(tx, created.id);
@@ -212,9 +297,9 @@ router.put('/docs/:id', async (req: AuthRequest, res: Response): Promise<void> =
       return tx.stockDoc.update({
         where: { id: existing.id },
         data: {
-          ...head,
+          ...headData(head),
           date: date ? new Date(date) : undefined,
-          lines: { create: lines.map(lineData) },
+          lines: { create: lines.map((l, i) => lineData(l, i)) },
         },
       });
     });

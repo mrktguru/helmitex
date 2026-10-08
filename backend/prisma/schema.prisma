@@ -111,15 +111,19 @@ enum ProductState {
 }
 
 model Item {
-  id        String         @id @default(uuid())
-  type      ItemType
-  name      String
-  unit      String // "кг" | "шт" | "л"
-  minStock  Float?
-  archived  Boolean        @default(false)
-  createdAt DateTime       @default(now())
-  lots      Lot[]
-  docLines  StockDocLine[]
+  id          String         @id @default(uuid())
+  type        ItemType
+  name        String
+  unit        String // "кг" | "шт" | "л"
+  minStock    Float?
+  noStock     Boolean        @default(false) // не учитывается на складе (вода)
+  archived    Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+  lots        Lot[]
+  docLines    StockDocLine[]
+  recipe      Recipe?        @relation("RecipeOutput")
+  recipeLines RecipeLine[]
+  outputDocs  StockDoc[]     @relation("DocOutputItem")
 
   @@unique([type, name])
 }
@@ -143,6 +147,7 @@ enum DocType {
   RECEIPT // приход
   OPENING // ввод начальных остатков
   ADJUSTMENT // корректировка / инвентаризация
+  MIX // замес полуфабриката
 }
 
 enum DocStatus {
@@ -166,6 +171,15 @@ model StockDoc {
   createdAt DateTime       @default(now())
   lines     StockDocLine[]
   moves     StockMove[]
+
+  // замес: что получаем
+  outputItemId String?
+  outputItem   Item?     @relation("DocOutputItem", fields: [outputItemId], references: [id])
+  outputLotId  String?
+  plannedQty   Float?
+  yieldQty     Float?
+  barrel       String?
+  expiresAt    DateTime?
 }
 
 model StockDocLine {
@@ -176,6 +190,9 @@ model StockDocLine {
   item        Item         @relation(fields: [itemId], references: [id])
   lotId       String? // для корректировки — существующий лот; для прихода заполняется при проведении
   qty         Float // для прихода > 0; для корректировки — со знаком
+  planQty     Float? // замес: норма по рецептуре (null — корректировка сверх рецептуры)
+  stage       Int? // замес: этап
+  sort        Int          @default(0)
   unitCost    Float?
   supplierLot String?
   expiresAt   DateTime?
@@ -195,4 +212,26 @@ model StockMove {
   createdAt DateTime     @default(now())
 
   @@index([lotId, state])
+}
+
+model Recipe {
+  id        String       @id @default(uuid())
+  itemId    String       @unique
+  item      Item         @relation("RecipeOutput", fields: [itemId], references: [id])
+  stages    Json? // { "1": "Вода и диспергаторы · мин. обороты, 3 мин", … }
+  qc        String? // нормы ОТК текстом
+  comment   String?
+  updatedAt DateTime     @updatedAt
+  lines     RecipeLine[]
+}
+
+model RecipeLine {
+  id       String @id @default(uuid())
+  recipeId String
+  recipe   Recipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  itemId   String
+  item     Item   @relation(fields: [itemId], references: [id])
+  percent  Float
+  stage    Int    @default(1)
+  sort     Int    @default(0)
 }

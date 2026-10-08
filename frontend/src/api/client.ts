@@ -74,9 +74,9 @@ export const api = {
   // Stock
   getItems: (type?: string, archived = false) =>
     request<any[]>(`/stock/items?${new URLSearchParams({ ...(type ? { type } : {}), ...(archived ? { archived: '1' } : {}) })}`),
-  createItem: (data: { type: string; name: string; unit: string; minStock?: number | null }) =>
+  createItem: (data: { type: string; name: string; unit: string; minStock?: number | null; noStock?: boolean }) =>
     request<any>('/stock/items', { method: 'POST', body: JSON.stringify(data) }),
-  updateItem: (id: string, data: Partial<{ name: string; unit: string; minStock: number | null; archived: boolean }>) =>
+  updateItem: (id: string, data: Partial<{ name: string; unit: string; minStock: number | null; noStock: boolean; archived: boolean }>) =>
     request<any>(`/stock/items/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   getBalances: (params: { type?: string; itemId?: string } = {}) =>
     request<any[]>(`/stock/balances?${new URLSearchParams(params as Record<string, string>)}`),
@@ -91,6 +91,11 @@ export const api = {
   postDoc: (id: string) => request<{ ok: true }>(`/stock/docs/${id}/post`, { method: 'POST' }),
   cancelDoc: (id: string) => request<{ ok: true }>(`/stock/docs/${id}/cancel`, { method: 'POST' }),
   deleteDoc: (id: string) => request<{ ok: true }>(`/stock/docs/${id}`, { method: 'DELETE' }),
+  getRecipes: () => request<any[]>('/stock/recipes'),
+  saveRecipe: (itemId: string, data: any) =>
+    request<any>(`/stock/recipes/${itemId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getMixPlan: (itemId: string, qty: number) =>
+    request<any>(`/stock/mix/plan?${new URLSearchParams({ itemId, qty: String(qty) })}`),
 
   // Users (admin)
   getUsers: () => request<any[]>('/users'),

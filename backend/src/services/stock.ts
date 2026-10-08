@@ -15,6 +15,7 @@ export const DOC_PREFIX: Record<DocType, string> = {
   RECEIPT: 'ПР',
   OPENING: 'НО',
   ADJUSTMENT: 'КР',
+  MIX: 'З',
 };
 
 const EPS = 1e-6;
@@ -68,6 +69,11 @@ export async function postDoc(tx: Tx, docId: string): Promise<void> {
   if (doc.status !== 'DRAFT') throw new StockError('Провести можно только черновик');
   if (doc.lines.length === 0) throw new StockError('В документе нет строк');
 
+  if (doc.type === 'MIX') {
+    await postMix(tx, doc);
+    return;
+  }
+
   for (const line of doc.lines) {
     if (doc.type === 'ADJUSTMENT') {
       if (!line.lotId) throw new StockError(`Не выбран лот для «${line.item.name}»`);
@@ -114,4 +120,73 @@ export async function cancelDoc(tx: Tx, docId: string): Promise<void> {
     await tx.stockMove.create({ data: { docId, lotId: m.lotId, state: m.state, qty: -m.qty } });
   }
   await tx.stockDoc.update({ where: { id: docId }, data: { status: 'CANCELLED' } });
+}
+
+type DocWithLines = Prisma.StockDocGetPayload<{ include: { lines: { include: { item: true } } } }>;
+
+async function consume(tx: Tx, docId: string, lotId: string, state: ProductState, qty: number, name: string) {
+  await tx.stockMove.create({ data: { docId, lotId, state, qty: -qty } });
+  const balance = await lotBalance(tx, lotId, state);
+  if (balance < -EPS) {
+    const lot = await tx.lot.findUnique({ where: { id: lotId } });
+    throw new StockError(`«${name}», лот ${lot?.number}: не хватает ${round(-balance)}`);
+  }
+}
+
+const round = (n: number) => Math.round(n * 1e6) / 1e6;
+
+// Замес: списывает сырьё по фактическим лотам, создаёт бочку полуфабриката с выходом и себестоимостью.
+async function postMix(tx: Tx, doc: DocWithLines): Promise<void> {
+  if (!doc.outputItemId) throw new StockError('Не выбран полуфабрикат');
+  if (!doc.yieldQty || doc.yieldQty <= 0) throw new StockError('Укажите выход в бочку, кг');
+
+  let cost: number | null = 0;
+  for (const line of doc.lines) {
+    if (line.qty < 0) throw new StockError(`«${line.item.name}»: расход не может быть отрицательным`);
+    if (line.qty === 0 || line.item.noStock) continue;
+    if (!line.lotId) throw new StockError(`«${line.item.name}»: не выбран лот`);
+    await consume(tx, doc.id, line.lotId, 'NONE', line.qty, line.item.name);
+    const lot = await tx.lot.findUnique({ where: { id: line.lotId } });
+    if (lot?.itemId !== line.itemId) throw new StockError(`«${line.item.name}»: лот от другой позиции`);
+    cost = cost == null || lot.unitCost == null ? null : cost + lot.unitCost * line.qty;
+  }
+
+  const lot = await tx.lot.create({
+    data: {
+      number: await nextLotNumber(tx, 'SEMI'),
+      itemId: doc.outputItemId,
+      barrel: doc.barrel,
+      expiresAt: doc.expiresAt,
+      unitCost: cost == null ? null : round(cost / doc.yieldQty),
+    },
+  });
+  await tx.stockMove.create({ data: { docId: doc.id, lotId: lot.id, state: 'NONE', qty: doc.yieldQty } });
+  await tx.stockDoc.update({ where: { id: doc.id }, data: { status: 'POSTED', postedAt: new Date(), outputLotId: lot.id } });
+}
+
+export interface Allocation { lotId: string | null; lotNumber: string | null; qty: number }
+
+// Подбор лотов по FEFO: ближайший срок годности первым, без срока — в конце, затем по дате прихода.
+export async function allocateFefo(tx: Tx, itemId: string, need: number): Promise<{ allocations: Allocation[]; shortage: number }> {
+  const groups = await tx.stockMove.groupBy({
+    by: ['lotId'],
+    where: { lot: { itemId }, state: 'NONE' },
+    _sum: { qty: true },
+  });
+  const avail = groups.filter((g) => (g._sum.qty ?? 0) > EPS);
+  const lots = await tx.lot.findMany({ where: { id: { in: avail.map((g) => g.lotId) } } });
+  const qty = new Map(avail.map((g) => [g.lotId, g._sum.qty ?? 0]));
+  lots.sort((a, b) =>
+    (a.expiresAt?.getTime() ?? Infinity) - (b.expiresAt?.getTime() ?? Infinity) ||
+    a.createdAt.getTime() - b.createdAt.getTime());
+
+  const allocations: Allocation[] = [];
+  let left = need;
+  for (const lot of lots) {
+    if (left <= EPS) break;
+    const take = Math.min(left, qty.get(lot.id)!);
+    allocations.push({ lotId: lot.id, lotNumber: lot.number, qty: round(take) });
+    left -= take;
+  }
+  return { allocations, shortage: left > EPS ? round(left) : 0 };
 }

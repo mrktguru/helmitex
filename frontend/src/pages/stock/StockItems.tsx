@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
 import { ITEM_TYPES, btnPrimary, fmtQty, inputCls, parseNum, typeLabel } from './common';
 
-interface Item { id: string; type: string; name: string; unit: string; minStock: number | null; archived: boolean }
+interface Item { id: string; type: string; name: string; unit: string; minStock: number | null; noStock: boolean; archived: boolean }
 
 export default function StockItems() {
   const [items, setItems] = useState<Item[]>([]);
   const [showArchived, setShowArchived] = useState(false);
-  const [form, setForm] = useState({ type: 'RAW', name: '', unit: 'кг', minStock: '' });
+  const [form, setForm] = useState({ type: 'RAW', name: '', unit: 'кг', minStock: '', noStock: false });
   const [editId, setEditId] = useState<string | null>(null);
   const [edit, setEdit] = useState({ name: '', unit: '', minStock: '' });
   const [error, setError] = useState('');
@@ -19,8 +19,8 @@ export default function StockItems() {
     e.preventDefault();
     setError('');
     try {
-      await api.createItem({ type: form.type, name: form.name.trim(), unit: form.unit.trim(), minStock: parseNum(form.minStock) });
-      setForm({ ...form, name: '', minStock: '' });
+      await api.createItem({ type: form.type, name: form.name.trim(), unit: form.unit.trim(), minStock: parseNum(form.minStock), noStock: form.type === 'RAW' && form.noStock });
+      setForm({ ...form, name: '', minStock: '', noStock: false });
       await load();
     } catch (err: any) { setError(err.message); }
   }
@@ -58,6 +58,11 @@ export default function StockItems() {
         <label className="flex flex-col gap-1 text-xs text-gray-500 w-28">Мин. остаток
           <input value={form.minStock} onChange={(e) => setForm({ ...form, minStock: e.target.value })} className={inputCls + ' text-right'} placeholder="—" />
         </label>
+        {form.type === 'RAW' && (
+          <label className="flex items-center gap-2 text-sm text-gray-600 py-1.5" title="Например, вода: идёт в рецептуру, но не списывается со склада">
+            <input type="checkbox" checked={form.noStock} onChange={(e) => setForm({ ...form, noStock: e.target.checked })} /> Без складского учёта
+          </label>
+        )}
         <button type="submit" disabled={!form.name.trim()} className={btnPrimary}>Добавить</button>
       </form>
       {error && <p className="text-sm text-red-600">{error}</p>}
@@ -94,7 +99,7 @@ export default function StockItems() {
                   </tr>
                 ) : (
                   <tr key={it.id} className={'border-b last:border-0 ' + (it.archived ? 'text-gray-400' : '')}>
-                    <td className="px-4 py-2">{it.name}{it.archived && ' (архив)'}</td>
+                    <td className="px-4 py-2">{it.name}{it.noStock && <span className="ml-2 text-xs text-gray-400">без учёта</span>}{it.archived && ' (архив)'}</td>
                     <td className="px-4 py-2">{it.unit}</td>
                     <td className="px-4 py-2 text-right">{it.minStock != null ? fmtQty(it.minStock) : '—'}</td>
                     <td className="px-4 py-2 text-right whitespace-nowrap">

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { api } from '../../api/client';
-import { STATE_LABEL, docTypeLabel, fmtQty } from './common';
+import { STATE_LABEL, docPath, docTypeLabel, fmtQty } from './common';
 
 export default function StockMoves() {
   const [params, setParams] = useSearchParams();
@@ -39,7 +39,7 @@ export default function StockMoves() {
                 <tr key={m.id} className="border-b last:border-0">
                   <td className="px-3 py-1.5 whitespace-nowrap text-gray-500">{new Date(m.createdAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}</td>
                   <td className="px-3 py-1.5 whitespace-nowrap">
-                    <Link to={`/stock/docs/${m.doc.id}`} className="font-mono text-xs text-blue-700 hover:underline">{m.doc.number}</Link>
+                    <Link to={docPath(m.doc)} className="font-mono text-xs text-blue-700 hover:underline">{m.doc.number}</Link>
                     <span className="text-gray-500 ml-2">{docTypeLabel(m.doc.type)}</span>
                   </td>
                   <td className="px-3 py-1.5">{m.lot.item.name}{m.state !== 'NONE' && <span className="text-gray-500"> · {STATE_LABEL[m.state]}</span>}</td>
