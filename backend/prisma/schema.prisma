@@ -428,6 +428,81 @@ model FboCargo {
   @@unique([shipmentId, quantId])
 }
 
+// ─────────────────────────── Аналитика рекламы ───────────────────────────
+
+// Воронка и финансы SKU за день: Seller API (analytics/data) + начисления (finance/accrual/by-day)
+model AdDaySku {
+  date        DateTime @db.Date
+  sku         String
+  views       Int      @default(0) // показы всего
+  searchViews Int      @default(0)
+  pdpViews    Int      @default(0) // просмотры карточки
+  toCart      Int      @default(0)
+  orders      Int      @default(0) // заказано, шт
+  revenue     Float    @default(0) // заказано, ₽
+  position    Float? // средняя позиция в категории
+  // Начисления за день (по дате начисления, не заказа)
+  accrQty     Int      @default(0)
+  accrSale    Float    @default(0) // по цене продавца
+  accrBuyer   Float    @default(0) // оплатил покупатель
+  accrPayout  Float    @default(0) // к выплате: продажа − комиссия − логистика − сборы
+  updatedAt   DateTime @updatedAt
+
+  @@id([date, sku])
+}
+
+// Реклама с оплатой за клик: кампания × SKU × день (Performance API statistics)
+model AdDayCampaign {
+  date        DateTime @db.Date
+  campaignId  String
+  sku         String
+  views       Int      @default(0)
+  clicks      Int      @default(0)
+  toCart      Int      @default(0)
+  orders      Int      @default(0)
+  ordersMoney Float    @default(0)
+  spend       Float    @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@id([date, campaignId, sku])
+}
+
+// Списания по кампании за день из начислений (оплата за заказ — только так видна реальная сумма)
+model AdDayCharge {
+  date       DateTime @db.Date
+  campaignId String
+  kind       String // ORDER | CLICK
+  amount     Float
+  updatedAt  DateTime @updatedAt
+
+  @@id([date, campaignId, kind])
+}
+
+// Какие дни уже загружены (чтобы не перезапрашивать дни без данных)
+model AdSyncDay {
+  kind      String // seller | perf | finance
+  date      DateTime @db.Date
+  fetchedAt DateTime @default(now())
+
+  @@id([kind, date])
+}
+
+// Журнал изменений: вручную и автоматически при действиях из сервиса
+model AdJournal {
+  id         String   @id @default(uuid())
+  sku        String?
+  campaignId String?
+  at         DateTime // когда сделали изменение
+  kind       String // PRICE | ACTION_PRICE | BID | BUDGET | CAMPAIGN_ON | CAMPAIGN_OFF | CAMPAIGN_NEW | CPO_ON | CPO_OFF | CPO_BID | PROMO | NOTE
+  text       String
+  source     String   @default("MANUAL") // MANUAL | AUTO
+  meta       Json?
+  userEmail  String?
+  createdAt  DateTime @default(now())
+
+  @@index([sku, at])
+}
+
 model OzonApiLog {
   id         String   @id @default(uuid())
   shipmentId String?

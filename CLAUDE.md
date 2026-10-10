@@ -57,6 +57,7 @@ Express API with JWT cookie auth. All routes require `authMiddleware` except `/a
 - **`services/datamatrix.ts`** — re-encodes code string as DataMatrix PNG (for CSV-sourced codes)
 - **`services/barcode.ts`** — EAN-13 vector rendering (drawEan13Vector → pdf-lib rectangles + text)
 - **`services/s3.ts`** — S3/MinIO wrappers
+- **`services/ads.ts`** + **`services/perf.ts`** + **`routes/ads.ts`** — «Аналитика рекламы»: daily SKU funnel (Seller analytics), CPC stats (Performance API), accruals (`/v1/finance/accrual/by-day`) cached in `AdDay*` tables; campaign/bid/budget/price actions auto-logged to `AdJournal`. Frontend: `pages/ads/`
 
 **Key PDF WYSIWYG trick:** the browser pre-computes `_wrappedLines` and `_resolvedFontSizePt` on every template save. The PDF worker uses these cached values directly instead of re-computing text layout, so browser and PDF output match exactly.
 
@@ -132,3 +133,4 @@ systemctl list-timers | grep portal
 | `FRONTEND_URL` | CORS allowed origin |
 | `PORT` | API listen port (3100 on server) |
 | `OZON_CLIENT_ID` / `OZON_API_KEY` | Ozon Seller API for FBO supplies (server `.env` only, never in git) |
+| `OZON_PERF_CLIENT_ID` / `OZON_PERF_CLIENT_SECRET` | Ozon Performance API (ads) for «Аналитика рекламы» (server `.env` only, never in git) |

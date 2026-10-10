@@ -18,20 +18,31 @@ function headers() {
 
 // Вызов Seller API. Каждый запрос и ответ пишется в OzonApiLog (с привязкой к поставке, если есть).
 export async function ozon<T = any>(path: string, body: unknown, shipmentId?: string): Promise<T> {
+  return ozonCall<T>('POST', path, body, shipmentId);
+}
+
+export async function ozonGet<T = any>(path: string): Promise<T> {
+  return ozonCall<T>('GET', path, undefined);
+}
+
+// log = false — для объёмных ответов аналитики и начислений: в журнал пишутся только ошибки
+export async function ozonCall<T>(method: 'GET' | 'POST', path: string, body: unknown, shipmentId?: string, log = true): Promise<T> {
   const t0 = Date.now();
   let status = 0;
   let data: any = null;
   try {
-    const res = await fetch(BASE + path, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+    const res = await fetch(BASE + path, { method, headers: headers(), body: method === 'POST' ? JSON.stringify(body) : undefined });
     status = res.status;
     const text = await res.text();
     try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text.slice(0, 2000) }; }
   } catch (e: any) {
     data = { networkError: String(e?.message ?? e) };
   }
-  await prisma.ozonApiLog.create({
-    data: { shipmentId, method: path, status, request: body as any, response: data, ms: Date.now() - t0 },
-  }).catch((e) => console.warn('[ozon] log failed', e));
+  if (log || status < 200 || status >= 300) {
+    await prisma.ozonApiLog.create({
+      data: { shipmentId, method: path, status, request: body as any, response: data, ms: Date.now() - t0 },
+    }).catch((e) => console.warn('[ozon] log failed', e));
+  }
 
   if (status === 429) throw new StockError(`Ozon: превышен лимит запросов (${path}). Подождите минуту и повторите.`);
   if (status < 200 || status >= 300) {

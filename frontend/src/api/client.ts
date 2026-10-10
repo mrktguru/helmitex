@@ -173,6 +173,28 @@ export const api = {
   getMixPlan: (itemId: string, qty: number) =>
     request<any>(`/stock/mix/plan?${new URLSearchParams({ itemId, qty: String(qty) })}`),
 
+  // Аналитика рекламы
+  adsStatus: () => request<{ seller: boolean; perf: boolean; lastDay: string }>('/ads/status'),
+  adsProducts: (from: string, to: string, refresh = false) =>
+    request<{ from: string; to: string; products: any[] }>(`/ads/products?${new URLSearchParams({ from, to, ...(refresh ? { refresh: '1' } : {}) })}`),
+  adsReport: (sku: string, from: string, to: string, refresh = false) =>
+    request<any>(`/ads/report/${sku}?${new URLSearchParams({ from, to, ...(refresh ? { refresh: '1' } : {}) })}`),
+  adsCampaignState: (id: string, on: boolean) => request<{ ok: true }>(`/ads/campaigns/${id}/state`, { method: 'POST', body: JSON.stringify({ on }) }),
+  adsCampaignBid: (id: string, sku: string, bid: number) => request<{ ok: true }>(`/ads/campaigns/${id}/bid`, { method: 'PUT', body: JSON.stringify({ sku, bid }) }),
+  adsCampaignBudget: (id: string, data: { weeklyBudget?: number | null; dailyBudget?: number | null }) =>
+    request<{ ok: true }>(`/ads/campaigns/${id}/budget`, { method: 'PATCH', body: JSON.stringify(data) }),
+  adsCreateCampaign: (data: { title: string; placement: string; weeklyBudget?: number | null; dailyBudget?: number | null; skus: { sku: string; bid: number }[]; activate: boolean }) =>
+    request<{ id: string; activated: boolean; activateError: string | null }>('/ads/campaigns', { method: 'POST', body: JSON.stringify(data) }),
+  adsSelected: (sku: string, on: boolean) => request<{ ok: true }>(`/ads/selected/${sku}`, { method: 'POST', body: JSON.stringify({ on }) }),
+  adsSelectedBid: (sku: string, bid: number) => request<{ ok: true }>(`/ads/selected/${sku}/bid`, { method: 'PUT', body: JSON.stringify({ bid }) }),
+  adsPrice: (sku: string, data: { price?: number | null; oldPrice?: number | null; minPrice?: number | null }) =>
+    request<{ ok: true }>(`/ads/price/${sku}`, { method: 'PUT', body: JSON.stringify(data) }),
+  adsActionPrice: (sku: string, actionId: number, actionPrice: number) =>
+    request<{ ok: true }>(`/ads/action-price/${sku}`, { method: 'PUT', body: JSON.stringify({ actionId, actionPrice }) }),
+  adsJournalAdd: (data: { sku: string | null; at: string; kind: string; text: string }) =>
+    request<any>('/ads/journal', { method: 'POST', body: JSON.stringify(data) }),
+  adsJournalDelete: (id: string) => request<{ ok: true }>(`/ads/journal/${id}`, { method: 'DELETE' }),
+
   // Users (admin)
   getUsers: () => request<any[]>('/users'),
   createUser: (data: { email: string; password: string; role: 'ADMIN' | 'OPERATOR' }) =>

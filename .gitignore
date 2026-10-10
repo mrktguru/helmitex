@@ -26,3 +26,8 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Скриншоты и логи Playwright
+.playwright-mcp/
+# Выгрузки из кабинетов маркетплейсов (финансовые данные)
+reports/

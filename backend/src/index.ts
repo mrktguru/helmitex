@@ -15,8 +15,10 @@ import stockRouter from './routes/stock';
 import quantsRouter from './routes/quants';
 import fboRouter from './routes/fbo';
 import dashboardRouter from './routes/dashboard';
+import adsRouter from './routes/ads';
 import { syncAllShipments } from './services/fbo';
 import { ozonConfigured } from './services/ozon';
+import { startAdsSync } from './services/ads';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
@@ -49,6 +51,7 @@ app.use('/api/stock', stockRouter);
 app.use('/api/stock', quantsRouter);
 app.use('/api/stock', fboRouter);
 app.use('/api/stock', dashboardRouter);
+app.use('/api/ads', adsRouter);
 app.use('/api', batchesRouter);
 
 app.use(errorHandler);
@@ -61,6 +64,8 @@ app.listen(PORT, () => {
 // Статусы FBO-поставок из Ozon — раз в 15 минут
 if (ozonConfigured()) {
   setInterval(() => { syncAllShipments().catch((e) => console.warn('[fbo sync]', e)); }, 15 * 60_000);
+  // Статистика рекламы и продаж за последние дни — раз в 3 часа
+  startAdsSync();
 }
 
 export default app;
