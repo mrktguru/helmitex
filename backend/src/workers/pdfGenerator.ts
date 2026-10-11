@@ -156,6 +156,11 @@ async function warmCzCache(czBatchId: string): Promise<void> {
 const worker = new Worker<JobData>(
   'pdf-generation',
   async (job) => {
+    if (job.name === 'cz-import') {
+      const { runPdfImport } = await import('../services/czImport');
+      await runPdfImport((job.data as unknown as { importId: string }).importId);
+      return;
+    }
     if (job.name === 'warm-cz-cache') {
       await warmCzCache((job.data as unknown as WarmJobData).czBatchId);
       return;

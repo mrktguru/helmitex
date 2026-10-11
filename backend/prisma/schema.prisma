@@ -282,6 +282,7 @@ model ProductSpec {
   ozonSku         String? // SKU Ozon (из /v3/product/info/list)
   ozonName        String?
   wbArticle       String?           @unique // артикул продавца в WB (в заданиях FBS — поле article)
+  gtin            String?           @unique // GTIN в кодах ЧЗ (01 + 14 цифр) — по нему загруженные коды раскладываются по SKU
   shelfLifeMonths Int? // срок годности ГП от даты фасовки
   requiresCz      Boolean           @default(false) // обязательна маркировка Честный знак
   czProjectId     String? // проект портала с макетом этикетки ЧЗ
@@ -574,4 +575,20 @@ model WbOrder {
   updatedAt       DateTime  @updatedAt
 
   @@index([supplyId])
+}
+
+// Загрузка файла ЧЗ на все SKU сразу: коды раскладываются по GTIN
+model CzImport {
+  id         String    @id @default(uuid())
+  fileName   String
+  kind       String // pdf | csv
+  s3Key      String?
+  status     String    @default("processing") // processing | done | error
+  pages      Int       @default(0)
+  decoded    Int       @default(0)
+  result     Json? // { bySku: [{itemId, name, added, duplicates}], unassigned: { gtin: codes[] }, failedPages: [] }
+  error      String?
+  userId     String
+  createdAt  DateTime  @default(now())
+  finishedAt DateTime?
 }

@@ -18,7 +18,7 @@ router.use(authMiddleware);
  * common variants and convert them back to a single 0x1D so the encoded
  * DataMatrix matches what the official PDF contains.
  */
-function unescapeGs(raw: string): string {
+export function unescapeGs(raw: string): string {
   return raw
     .replace(/\\u001[dD]/g, '\x1d')   // \u001d / \u001D
     .replace(/\\x1[dD]/g, '\x1d')     // \x1d / \x1D

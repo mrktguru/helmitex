@@ -137,6 +137,10 @@ export const api = {
   getMarking: () => request<any[]>('/stock/marking'),
   getMarkingItem: (itemId: string) => request<any>(`/stock/marking/${itemId}`),
   getMarkingQueue: () => request<any[]>('/stock/marking/queue'),
+  getCzImports: () => request<any[]>('/stock/marking/imports'),
+  assignCzImport: (id: string, gtin: string, itemId: string) =>
+    request<any>(`/stock/marking/imports/${id}/assign`, { method: 'POST', body: JSON.stringify({ gtin, itemId }) }),
+  setGtin: (itemId: string, gtin: string) => request<any>(`/stock/marking/${itemId}/gtin`, { method: 'PUT', body: JSON.stringify({ gtin }) }),
   wbStatus: () => request<{ configured: boolean }>('/stock/wb/status'),
   wbSupplies: () => request<any[]>('/stock/wb/supplies'),
   wbCreateSupply: (name: string) => request<{ id: string }>('/stock/wb/supplies', { method: 'POST', body: JSON.stringify({ name }) }),

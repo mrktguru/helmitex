@@ -4,6 +4,10 @@ import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { StockError } from '../services/stock';
 import { lotLabelVars, markLot } from '../services/marking';
 import { pdfQueue } from '../workers/pdfQueue';
+import multer from 'multer';
+import { assignUnassigned, distribute, gtinTargets } from '../services/czImport';
+import { uploadFile } from '../services/s3';
+import { unescapeGs } from './cz';
 
 // Маркировка: SKU, которым нужен ЧЗ, — их база кодов (проект этикетки) и выпущенный без ЧЗ остаток
 const router = Router();
@@ -60,7 +64,9 @@ async function load(itemIds?: string[]) {
     include: { spec: { include: { czProject: { include: { template: { select: { widthMm: true, heightMm: true, czArea: true } } } } } } },
   });
   const projectIds = items.map((i) => i.spec?.czProjectId).filter((x): x is string => !!x);
-  const [codes, stock] = await Promise.all([codeStats(projectIds), stockByState(items.map((i) => i.id))]);
+  const [codes, stock, targets] = await Promise.all([codeStats(projectIds), stockByState(items.map((i) => i.id)), gtinTargets()]);
+  const gtinOfItem = new Map<string, { gtin: string; source: string }>();
+  for (const [gtin, t] of targets) if (!gtinOfItem.has(t.itemId)) gtinOfItem.set(t.itemId, { gtin, source: t.source });
   const empty = { total: 0, pending: 0, used: 0, spoiled: 0, noText: 0 };
   return items.map((i) => {
     const p = i.spec?.czProject ?? null;
@@ -75,6 +81,7 @@ async function load(itemIds?: string[]) {
       },
       codes: c,
       stock: s,
+      gtin: gtinOfItem.get(i.id) ?? null,
       // сколько кодов не хватает на выпущенный без ЧЗ товар
       shortage: Math.max(0, Math.ceil(s.unlabeled) - c.pending),
     };
@@ -150,6 +157,68 @@ router.post('/marking/lots/:lotId/mark', async (req: AuthRequest, res: Response)
     if (err instanceof StockError) { res.status(400).json({ error: err.message }); return; }
     throw err;
   }
+});
+
+// ───────────── Загрузка ЧЗ на все SKU (раскладка по GTIN) ─────────────
+
+const uploadAny = multer({ storage: multer.memoryStorage(), limits: { fileSize: 60 * 1024 * 1024 } });
+
+// POST /api/stock/marking/import — PDF (распознаётся в фоне) или CSV/TXT (сразу)
+router.post('/marking/import', uploadAny.single('file'), async (req: AuthRequest, res: Response): Promise<void> => {
+  const f = req.file;
+  if (!f) { res.status(400).json({ error: 'Нужен файл PDF или CSV' }); return; }
+  const isPdf = f.mimetype === 'application/pdf' || /\.pdf$/i.test(f.originalname);
+  const fileName = Buffer.from(f.originalname, 'latin1').toString('utf8');
+  if (isPdf) {
+    const imp = await prisma.czImport.create({ data: { fileName, kind: 'pdf', userId: req.user!.id } });
+    const s3Key = `cz-import/${imp.id}.pdf`;
+    await uploadFile(s3Key, f.buffer, 'application/pdf');
+    await prisma.czImport.update({ where: { id: imp.id }, data: { s3Key } });
+    await pdfQueue.add('cz-import', { importId: imp.id } as any, { jobId: `cz-import-${imp.id}` });
+    res.status(201).json(await prisma.czImport.findUnique({ where: { id: imp.id } }));
+    return;
+  }
+  const lines = f.buffer.toString('utf8').replace(/^\uFEFF/, '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const codes = lines.map((l) => unescapeGs(l.split(/[,;\t]/)[0].trim().replace(/^"|"$/g, ''))).filter((c) => /^01\d{14}/.test(c));
+  if (!codes.length) { res.status(400).json({ error: 'В файле не найдено кодов ЧЗ (строки должны начинаться с 01 и GTIN)' }); return; }
+  const imp = await prisma.czImport.create({ data: { fileName, kind: 'csv', userId: req.user!.id, pages: lines.length, decoded: lines.length } });
+  const result = await distribute(codes, `import-${imp.id}`);
+  res.status(201).json(await prisma.czImport.update({ where: { id: imp.id }, data: { status: 'done', result: result as any, finishedAt: new Date() } }));
+});
+
+// GET /api/stock/marking/imports — последние загрузки
+router.get('/marking/imports', async (_req: AuthRequest, res: Response) => {
+  const rows = await prisma.czImport.findMany({ orderBy: { createdAt: 'desc' }, take: 20 });
+  // коды нераспределённых GTIN наружу не отдаём — только количество
+  res.json(rows.map((r) => {
+    const result = r.result as any;
+    return {
+      ...r,
+      result: result && { ...result, unassigned: Object.fromEntries(Object.entries(result.unassigned ?? {}).map(([g, l]) => [g, (l as string[]).length])) },
+    };
+  }));
+});
+
+// POST /api/stock/marking/imports/:id/assign { gtin, itemId }
+router.post('/marking/imports/:id/assign', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    res.json(await assignUnassigned(req.params.id, String(req.body?.gtin ?? ''), String(req.body?.itemId ?? '')));
+  } catch (err) {
+    if (err instanceof StockError) { res.status(400).json({ error: err.message }); return; }
+    throw err;
+  }
+});
+
+// PUT /api/stock/marking/:itemId/gtin { gtin }
+router.put('/marking/:itemId/gtin', async (req: AuthRequest, res: Response): Promise<void> => {
+  const raw = String(req.body?.gtin ?? '').trim();
+  const gtin = raw === '' ? null : /^\d{13}$/.test(raw) ? '0' + raw : /^\d{14}$/.test(raw) ? raw : undefined;
+  if (gtin === undefined) { res.status(400).json({ error: 'GTIN — 14 цифр (или EAN-13)' }); return; }
+  await prisma.$transaction(async (tx) => {
+    if (gtin) await tx.productSpec.updateMany({ where: { gtin, itemId: { not: req.params.itemId } }, data: { gtin: null } });
+    await tx.productSpec.update({ where: { itemId: req.params.itemId }, data: { gtin } });
+  });
+  res.json({ ok: true });
 });
 
 // GET /api/stock/marking/:itemId

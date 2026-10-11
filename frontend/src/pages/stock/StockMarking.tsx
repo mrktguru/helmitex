@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
-import { api, downloadFile } from '../../api/client';
+import { api, downloadFile, uploadForm } from '../../api/client';
 import TemplatePreview from '../../components/TemplatePreview';
 import { btnPrimary, btnSecondary, fmtDate, fmtQty, inputCls } from './common';
 import { PageHeader } from './StockLayout';
@@ -236,8 +236,9 @@ function Base() {
 
   return (
     <div>
+      <CzImport skus={rows ?? []} onDone={() => api.getMarking().then(setRows).catch(() => {})} />
       <div className="flex flex-wrap items-center gap-3 mb-4">
-        <p className="text-sm text-slate-500 flex-1 min-w-[260px]">Коды загружаются в карточку SKU файлом PDF из Честного знака — партиями по 500–1000 кодов. Там же — макет этикетки.</p>
+        <p className="text-sm text-slate-500 flex-1 min-w-[260px]">Товары с маркировкой. В карточке — база кодов SKU, макет этикетки и печать.</p>
         <button className={btnSecondary} onClick={() => setAdding((v) => !v)}>+ Включить маркировку для SKU</button>
       </div>
       {adding && (
@@ -268,6 +269,7 @@ function Base() {
                   : r.codes.pending > 0 && <Badge cls="bg-green-100 text-green-800">коды есть</Badge>}
               </div>
               <div className="text-xs text-slate-500 mt-0.5">
+                GTIN {r.gtin ? <span className="font-mono">{r.gtin.gtin}</span> : <span className="text-amber-700">не определён</span>} ·{' '}
                 Этикетка: {r.project?.template ? `${r.project.template.widthMm}×${r.project.template.heightMm} мм` : 'макет не создан'}
                 {r.project?.template && !r.project.template.hasCzArea && <span className="text-amber-700"> · нет поля ЧЗ</span>}
               </div>
@@ -282,6 +284,91 @@ function Base() {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ───────────── Загрузка ЧЗ на все SKU ─────────────
+
+function CzImport({ skus, onDone }: { skus: any[]; onDone: () => void }) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [drag, setDrag] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const timer = useRef<number>();
+
+  async function load() {
+    try {
+      const r = await api.getCzImports();
+      setRows(r);
+      window.clearTimeout(timer.current);
+      if (r.some((x) => x.status === 'processing')) timer.current = window.setTimeout(load, 2000);
+      else onDone();
+    } catch (e: any) { setError(e.message); }
+  }
+  useEffect(() => { load(); return () => window.clearTimeout(timer.current); }, []);
+
+  async function upload(f: File) {
+    setBusy(true); setError('');
+    try { await uploadForm('/stock/marking/import', f); await load(); } catch (e: any) { setError(e.message); }
+    setBusy(false);
+  }
+
+  async function assign(id: string, gtin: string, itemId: string) {
+    if (!itemId) return;
+    try { await api.assignCzImport(id, gtin, itemId); await load(); } catch (e: any) { setError(e.message); }
+  }
+
+  const recent = rows.slice(0, 5);
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-4 mb-5">
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
+        onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) upload(f); }}
+        onClick={() => !busy && fileRef.current?.click()}
+        className={clsx('border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition', drag ? 'border-brand-500 bg-brand-50' : 'border-slate-300 hover:border-brand-400')}>
+        <div className="font-semibold">{busy ? 'Загрузка…' : 'Загрузить ЧЗ — коды разложатся по товарам сами'}</div>
+        <div className="text-xs text-slate-500 mt-1">PDF из Честного знака (по 500–1000 кодов) или CSV. Товар определяется по GTIN в коде; повторно загруженные коды пропускаются.</div>
+        <input ref={fileRef} type="file" accept="application/pdf,.pdf,text/csv,.csv,.txt" className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) upload(f); }} />
+      </div>
+      {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
+      {recent.length > 0 && (
+        <div className="mt-4 divide-y divide-slate-100">
+          {recent.map((r) => (
+            <div key={r.id} className="py-2.5 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">{r.fileName}</span>
+                <span className="text-xs text-slate-500">{new Date(r.createdAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                {r.status === 'processing' && <Badge cls="bg-amber-100 text-amber-800">распознаётся {r.decoded}/{r.pages || '…'}</Badge>}
+                {r.status === 'error' && <Badge cls="bg-red-100 text-red-700">ошибка: {r.error}</Badge>}
+              </div>
+              {r.status === 'processing' && r.pages > 0 && (
+                <div className="mt-1.5 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-brand-500 transition-all" style={{ width: `${(r.decoded / r.pages) * 100}%` }} /></div>
+              )}
+              {r.result && (
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                  {r.result.bySku.map((b: any) => (
+                    <span key={b.gtin}><b className="text-green-700">+{b.added}</b> {b.name}{b.duplicates ? <span className="text-slate-500"> · повторов {b.duplicates}</span> : ''}</span>
+                  ))}
+                  {r.result.invalid > 0 && <span className="text-amber-700">не коды ЧЗ: {r.result.invalid}</span>}
+                  {r.result.failedPages?.length > 0 && <span className="text-red-600">не распознаны страницы: {r.result.failedPages.slice(0, 10).join(', ')}{r.result.failedPages.length > 10 ? '…' : ''}</span>}
+                </div>
+              )}
+              {r.result && Object.entries(r.result.unassigned ?? {}).map(([gtin, n]) => (
+                <div key={gtin} className="mt-2 flex flex-wrap items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs">
+                  <span>GTIN <span className="font-mono">{gtin}</span> — {String(n)} кодов: товар не найден.</span>
+                  <select className={clsx(inputCls, 'w-72 text-xs')} defaultValue="" onChange={(e) => assign(r.id, gtin, e.target.value)}>
+                    <option value="">Это коды товара…</option>
+                    {skus.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
