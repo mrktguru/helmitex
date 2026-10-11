@@ -10,11 +10,12 @@ const NAV: NavItem[] = [
   { to: '/stock', label: 'Главная', icon: '◎', match: ['/stock'] },
   { to: '/stock/warehouse', label: 'Склад', icon: '▦', match: ['/stock/warehouse', '/stock/docs', '/stock/moves'] },
   {
-    to: '/stock/mixes', label: 'Производство', icon: '⚙', match: ['/stock/mix', '/stock/fill', '/stock/quant'],
+    to: '/stock/mixes', label: 'Производство', icon: '⚙', match: ['/stock/mix', '/stock/fill', '/stock/quant', '/stock/marking'],
     children: [
       { to: '/stock/mixes', label: 'Замесы', match: ['/stock/mix'] },
       { to: '/stock/fills', label: 'Фасовка', match: ['/stock/fill'] },
       { to: '/stock/quants', label: 'Кванты', match: ['/stock/quant'] },
+      { to: '/stock/marking', label: 'Маркировка', match: ['/stock/marking'] },
     ],
   },
   { to: '/stock/fbo', label: 'Отгрузки FBO', icon: '⇪', match: ['/stock/fbo'] },

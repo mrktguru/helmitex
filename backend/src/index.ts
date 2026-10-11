@@ -16,6 +16,7 @@ import quantsRouter from './routes/quants';
 import fboRouter from './routes/fbo';
 import dashboardRouter from './routes/dashboard';
 import adsRouter from './routes/ads';
+import markingRouter from './routes/marking';
 import { syncAllShipments } from './services/fbo';
 import { ozonConfigured } from './services/ozon';
 import { startAdsSync } from './services/ads';
@@ -51,6 +52,7 @@ app.use('/api/stock', stockRouter);
 app.use('/api/stock', quantsRouter);
 app.use('/api/stock', fboRouter);
 app.use('/api/stock', dashboardRouter);
+app.use('/api/stock', markingRouter);
 app.use('/api/ads', adsRouter);
 app.use('/api', batchesRouter);
 

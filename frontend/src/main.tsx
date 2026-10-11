@@ -24,6 +24,8 @@ import StockQuantDetail from './pages/stock/StockQuantDetail';
 import StockFboList from './pages/stock/StockFboList';
 import StockFbo from './pages/stock/StockFbo';
 import AdsAnalytics from './pages/ads/AdsAnalytics';
+import StockMarking from './pages/stock/StockMarking';
+import StockMarkingItem from './pages/stock/StockMarkingItem';
 import { PrivateRoute } from './components/PrivateRoute';
 import { AdminRoute } from './components/AdminRoute';
 
@@ -51,6 +53,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="quants/:id" element={<StockQuantDetail />} />
             <Route path="quant/new" element={<StockQuantAssemble />} />
             <Route path="quant/:id" element={<StockQuantDoc />} />
+            <Route path="marking" element={<StockMarking />} />
+            <Route path="marking/:id" element={<StockMarkingItem />} />
             <Route path="fbo" element={<StockFboList />} />
             <Route path="fbo/:id" element={<StockFbo />} />
             <Route path="ads" element={<AdsAnalytics />} />

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import React from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useEditorStore, LabelElement, TextElement, BarcodeElement, RectElement, EacElement, VariableElement } from '../store/useEditorStore';
 import { api } from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
@@ -165,6 +165,9 @@ function colorToFilter(hex: string): string {
 export default function Editor() {
   const { id: projectId } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  // ?back=/stock/marking/… — вернуться туда, откуда открыли редактор
+  const back = useSearchParams()[0].get('back');
+  const backPath = back?.startsWith('/') && !back.startsWith('//') ? back : `/projects/${projectId}`;
   const store = useEditorStore();
   const token = useAuthStore((s) => s.accessToken);
 
@@ -457,7 +460,7 @@ export default function Editor() {
           Визуальный редактор шаблонов требует широкого экрана. Пожалуйста, откройте этот проект с компьютера или планшета (от 768px).
         </p>
         <button
-          onClick={() => navigate(`/projects/${projectId}`)}
+          onClick={() => navigate(backPath)}
           className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium"
         >
           ← Вернуться к проекту
@@ -465,7 +468,7 @@ export default function Editor() {
       </div>
       <div className="hidden md:flex flex-col flex-1 min-h-0">
       <div className="bg-white border-b px-4 py-2 flex items-center gap-3">
-        <button onClick={() => navigate(`/projects/${projectId}`)} className="text-gray-500 hover:text-gray-900 text-sm">
+        <button onClick={() => navigate(backPath)} className="text-gray-500 hover:text-gray-900 text-sm">
           ← Назад
         </button>
         <span className="text-sm font-medium">Редактор шаблона</span>

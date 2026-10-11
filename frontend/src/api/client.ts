@@ -123,6 +123,10 @@ export const api = {
   getDashboard: () => request<any>('/stock/dashboard'),
   getCzProjects: () => request<{ id: string; name: string; hasCzArea: boolean; freeCodes: number }[]>('/stock/cz-projects'),
   getItem: (id: string) => request<any>(`/stock/items/${id}`),
+  getMarking: () => request<any[]>('/stock/marking'),
+  getMarkingItem: (itemId: string) => request<any>(`/stock/marking/${itemId}`),
+  enableMarking: (itemId: string, projectId?: string) =>
+    request<any>(`/stock/marking/${itemId}/enable`, { method: 'POST', body: JSON.stringify({ projectId }) }),
   importOzonProducts: (products: { offerId: string; name: string }[]) =>
     request<{ created: number; ids: string[]; notFound: string[] }>('/stock/ozon/import-products', { method: 'POST', body: JSON.stringify({ products }) }),
   // Ozon / FBO
