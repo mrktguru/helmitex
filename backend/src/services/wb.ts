@@ -87,19 +87,25 @@ export async function wbSupplies(): Promise<WbSupplyApi[]> {
   return out;
 }
 
-// Задания по списку id: ищем в /api/v3/orders начиная с даты (WB отдаёт задания за период, постранично)
+// Задания по списку id: WB отдаёт /api/v3/orders за период не длиннее 30 дней — идём окнами назад от сегодня
 export async function wbOrdersByIds(ids: number[], since: Date): Promise<WbOrderApi[]> {
   const want = new Set(ids);
-  const found: WbOrderApi[] = [];
-  let next = 0;
-  const dateFrom = Math.floor(since.getTime() / 1000);
-  for (let page = 0; page < 30 && found.length < want.size; page++) {
-    const r = await wb<{ orders: WbOrderApi[]; next: number }>('GET', `/api/v3/orders?limit=1000&next=${next}&dateFrom=${dateFrom}`, undefined, undefined, false);
-    for (const o of r.orders ?? []) if (want.has(o.id)) found.push(o);
-    if (!r.orders?.length || !r.next || r.next === next) break;
-    next = r.next;
+  const found = new Map<number, WbOrderApi>();
+  const DAY = 86400;
+  let to = Math.floor(Date.now() / 1000);
+  const stop = Math.floor(since.getTime() / 1000);
+  while (found.size < want.size && to > stop) {
+    const from = Math.max(stop, to - 30 * DAY + 60);
+    let next = 0;
+    for (let page = 0; page < 50; page++) {
+      const r = await wb<{ orders: WbOrderApi[]; next: number }>('GET', `/api/v3/orders?limit=1000&next=${next}&dateFrom=${from}&dateTo=${to}`, undefined, undefined, false);
+      for (const o of r.orders ?? []) if (want.has(o.id)) found.set(o.id, o);
+      if (!r.orders?.length || !r.next || r.next === next) break;
+      next = r.next;
+    }
+    to = from;
   }
-  return found;
+  return [...found.values()];
 }
 
 export const fmtRuDate = (d: Date) =>

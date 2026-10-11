@@ -65,7 +65,7 @@ export async function syncSupply(id: string) {
   const knownIds = new Set(known.map((k) => k.id));
   const missing = ids.filter((x) => !knownIds.has(String(x)));
   if (missing.length) {
-    const since = new Date(new Date(s.createdAt).getTime() - 45 * 86400_000);
+    const since = new Date(new Date(s.createdAt).getTime() - 30 * 86400_000);
     await upsertOrders(await wbOrdersByIds(missing, since), id);
   }
   await prisma.wbOrder.updateMany({ where: { id: { in: ids.map(String) } }, data: { supplyId: id } });
