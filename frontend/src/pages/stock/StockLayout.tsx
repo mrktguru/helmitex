@@ -14,8 +14,8 @@ const NAV: NavItem[] = [
     children: [
       { to: '/stock/mixes', label: 'Замесы', match: ['/stock/mix'] },
       { to: '/stock/fills', label: 'Фасовка', match: ['/stock/fill'] },
-      { to: '/stock/quants', label: 'Кванты', match: ['/stock/quant'] },
       { to: '/stock/marking', label: 'Маркировка', match: ['/stock/marking'] },
+      { to: '/stock/quants', label: 'Кванты', match: ['/stock/quant'] },
     ],
   },
   { to: '/stock/fbo', label: 'Отгрузки FBO', icon: '⇪', match: ['/stock/fbo'] },
