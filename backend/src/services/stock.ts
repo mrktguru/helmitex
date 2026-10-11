@@ -205,10 +205,10 @@ async function postMix(tx: Tx, doc: DocWithLines): Promise<void> {
 export interface Allocation { lotId: string | null; lotNumber: string | null; qty: number }
 
 // Подбор лотов по FEFO: ближайший срок годности первым, без срока — в конце, затем по дате прихода.
-export async function allocateFefo(tx: Tx, itemId: string, need: number): Promise<{ allocations: Allocation[]; shortage: number }> {
+export async function allocateFefo(tx: Tx, itemId: string, need: number, state: ProductState = 'NONE'): Promise<{ allocations: Allocation[]; shortage: number }> {
   const groups = await tx.stockMove.groupBy({
     by: ['lotId'],
-    where: { lot: { itemId }, state: 'NONE' },
+    where: { lot: { itemId }, state },
     _sum: { qty: true },
   });
   const avail = groups.filter((g) => (g._sum.qty ?? 0) > EPS);

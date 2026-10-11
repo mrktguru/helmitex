@@ -19,6 +19,7 @@ const NAV: NavItem[] = [
     ],
   },
   { to: '/stock/fbo', label: 'Отгрузки FBO', icon: '⇪', match: ['/stock/fbo'] },
+  { to: '/stock/wb', label: 'Отправки WB FBS', icon: '⇡', match: ['/stock/wb'] },
   { to: '/stock/ads', label: 'Аналитика рекламы', icon: '◔', match: ['/stock/ads'] },
   { to: '/stock/catalog', label: 'Справочники', icon: '☰', match: ['/stock/catalog'] },
 ];

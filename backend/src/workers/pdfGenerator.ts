@@ -185,10 +185,11 @@ const worker = new Worker<JobData>(
       const heightPt = template.heightMm * MM_TO_PT;
 
       // Load all CZ codes for this batch
+      // Порядок страниц = порядок выдачи кодов (claim): партия загрузки, номер страницы. Так же его восстанавливает wbPdf.
       const codes = await prisma.czCode.findMany({
         where: { outputBatchId },
         include: { czBatch: true },
-        orderBy: { pageIndex: 'asc' },
+        orderBy: [{ czBatch: { uploadedAt: 'asc' } }, { pageIndex: 'asc' }, { id: 'asc' }],
       });
       const outputBatch = await prisma.outputBatch.findUnique({ where: { id: outputBatchId } });
       // Batches for layouts without CZ carry no codes: one page per requested label.

@@ -19,7 +19,7 @@ export async function lotLabelVars(tx: Tx, lotId: string): Promise<Record<string
 }
 
 /** Маркировка партии: n кодов из пула SKU → тираж этикеток, n шт. «без ЧЗ» → «с ЧЗ». */
-export async function markLot(tx: Tx, lotId: string, n: number, userId: string): Promise<{ docId: string; job: PdfJob }> {
+export async function markLot(tx: Tx, lotId: string, n: number, userId: string, comment?: string): Promise<{ docId: string; job: PdfJob }> {
   const lot = await tx.lot.findUnique({
     where: { id: lotId },
     include: { item: { include: { spec: { include: { czProject: { include: { template: true } } } } } } },
@@ -47,7 +47,7 @@ export async function markLot(tx: Tx, lotId: string, n: number, userId: string):
   const doc = await tx.stockDoc.create({
     data: {
       type: 'MARK', status: 'POSTED', postedAt: new Date(), number: await nextDocNumber(tx, 'MARK'), userId,
-      sourceLotId: lot.id, comment: `Маркировка партии ${lot.number}: ${n} шт.`,
+      sourceLotId: lot.id, comment: comment ?? `Маркировка партии ${lot.number}: ${n} шт.`,
     },
   });
   await tx.stockDocLine.create({ data: { docId: doc.id, itemId: lot.itemId, lotId: lot.id, qty: n, state: 'LABELED' } });
@@ -67,7 +67,7 @@ export async function markLot(tx: Tx, lotId: string, n: number, userId: string):
   return { docId: doc.id, job: { outputBatchId: batch.id, projectId: project.id, codeIds: codes.map((c) => c.id) } };
 }
 
-/** Напечатанные коды партии, которые сейчас на банках россыпью (не в активном кванте). */
+/** Напечатанные коды партии, которые сейчас на банках россыпью (не в активном кванте и не в задании WB). */
 export async function looseCodes(tx: Tx, lotId: string, n: number): Promise<string[]> {
   const rows = await tx.$queryRaw<{ id: string }[]>`
     SELECT c.id
@@ -77,6 +77,7 @@ export async function looseCodes(tx: Tx, lotId: string, n: number): Promise<stri
     WHERE c.status = 'USED'
       AND (b."lotId" = ${lotId} OR q."lotId" = ${lotId})
       AND NOT EXISTS (SELECT 1 FROM "QuantCode" qc WHERE qc."czCodeId" = c.id AND qc.active)
+      AND NOT EXISTS (SELECT 1 FROM "WbOrder" w WHERE w."czCodeId" = c.id)
     ORDER BY c."usedAt" ASC, c."pageIndex" ASC
     LIMIT ${n}
     FOR UPDATE OF c`;
@@ -91,6 +92,8 @@ export async function cancelMark(tx: Tx, docId: string, releaseCodes: boolean): 
     where: { active: true, czCode: { outputBatchId: { in: ids } } }, include: { quant: true },
   });
   if (inQuant) throw new StockError(`Коды этой маркировки уже в кванте ${inQuant.quant.number}`);
+  const inWb = await tx.wbOrder.findFirst({ where: { czCode: { outputBatchId: { in: ids } } } });
+  if (inWb) throw new StockError(`Коды этой маркировки привязаны к заданию WB ${inWb.id} (поставка ${inWb.supplyId}) — сначала отвяжите их`);
   await tx.czCode.updateMany({
     where: { outputBatchId: { in: ids } },
     data: releaseCodes ? { status: 'PENDING', usedAt: null, outputBatchId: null } : { status: 'SPOILED' },

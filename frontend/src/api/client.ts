@@ -63,6 +63,17 @@ export async function downloadFile(path: string, fallbackName: string): Promise<
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
+// Загрузка файла формой (multipart) с авторизацией
+export async function uploadForm<T>(path: string, file: File): Promise<T> {
+  const token = useAuthStore.getState().accessToken;
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch(BASE + path, { method: 'POST', body: fd, headers: token ? { Authorization: `Bearer ${token}` } : {}, credentials: 'include' });
+  const body = await res.json().catch(() => ({})) as any;
+  if (!res.ok) throw new Error(errorText(body.error) ?? `HTTP ${res.status}`);
+  return body as T;
+}
+
 export const api = {
   // Auth
   login: (login: string, password: string) =>
@@ -126,6 +137,29 @@ export const api = {
   getMarking: () => request<any[]>('/stock/marking'),
   getMarkingItem: (itemId: string) => request<any>(`/stock/marking/${itemId}`),
   getMarkingQueue: () => request<any[]>('/stock/marking/queue'),
+  wbStatus: () => request<{ configured: boolean }>('/stock/wb/status'),
+  wbSupplies: () => request<any[]>('/stock/wb/supplies'),
+  wbCreateSupply: (name: string) => request<{ id: string }>('/stock/wb/supplies', { method: 'POST', body: JSON.stringify({ name }) }),
+  wbNewOrders: () => request<any[]>('/stock/wb/new-orders'),
+  wbMapArticle: (article: string, itemId: string) => request<any>('/stock/wb/map-article', { method: 'POST', body: JSON.stringify({ article, itemId }) }),
+  wbSupply: (id: string, sync = false) => request<any>(`/stock/wb/supplies/${encodeURIComponent(id)}${sync ? '?sync=1' : ''}`),
+  wbAddOrders: (id: string, ids: string[]) => request<any>(`/stock/wb/supplies/${encodeURIComponent(id)}/orders`, { method: 'POST', body: JSON.stringify({ ids }) }),
+  wbAssign: (id: string, mode: 'fresh' | 'loose') =>
+    request<{ notes: string[]; printed: number }>(`/stock/wb/supplies/${encodeURIComponent(id)}/assign`, { method: 'POST', body: JSON.stringify({ mode }) }),
+  wbScan: (id: string, code: string, orderId?: string) =>
+    request<{ orderId: string }>(`/stock/wb/supplies/${encodeURIComponent(id)}/scan`, { method: 'POST', body: JSON.stringify({ code, orderId }) }),
+  wbDetach: (id: string, orderId: string) => request<any>(`/stock/wb/supplies/${encodeURIComponent(id)}/orders/${orderId}/detach`, { method: 'POST' }),
+  wbSendMeta: (id: string) => request<{ sent: number; errors: string[]; remaining: number }>(`/stock/wb/supplies/${encodeURIComponent(id)}/send-meta`, { method: 'POST' }),
+  wbResetErrors: (id: string) => request<any>(`/stock/wb/supplies/${encodeURIComponent(id)}/reset-errors`, { method: 'POST' }),
+  wbTrbx: (id: string) => request<{ id: string }[]>(`/stock/wb/supplies/${encodeURIComponent(id)}/trbx`),
+  wbAddTrbx: (id: string, amount: number) => request<any>(`/stock/wb/supplies/${encodeURIComponent(id)}/trbx`, { method: 'POST', body: JSON.stringify({ amount }) }),
+  wbDeleteTrbx: (id: string, ids: string[]) => request<any>(`/stock/wb/supplies/${encodeURIComponent(id)}/trbx`, { method: 'DELETE', body: JSON.stringify({ ids }) }),
+  wbShippingPoints: (city: string, cargoType = 1) => request<any[]>(`/stock/wb/shipping-points?city=${encodeURIComponent(city)}&cargoType=${cargoType}`),
+  wbShippingDefaults: () => request<any>('/stock/wb/shipping-defaults'),
+  wbSetShipping: (id: string, data: any) => request<any>(`/stock/wb/supplies/${encodeURIComponent(id)}/shipping`, { method: 'PATCH', body: JSON.stringify(data) }),
+  wbDeliver: (id: string, writeOff: boolean) =>
+    request<{ ok: true; stockError: string | null }>(`/stock/wb/supplies/${encodeURIComponent(id)}/deliver`, { method: 'POST', body: JSON.stringify({ writeOff }) }),
+  wbWriteOff: (id: string) => request<any>(`/stock/wb/supplies/${encodeURIComponent(id)}/write-off`, { method: 'POST' }),
   getMarkingHistory: () => request<any[]>('/stock/marking/history'),
   markLot: (lotId: string, count: number) =>
     request<{ docId: string; outputBatchId: string }>(`/stock/marking/lots/${lotId}/mark`, { method: 'POST', body: JSON.stringify({ count }) }),
