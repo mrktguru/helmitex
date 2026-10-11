@@ -86,6 +86,11 @@ function Panel({ title, hint, right, children }: { title: string; hint?: string;
   );
 }
 
+// YYYY-MM-DD по местному времени (toISOString дал бы дату по UTC — после полуночи по Москве это вчера)
+function localDate(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 const Badge = ({ cls, children }: { cls: string; children: React.ReactNode }) =>
   <span className={clsx('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap', cls)}>{children}</span>;
 
@@ -253,7 +258,9 @@ function Shipping({ supply, done, onSaved }: { supply: any; done: boolean; onSav
   const [pointId, setPointId] = useState<string>(supply.shippingPointId ? String(supply.shippingPointId) : '');
   const [pointName, setPointName] = useState('');
   const [type, setType] = useState(supply.shippingType ?? 'selfShipping');
-  const [date, setDate] = useState(supply.shippingDt ?? new Date().toISOString().slice(0, 10));
+  const today = localDate();
+  // Сохранённая дата могла уже пройти — WB принимает только сегодня и позже
+  const [date, setDate] = useState(supply.shippingDt && supply.shippingDt >= today ? supply.shippingDt : today);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
@@ -288,7 +295,7 @@ function Shipping({ supply, done, onSaved }: { supply: any; done: boolean; onSav
           </select>
         </label>
         <label className="block"><span className="text-xs text-slate-500">Дата отгрузки</span>
-          <input type="date" className={clsx(inputCls, 'w-full mt-0.5')} value={date} disabled={done} onChange={(e) => setDate(e.target.value)} />
+          <input type="date" min={today} className={clsx(inputCls, 'w-full mt-0.5')} value={date} disabled={done} onChange={(e) => setDate(e.target.value)} />
         </label>
         <div>
           <span className="text-xs text-slate-500">Пункт приёма</span>

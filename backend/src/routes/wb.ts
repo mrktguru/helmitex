@@ -162,9 +162,12 @@ router.patch('/wb/supplies/:id/shipping', h(async (req, res) => {
     pointName: z.string().max(300).optional(),
     city: z.string().max(100).optional(),
   }).parse(req.body);
+  const todayMsk = new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
+  if (b.shippingDt < todayMsk) throw new StockError(`Дата отгрузки ${b.shippingDt.split('-').reverse().join('.')} уже прошла — выберите сегодня или позже`);
   const r = await wb<{ results: { supplyId: string; success?: boolean; error?: { detail: string } }[] }>('PATCH', '/api/marketplace/v3/fbs/supplies/shipping-method',
     { data: [{ supplyId: req.params.id, shippingType: b.shippingType, shippingPointId: b.shippingPointId, shippingDt: b.shippingDt }] }, req.params.id);
   const err = r.results?.find((x) => !x.success)?.error;
+  if (err?.detail === 'InvalidShippingDt') throw new StockError(`WB не принял дату отгрузки ${b.shippingDt.split('-').reverse().join('.')}: дата должна быть не раньше сегодняшней. Выберите другую дату.`);
   if (err) throw new StockError(`WB не принял способ отгрузки: ${err.detail}`);
   await prisma.wbSupply.update({ where: { id: req.params.id }, data: { shippingType: b.shippingType, shippingPointId: b.shippingPointId, shippingDt: b.shippingDt } });
   await setSetting(SHIPPING_KEY, { shippingType: b.shippingType, shippingPointId: b.shippingPointId, pointName: b.pointName ?? null, city: b.city ?? null });
