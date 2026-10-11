@@ -127,8 +127,14 @@ function LotRow({ row, onMarked }: { row: any; onMarked: () => void }) {
         <div className="mt-4 pt-4 border-t border-slate-100 grid md:grid-cols-[1fr_auto] gap-4 items-start">
           <div className="bg-slate-50 rounded-lg p-4"><TemplatePreview projectId={row.sku.project.id} maxWidthPx={420} variables={row.vars} /></div>
           <div className="text-xs text-slate-500 max-w-[240px] space-y-2">
-            <p>Подставляется автоматически: <span className="font-mono">{'{{lot}}'}</span> — партия, <span className="font-mono">{'{{expiry}}'}</span> — годен до.</p>
-            <p>Добавьте их в текст этикетки в редакторе, например «Партия: {'{{lot}}'}».</p>
+            <p>Из партии подставляются переменные макета:</p>
+            <ul className="font-mono space-y-0.5">
+              <li>{'{{batch}}'} / {'{{lot}}'} — партия ({row.vars.batch})</li>
+              <li>{'{{data}}'} — дата изготовления ({row.vars.data})</li>
+              <li>{'{{made}}'} — она же полностью ({row.vars.made})</li>
+              <li>{'{{expiry}}'} — годен до ({row.vars.expiry || '—'})</li>
+            </ul>
+            <p>Значения из редактора для них не используются.</p>
             <button className="text-brand-700 hover:underline" onClick={() => navigate(editor)}>Открыть редактор →</button>
           </div>
         </div>

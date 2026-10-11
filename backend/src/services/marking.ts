@@ -6,16 +6,33 @@ type Tx = Prisma.TransactionClient;
 const fmtDate = (d: Date) =>
   `${String(d.getUTCDate()).padStart(2, '0')}.${String(d.getUTCMonth() + 1).padStart(2, '0')}.${d.getUTCFullYear()}`;
 
+const fmtMonth = (d: Date) => `${String(d.getUTCMonth() + 1).padStart(2, '0')}.${d.getUTCFullYear()}`;
+
 /**
- * Переменные макета, которые берутся из партии ГП:
- *   {{lot}}    — номер бочки полуфабриката, из которой фасовали (П-…), иначе номер самой партии
- *   {{expiry}} — годен до
+ * Переменные макета, которые берутся из партии ГП (перекрывают значения, введённые в редакторе):
+ *   {{lot}}, {{batch}}   — номер бочки полуфабриката, из которой фасовали (П-…), иначе номер самой партии
+ *   {{data}}, {{date}}   — дата изготовления, ММ.ГГГГ (дата фасовки / ввода остатков)
+ *   {{made}}             — дата изготовления, ДД.ММ.ГГГГ
+ *   {{expiry}}           — годен до, ДД.ММ.ГГГГ; {{expiry_month}} — ММ.ГГГГ
  */
 export async function lotLabelVars(tx: Tx, lotId: string): Promise<Record<string, string>> {
   const lot = await tx.lot.findUnique({ where: { id: lotId } });
   if (!lot) return {};
   const parent = lot.parentLotId ? await tx.lot.findUnique({ where: { id: lot.parentLotId } }) : null;
-  return { lot: parent?.number ?? lot.number, expiry: lot.expiresAt ? fmtDate(lot.expiresAt) : '' };
+  // Дата изготовления — дата документа, создавшего партию (фасовка, ввод остатков, приход)
+  const line = await tx.stockDocLine.findFirst({
+    where: { lotId, doc: { type: { in: ['FILL', 'OPENING', 'RECEIPT'] }, status: 'POSTED' } },
+    include: { doc: { select: { date: true } } },
+  });
+  const made = line?.doc.date ?? lot.createdAt;
+  const number = parent?.number ?? lot.number;
+  const vars: Record<string, string> = {
+    lot: number, batch: number,
+    data: fmtMonth(made), date: fmtMonth(made), made: fmtDate(made),
+    expiry: lot.expiresAt ? fmtDate(lot.expiresAt) : '', expiry_month: lot.expiresAt ? fmtMonth(lot.expiresAt) : '',
+  };
+  // пустые не передаём — иначе перекроют значение из редактора пустотой
+  return Object.fromEntries(Object.entries(vars).filter(([, v]) => v));
 }
 
 /** Маркировка партии: n кодов из пула SKU → тираж этикеток, n шт. «без ЧЗ» → «с ЧЗ». */
