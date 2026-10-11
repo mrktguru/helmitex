@@ -176,7 +176,11 @@ const worker = new Worker<JobData>(
       const elements = template.elements as unknown as LabelElement[];
       // null = layout without a Честный знак area (labels are generated without codes)
       const czArea = template.czArea as unknown as CzArea | null;
-      const templateVariables = (template.variables as Record<string, string> | null) ?? {};
+      const outputBatchVars = await prisma.outputBatch.findUnique({ where: { id: outputBatchId }, select: { variables: true } });
+      // Переменные тиража (партия, годен до) перекрывают значения из макета
+      const batchVariables = (outputBatchVars?.variables as Record<string, string> | null) ?? {};
+      const templateVariables = { ...((template.variables as Record<string, string> | null) ?? {}), ...batchVariables };
+      const batchVarKeys = Object.keys(batchVariables);
       const widthPt = template.widthMm * MM_TO_PT;
       const heightPt = template.heightMm * MM_TO_PT;
 
@@ -342,7 +346,11 @@ const worker = new Worker<JobData>(
             // The browser pre-computes _wrappedLines on the substituted text; if present,
             // they are already final. Only fall back to server-side substitution+wrap
             // when no cached lines are provided (older templates / direct API saves).
-            const hasCachedLines = Array.isArray(el._wrappedLines) && el._wrappedLines.length > 0;
+            // Строки из браузера посчитаны со значениями макета — если элемент ссылается на переменную тиража, переносим заново
+            const usesBatchVar = el.type === 'variable'
+              ? batchVarKeys.includes(el.key ?? '')
+              : batchVarKeys.some((k) => new RegExp(`\\{\\{\\s*${k}\\s*\\}\\}`).test(sourceText));
+            const hasCachedLines = !usesBatchVar && Array.isArray(el._wrappedLines) && el._wrappedLines.length > 0;
             const hasTokens = !hasCachedLines && el.type === 'text' && sourceText.includes('{{');
             const rawText = hasTokens
               ? sourceText.replace(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g, (m, key) => {
@@ -351,8 +359,9 @@ const worker = new Worker<JobData>(
                 })
               : sourceText;
             // Calculate font size: prefer browser-resolved value (WYSIWYG) when available.
-            let size = el._resolvedFontSizePt ?? el.fontSizePt ?? 10;
-            if (!el._resolvedFontSizePt && el.fitToBlock && blockW > 0 && blockH > 0) {
+            const resolvedSize = usesBatchVar && el.fitToBlock ? undefined : el._resolvedFontSizePt;
+            let size = resolvedSize ?? el.fontSizePt ?? 10;
+            if (!resolvedSize && el.fitToBlock && blockW > 0 && blockH > 0) {
               let lo = 1, hi = 200;
               for (let fi = 0; fi < 20; fi++) {
                 const mid = (lo + hi) / 2;

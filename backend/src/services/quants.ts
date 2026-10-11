@@ -1,5 +1,6 @@
 import { Prisma, ProductState } from '@prisma/client';
 import { PdfJob, StockError, allocateFefo, consume, nextNumber, round } from './stock';
+import { looseCodes, lotLabelVars } from './marking';
 
 type Tx = Prisma.TransactionClient;
 
@@ -29,13 +30,16 @@ export async function availableCodes(tx: Tx, projectId: string): Promise<number>
   return tx.czCode.count({ where: { status: 'PENDING', czBatch: { projectId } } });
 }
 
-async function issueBatch(tx: Tx, projectId: string, n: number, projectName: string): Promise<{ batchId: string; codeIds: string[] }> {
+async function issueBatch(tx: Tx, projectId: string, n: number, projectName: string, lotId: string): Promise<{ batchId: string; codeIds: string[] }> {
   const codes = await claimCodes(tx, projectId, n);
   if (codes.length < n) {
     throw new StockError(`В проекте «${projectName}» не хватает кодов ЧЗ: свободно ${codes.length}, нужно ${n}. Загрузите коды.`);
   }
   const batch = await tx.outputBatch.create({
-    data: { projectId, fromIndex: codes[0].pageIndex, toIndex: codes[codes.length - 1].pageIndex, count: n },
+    data: {
+      projectId, fromIndex: codes[0].pageIndex, toIndex: codes[codes.length - 1].pageIndex, count: n,
+      lotId, variables: await lotLabelVars(tx, lotId),
+    },
   });
   await tx.czCode.updateMany({
     where: { id: { in: codes.map((c) => c.id) } },
@@ -67,7 +71,9 @@ export async function postQuant(tx: Tx, docId: string, importCodes?: string[][])
 
   const n = qt.unitsPerQuant;
   const state: ProductState = doc.sourceState ?? (doc.imported ? 'LABELED' : 'UNLABELED');
-  const needCz = qt.trackCz && !doc.imported;
+  // Из «с ЧЗ» коды уже на банках (напечатаны маркировкой) — новые не выдаются, квант получает коды партии россыпью
+  const needCz = qt.trackCz && !doc.imported && state === 'UNLABELED';
+  const reuseCz = qt.trackCz && !doc.imported && state === 'LABELED';
   if (needCz) {
     if (!qt.project) throw new StockError(`У типа «${qt.name}» не выбран проект этикетки ЧЗ`);
     if (!qt.project.template) throw new StockError(`В проекте «${qt.project.name}» нет макета этикетки`);
@@ -114,10 +120,15 @@ export async function postQuant(tx: Tx, docId: string, importCodes?: string[][])
     let outputBatchId: string | null = null;
     let codeIds: string[] = [];
     if (needCz) {
-      const issued = await issueBatch(tx, qt.project!.id, n, qt.project!.name);
+      const issued = await issueBatch(tx, qt.project!.id, n, qt.project!.name, lot.id);
       outputBatchId = issued.batchId;
       codeIds = issued.codeIds;
       jobs.push({ outputBatchId, projectId: qt.project!.id, codeIds });
+    } else if (reuseCz) {
+      codeIds = await looseCodes(tx, lot.id, n);
+      if (codeIds.length < n) {
+        throw new StockError(`У партии ${lot.number} на банках «с ЧЗ» известно ${codeIds.length} кодов, а в квант нужно ${n}. Промаркируйте партию в разделе «Маркировка».`);
+      }
     }
     const quant = await tx.quant.create({
       data: {
@@ -149,8 +160,8 @@ export async function cancelQuants(tx: Tx, docId: string, releaseCodes: boolean)
   if (busy) throw new StockError(`Квант ${busy.number} уже в поставке или отгружен`);
   const czIds = quants.flatMap((q) => q.codes.filter((c) => c.active).map((c) => c.czCodeId)).filter((x): x is string => !!x);
   const doc = await tx.stockDoc.findUnique({ where: { id: docId } });
-  // Коды введённых вручную квантов уже нанесены на банки — их статус не меняем
-  if (czIds.length && !doc?.imported) {
+  // Коды введённых вручную квантов и квантов из «с ЧЗ» уже нанесены на банки — их статус не меняем
+  if (czIds.length && !doc?.imported && doc?.sourceState !== 'LABELED') {
     await tx.czCode.updateMany({
       where: { id: { in: czIds } },
       data: releaseCodes ? { status: 'PENDING', usedAt: null, outputBatchId: null } : { status: 'SPOILED' },
@@ -172,7 +183,7 @@ export async function replaceCode(tx: Tx, quantId: string, quantCodeId: string):
 
   await tx.quantCode.update({ where: { id: qc.id }, data: { active: false } });
   if (qc.czCodeId) await tx.czCode.update({ where: { id: qc.czCodeId }, data: { status: 'SPOILED' } });
-  const issued = await issueBatch(tx, project.id, 1, project.name);
+  const issued = await issueBatch(tx, project.id, 1, project.name, quant.lotId);
   await tx.quantCode.create({ data: { quantId, czCodeId: issued.codeIds[0] } });
   return { outputBatchId: issued.batchId, projectId: project.id, codeIds: issued.codeIds };
 }

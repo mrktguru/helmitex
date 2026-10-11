@@ -97,6 +97,12 @@ model OutputBatch {
   createdAt DateTime @default(now())
   codes     CzCode[]
   quant     Quant?
+  lotId     String? // партия ГП, для которой печатались этикетки
+  docId     String? // документ маркировки (MARK)
+  variables Json? // значения переменных макета на этот тираж: { lot, expiry }
+
+  @@index([lotId])
+  @@index([docId])
 }
 
 // ─────────────────────────── Склад ───────────────────────────
@@ -166,6 +172,7 @@ enum DocType {
   FILL // фасовка
   QUANT // сборка квантов
   SHIPMENT // отгрузка (FBO)
+  MARK // маркировка: печать ЧЗ на партию, «без ЧЗ» → «с ЧЗ»
 }
 
 enum DocStatus {

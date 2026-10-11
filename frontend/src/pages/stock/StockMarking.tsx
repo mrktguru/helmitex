@@ -1,12 +1,214 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
-import { api } from '../../api/client';
-import { btnPrimary, btnSecondary, fmtQty, inputCls } from './common';
+import { api, downloadFile } from '../../api/client';
+import TemplatePreview from '../../components/TemplatePreview';
+import { btnPrimary, btnSecondary, fmtDate, fmtQty, inputCls } from './common';
 import { PageHeader } from './StockLayout';
 
-// Маркировка: SKU с обязательным ЧЗ — база кодов и выпущенный без ЧЗ остаток
+const TABS = [
+  { key: 'queue', label: 'Ждут маркировки' },
+  { key: 'done', label: 'Промаркированы' },
+  { key: 'base', label: 'Коды и этикетки' },
+] as const;
+
+// Маркировка: очередь партий после фасовки → печать ЧЗ с партией и сроком годности из склада
 export default function StockMarking() {
+  const [params, setParams] = useSearchParams();
+  const tab = (params.get('tab') ?? 'queue') as (typeof TABS)[number]['key'];
+  const [queueCount, setQueueCount] = useState<number | null>(null);
+
+  return (
+    <div>
+      <PageHeader title="Маркировка" hint="Партии после фасовки, которые ждут кодов Честного знака. В этикетку подставляются партия (номер бочки полуфабриката) и срок годности; напечатанные банки переходят в «с ЧЗ».">
+        <Link to="/stock/marking?tab=base" className={btnSecondary}>Загрузить ЧЗ</Link>
+      </PageHeader>
+      <div className="flex gap-1 mb-4">
+        {TABS.map((t) => (
+          <button key={t.key} onClick={() => setParams(t.key === 'queue' ? {} : { tab: t.key })}
+            className={clsx('px-3 py-1.5 rounded-full text-sm', tab === t.key ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 hover:bg-slate-100')}>
+            {t.label}{t.key === 'queue' && queueCount != null ? ` · ${queueCount}` : ''}
+          </button>
+        ))}
+      </div>
+      {tab === 'queue' && <Queue onCount={setQueueCount} onMarked={() => setParams({ tab: 'done' })} />}
+      {tab === 'done' && <History />}
+      {tab === 'base' && <Base />}
+    </div>
+  );
+}
+
+// ───────────── Ждут маркировки ─────────────
+
+function Queue({ onCount, onMarked }: { onCount: (n: number) => void; onMarked: () => void }) {
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [error, setError] = useState('');
+  const load = () => api.getMarkingQueue().then((r) => { setRows(r); onCount(r.length); }).catch((e) => setError(e.message));
+  useEffect(() => { load(); }, []);
+
+  if (error) return <p className="text-sm text-red-600">{error}</p>;
+  if (!rows) return <p className="text-sm text-slate-500">Загрузка…</p>;
+  if (rows.length === 0) {
+    return (
+      <div className="bg-white rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
+        Все расфасованные партии промаркированы. Новые появятся здесь после проведения фасовки SKU с маркировкой ЧЗ.
+      </div>
+    );
+  }
+  return <div className="space-y-3">{rows.map((r) => <LotRow key={r.lotId} row={r} onMarked={onMarked} />)}</div>;
+}
+
+function LotRow({ row, onMarked }: { row: any; onMarked: () => void }) {
+  const navigate = useNavigate();
+  const qty = Math.floor(row.qty);
+  const free = row.sku.freeCodes as number;
+  const tpl = row.sku.project?.template;
+  const [count, setCount] = useState(String(Math.min(qty, free) || qty));
+  const [preview, setPreview] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const n = Number(count);
+  const ok = !!tpl?.hasCzArea && free >= n && n >= 1 && n <= qty;
+  const editor = `/projects/${row.sku.project.id}/editor?back=${encodeURIComponent('/stock/marking')}`;
+
+  async function mark() {
+    if (!confirm(`Напечатать ${n} этикеток ЧЗ для партии ${row.number}?\n${n} шт. перейдут из «без ЧЗ» в «с ЧЗ».`)) return;
+    setBusy(true); setError('');
+    try {
+      await api.markLot(row.lotId, n);
+      onMarked();
+    } catch (e: any) { setError(e.message); }
+    setBusy(false);
+  }
+
+  return (
+    <div className={clsx('bg-white rounded-xl border p-4', ok || !tpl ? 'border-slate-200' : 'border-red-200')}>
+      <div className="grid md:grid-cols-[1fr_auto_auto] gap-4 items-center">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Link to={`/stock/marking/${row.sku.id}`} className="font-semibold hover:text-brand-700">{row.sku.name}</Link>
+            {!tpl ? <Badge cls="bg-amber-100 text-amber-800">нет макета этикетки</Badge>
+              : !tpl.hasCzArea ? <Badge cls="bg-amber-100 text-amber-800">в макете нет поля ЧЗ</Badge>
+              : free < qty ? <Badge cls="bg-red-100 text-red-700">не хватает {qty - free} кодов</Badge>
+              : <Badge cls="bg-green-100 text-green-800">кодов хватает</Badge>}
+          </div>
+          <div className="text-sm text-slate-500 mt-1">
+            Партия ГП <span className="font-mono">{row.number}</span>
+            {row.fill && <> · фасовка <Link to={`/stock/fill/${row.fill.id}`} className="font-mono hover:underline">{row.fill.number}</Link> от {fmtDate(row.fill.date)}</>}
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            <Badge cls="bg-amber-50 text-amber-900 border border-amber-200">партия {row.vars.lot}</Badge>
+            {row.vars.expiry
+              ? <Badge cls="bg-amber-50 text-amber-900 border border-amber-200">годен до {row.vars.expiry}</Badge>
+              : <Badge cls="bg-red-50 text-red-700 border border-red-200">срок годности не задан</Badge>}
+          </div>
+        </div>
+        <div className="text-center md:px-4">
+          <div className="text-3xl font-bold">{fmtQty(row.qty)}</div>
+          <div className="text-xs text-slate-500">шт. без ЧЗ</div>
+          <div className={clsx('text-xs', free >= qty ? 'text-green-700' : 'text-red-600')}>свободно кодов: {free}</div>
+        </div>
+        <div className="flex flex-col gap-2 md:w-56">
+          {!tpl ? (
+            <button className={btnPrimary} onClick={() => navigate(editor)}>Создать этикетку</button>
+          ) : (
+            <>
+              <div className="flex gap-2">
+                <input className={clsx(inputCls, 'w-20 text-center')} inputMode="numeric" value={count} onChange={(e) => setCount(e.target.value.replace(/\D/g, ''))} />
+                <button className={clsx(btnPrimary, 'flex-1')} disabled={!ok || busy} onClick={mark}>{busy ? 'Печать…' : `Маркировать ${n || ''}`}</button>
+              </div>
+              <button className="text-sm text-brand-700 hover:underline text-left" onClick={() => setPreview((v) => !v)}>{preview ? 'Скрыть этикетку' : 'Предпросмотр этикетки'}</button>
+            </>
+          )}
+        </div>
+      </div>
+      {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
+      {preview && tpl && (
+        <div className="mt-4 pt-4 border-t border-slate-100 grid md:grid-cols-[1fr_auto] gap-4 items-start">
+          <div className="bg-slate-50 rounded-lg p-4"><TemplatePreview projectId={row.sku.project.id} maxWidthPx={420} variables={row.vars} /></div>
+          <div className="text-xs text-slate-500 max-w-[240px] space-y-2">
+            <p>Подставляется автоматически: <span className="font-mono">{'{{lot}}'}</span> — партия, <span className="font-mono">{'{{expiry}}'}</span> — годен до.</p>
+            <p>Добавьте их в текст этикетки в редакторе, например «Партия: {'{{lot}}'}».</p>
+            <button className="text-brand-700 hover:underline" onClick={() => navigate(editor)}>Открыть редактор →</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ───────────── Промаркированы ─────────────
+
+const JOB: Record<string, { label: string; cls: string }> = {
+  pending: { label: 'в очереди', cls: 'bg-slate-100 text-slate-600' },
+  processing: { label: 'генерируется', cls: 'bg-amber-100 text-amber-800' },
+  done: { label: 'готово', cls: 'bg-green-100 text-green-800' },
+  error: { label: 'ошибка', cls: 'bg-red-100 text-red-700' },
+};
+
+function History() {
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [error, setError] = useState('');
+  const timer = useRef<number>();
+  async function load() {
+    try {
+      const r = await api.getMarkingHistory();
+      setRows(r);
+      // пока этикетки генерируются — обновляем статус
+      if (r.some((d) => d.status === 'POSTED' && d.batch && ['pending', 'processing'].includes(d.batch.jobStatus))) {
+        timer.current = window.setTimeout(load, 2500);
+      }
+    } catch (e: any) { setError(e.message); }
+  }
+  useEffect(() => { load(); return () => window.clearTimeout(timer.current); }, []);
+
+  async function cancel(d: any) {
+    if (!confirm(`Отменить маркировку ${d.number}? ${fmtQty(d.qty)} шт. вернутся в «без ЧЗ».`)) return;
+    const printed = d.batch?.jobStatus === 'done';
+    const release = !printed || confirm('Этикетки не наклеивали — вернуть коды в пул?\nОК — вернуть коды, Отмена — списать коды в брак.');
+    try { await api.cancelDoc(d.id, release); load(); } catch (e: any) { setError(e.message); }
+  }
+
+  if (!rows) return <p className="text-sm text-slate-500">Загрузка…</p>;
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+      {error && <p className="text-sm text-red-600 px-4 pt-3">{error}</p>}
+      {rows.length === 0 ? <p className="text-sm text-slate-500 p-6 text-center">Маркировок ещё не было</p> : (
+        <table className="w-full text-sm min-w-[860px]">
+          <thead className="bg-slate-50 text-left text-xs text-slate-500">
+            <tr><th className="px-4 py-2">Документ</th><th>Дата</th><th>SKU</th><th>Партия ГП</th><th>Партия / годен до</th><th className="text-right">Шт.</th><th>Этикетки</th><th></th></tr>
+          </thead>
+          <tbody>
+            {rows.map((d) => {
+              const job = d.batch ? JOB[d.batch.jobStatus] ?? JOB.pending : null;
+              return (
+                <tr key={d.id} className={clsx('border-t border-slate-100', d.status === 'CANCELLED' && 'text-slate-400')}>
+                  <td className="px-4 py-2 font-mono">{d.number}</td>
+                  <td>{new Date(d.date).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}</td>
+                  <td>{d.itemName}</td>
+                  <td className="font-mono text-xs">{d.lotNumber}</td>
+                  <td className="font-mono text-xs">{d.vars.lot} · {d.vars.expiry || '—'}</td>
+                  <td className="text-right font-semibold">{fmtQty(d.qty)}</td>
+                  <td>{d.status === 'CANCELLED' ? <Badge cls="bg-slate-100 text-slate-500">отменена</Badge> : job && <Badge cls={job.cls}>{job.label}</Badge>}</td>
+                  <td className="px-4 text-right whitespace-nowrap space-x-3">
+                    {d.status === 'POSTED' && d.batch?.jobStatus === 'done' && (
+                      <button className="text-brand-700 hover:underline" onClick={() => downloadFile(`/stock/batches/${d.batch.id}/pdf`, `${d.number}.pdf`).catch((e) => setError(e.message))}>⇩ PDF</button>
+                    )}
+                    {d.status === 'POSTED' && <button className="text-slate-500 hover:text-red-600" onClick={() => cancel(d)}>Отменить</button>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// ───────────── Коды и этикетки по SKU ─────────────
+
+function Base() {
   const [rows, setRows] = useState<any[] | null>(null);
   const [products, setProducts] = useState<any[]>([]);
   const [adding, setAdding] = useState(false);
@@ -14,13 +216,11 @@ export default function StockMarking() {
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
-  async function load() {
-    try {
-      const [m, p] = await Promise.all([api.getMarking(), api.getItems('PRODUCT')]);
-      setRows(m); setProducts(p);
-    } catch (e: any) { setError(e.message); setRows([]); }
-  }
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    Promise.all([api.getMarking(), api.getItems('PRODUCT')])
+      .then(([m, p]) => { setRows(m); setProducts(p); })
+      .catch((e) => { setError(e.message); setRows([]); });
+  }, []);
 
   async function enable() {
     if (!pick) return;
@@ -36,10 +236,10 @@ export default function StockMarking() {
 
   return (
     <div>
-      <PageHeader title="Маркировка" hint="Коды Честного знака для выпущенной продукции: загрузка кодов по каждому SKU, макет этикетки и печать. Отсюда же коды берут кванты Ozon и отправки WB.">
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <p className="text-sm text-slate-500 flex-1 min-w-[260px]">Коды загружаются в карточку SKU файлом PDF из Честного знака — партиями по 500–1000 кодов. Там же — макет этикетки.</p>
         <button className={btnSecondary} onClick={() => setAdding((v) => !v)}>+ Включить маркировку для SKU</button>
-      </PageHeader>
-
+      </div>
       {adding && (
         <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4 flex flex-wrap items-center gap-2">
           <select className={clsx(inputCls, 'w-80')} value={pick} onChange={(e) => setPick(e.target.value)}>
@@ -47,10 +247,8 @@ export default function StockMarking() {
             {free.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
           <button className={btnPrimary} disabled={!pick} onClick={enable}>Включить и создать этикетку</button>
-          <span className="text-xs text-slate-500">Для SKU создастся макет этикетки — его можно отредактировать в редакторе.</span>
         </div>
       )}
-
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
       {!rows && <p className="text-sm text-slate-500">Загрузка…</p>}
       {rows && rows.length === 0 && (
@@ -58,18 +256,16 @@ export default function StockMarking() {
           Нет SKU с маркировкой. Включите её кнопкой выше или в карточке товара в справочниках.
         </div>
       )}
-
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {rows?.map((r) => {
           const usedPct = r.codes.total ? Math.round((r.codes.used / r.codes.total) * 100) : 0;
           return (
-            <Link key={r.id} to={`/stock/marking/${r.id}`}
-              className="bg-white rounded-xl border border-slate-200 p-4 hover:border-brand-400 hover:shadow-sm transition">
+            <Link key={r.id} to={`/stock/marking/${r.id}`} className="bg-white rounded-xl border border-slate-200 p-4 hover:border-brand-400 hover:shadow-sm transition">
               <div className="flex items-start justify-between gap-2">
                 <div className="font-semibold leading-snug">{r.name}</div>
                 {r.shortage > 0
-                  ? <span className="shrink-0 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">не хватает {r.shortage}</span>
-                  : r.codes.pending > 0 && <span className="shrink-0 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">коды есть</span>}
+                  ? <Badge cls="bg-red-100 text-red-700">не хватает {r.shortage}</Badge>
+                  : r.codes.pending > 0 && <Badge cls="bg-green-100 text-green-800">коды есть</Badge>}
               </div>
               <div className="text-xs text-slate-500 mt-0.5">
                 Этикетка: {r.project?.template ? `${r.project.template.widthMm}×${r.project.template.heightMm} мм` : 'макет не создан'}
@@ -78,7 +274,7 @@ export default function StockMarking() {
               <div className="grid grid-cols-3 gap-2 mt-3 text-center">
                 <Num label="Свободных кодов" value={r.codes.pending} cls={r.codes.pending ? 'text-green-700' : 'text-slate-400'} />
                 <Num label="Выпущено без ЧЗ" value={r.stock.unlabeled} />
-                <Num label="Оклеено / в квантах" value={`${fmtQty(r.stock.labeled)} / ${fmtQty(r.stock.inQuant)}`} />
+                <Num label="С ЧЗ / в квантах" value={`${fmtQty(r.stock.labeled)} / ${fmtQty(r.stock.inQuant)}`} />
               </div>
               <div className="mt-3 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-brand-500" style={{ width: `${usedPct}%` }} /></div>
               <div className="text-[11px] text-slate-500 mt-1">Загружено {r.codes.total} · использовано {r.codes.used}{r.codes.spoiled ? ` · испорчено ${r.codes.spoiled}` : ''}</div>
@@ -88,6 +284,10 @@ export default function StockMarking() {
       </div>
     </div>
   );
+}
+
+function Badge({ cls, children }: { cls: string; children: React.ReactNode }) {
+  return <span className={clsx('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap', cls)}>{children}</span>;
 }
 
 function Num({ label, value, cls }: { label: string; value: number | string; cls?: string }) {

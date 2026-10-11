@@ -125,6 +125,10 @@ export const api = {
   getItem: (id: string) => request<any>(`/stock/items/${id}`),
   getMarking: () => request<any[]>('/stock/marking'),
   getMarkingItem: (itemId: string) => request<any>(`/stock/marking/${itemId}`),
+  getMarkingQueue: () => request<any[]>('/stock/marking/queue'),
+  getMarkingHistory: () => request<any[]>('/stock/marking/history'),
+  markLot: (lotId: string, count: number) =>
+    request<{ docId: string; outputBatchId: string }>(`/stock/marking/lots/${lotId}/mark`, { method: 'POST', body: JSON.stringify({ count }) }),
   enableMarking: (itemId: string, projectId?: string) =>
     request<any>(`/stock/marking/${itemId}/enable`, { method: 'POST', body: JSON.stringify({ projectId }) }),
   importOzonProducts: (products: { offerId: string; name: string }[]) =>

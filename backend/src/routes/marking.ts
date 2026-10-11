@@ -1,6 +1,9 @@
 import { Router, Response } from 'express';
 import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
+import { StockError } from '../services/stock';
+import { lotLabelVars, markLot } from '../services/marking';
+import { pdfQueue } from '../workers/pdfQueue';
 
 // Маркировка: SKU, которым нужен ЧЗ, — их база кодов (проект этикетки) и выпущенный без ЧЗ остаток
 const router = Router();
@@ -81,6 +84,72 @@ async function load(itemIds?: string[]) {
 // GET /api/stock/marking — все SKU с обязательной маркировкой
 router.get('/marking', async (_req: AuthRequest, res: Response) => {
   res.json(await load());
+});
+
+// GET /api/stock/marking/queue — партии ГП «без ЧЗ» у SKU с маркировкой: что ждёт печати
+router.get('/marking/queue', async (_req: AuthRequest, res: Response) => {
+  const groups = await prisma.stockMove.groupBy({
+    by: ['lotId'],
+    where: { state: 'UNLABELED', lot: { item: { spec: { requiresCz: true } } } },
+    _sum: { qty: true },
+  });
+  const open = groups.filter((g) => (g._sum.qty ?? 0) > 1e-6);
+  const lots = await prisma.lot.findMany({ where: { id: { in: open.map((g) => g.lotId) } }, include: { item: true } });
+  const fills = await prisma.stockDocLine.findMany({
+    where: { lotId: { in: lots.map((l) => l.id) }, doc: { type: 'FILL', status: 'POSTED' } },
+    include: { doc: { select: { id: true, number: true, date: true } } },
+  });
+  const fillOf = new Map(fills.map((f) => [f.lotId!, f.doc]));
+  const skus = new Map((await load([...new Set(lots.map((l) => l.itemId))])).map((r) => [r.id, r]));
+  const qty = new Map(open.map((g) => [g.lotId, r3(g._sum.qty ?? 0)]));
+  const out = [];
+  for (const l of lots) {
+    const sku = skus.get(l.itemId);
+    if (!sku) continue;
+    out.push({
+      lotId: l.id, number: l.number, qty: qty.get(l.id)!, createdAt: l.createdAt,
+      vars: await lotLabelVars(prisma, l.id), fill: fillOf.get(l.id) ?? null,
+      sku: { id: sku.id, name: sku.name, project: sku.project, freeCodes: sku.codes.pending },
+    });
+  }
+  out.sort((a, b) => +a.createdAt - +b.createdAt);
+  res.json(out);
+});
+
+// GET /api/stock/marking/history — последние маркировки
+router.get('/marking/history', async (_req: AuthRequest, res: Response) => {
+  const docs = await prisma.stockDoc.findMany({
+    where: { type: 'MARK' }, orderBy: { createdAt: 'desc' }, take: 100,
+    include: { user: { select: { email: true } }, lines: { include: { item: true } } },
+  });
+  const batches = await prisma.outputBatch.findMany({ where: { docId: { in: docs.map((d) => d.id) } } });
+  const batchOf = new Map(batches.map((b) => [b.docId!, b]));
+  const lots = await prisma.lot.findMany({ where: { id: { in: docs.map((d) => d.sourceLotId!).filter(Boolean) } } });
+  const lotOf = new Map(lots.map((l) => [l.id, l]));
+  res.json(docs.map((d) => {
+    const b = batchOf.get(d.id);
+    return {
+      id: d.id, number: d.number, status: d.status, date: d.createdAt, user: d.user.email,
+      itemName: d.lines[0]?.item.name ?? '', qty: d.lines[0]?.qty ?? 0,
+      lotNumber: d.sourceLotId ? lotOf.get(d.sourceLotId)?.number ?? null : null,
+      vars: (b?.variables as Record<string, string> | null) ?? {},
+      batch: b ? { id: b.id, jobStatus: b.jobStatus } : null,
+    };
+  }));
+});
+
+// POST /api/stock/marking/lots/:lotId/mark { count } — напечатать ЧЗ на партию
+router.post('/marking/lots/:lotId/mark', async (req: AuthRequest, res: Response): Promise<void> => {
+  const count = Number(req.body?.count);
+  if (!Number.isInteger(count) || count < 1 || count > 5000) { res.status(400).json({ error: 'Количество — целое от 1 до 5000' }); return; }
+  try {
+    const r = await prisma.$transaction((tx) => markLot(tx, req.params.lotId, count, req.user!.id), { isolationLevel: 'Serializable', timeout: 30000 });
+    await pdfQueue.add('generate-pdf', r.job);
+    res.status(201).json({ docId: r.docId, outputBatchId: r.job.outputBatchId });
+  } catch (err) {
+    if (err instanceof StockError) { res.status(400).json({ error: err.message }); return; }
+    throw err;
+  }
 });
 
 // GET /api/stock/marking/:itemId

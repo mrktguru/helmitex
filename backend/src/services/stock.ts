@@ -19,6 +19,7 @@ export const DOC_PREFIX: Record<DocType, string> = {
   FILL: 'Ф',
   QUANT: 'СК',
   SHIPMENT: 'ОТ',
+  MARK: 'МК',
 };
 
 const EPS = 1e-6;
@@ -142,6 +143,10 @@ export async function cancelDoc(tx: Tx, docId: string, opts: { releaseCodes?: bo
   if (doc.type === 'QUANT') {
     const { cancelQuants } = await import('./quants');
     await cancelQuants(tx, docId, opts.releaseCodes ?? false);
+  }
+  if (doc.type === 'MARK') {
+    const { cancelMark } = await import('./marking');
+    await cancelMark(tx, docId, opts.releaseCodes ?? false);
   }
   await tx.stockDoc.update({ where: { id: docId }, data: { status: 'CANCELLED' } });
 }
