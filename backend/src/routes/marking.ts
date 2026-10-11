@@ -221,6 +221,18 @@ router.put('/marking/:itemId/gtin', async (req: AuthRequest, res: Response): Pro
   res.json({ ok: true });
 });
 
+// GET /api/stock/marking/docs/:id/ki.csv — коды маркировки списком (КИ без криптохвоста) для ввода в оборот в Честном знаке
+router.get('/marking/docs/:id/ki.csv', async (req: AuthRequest, res: Response): Promise<void> => {
+  const doc = await prisma.stockDoc.findUnique({ where: { id: req.params.id } });
+  if (doc?.type !== 'MARK') { res.status(404).json({ error: 'Документ маркировки не найден' }); return; }
+  const codes = await prisma.czCode.findMany({ where: { outputBatch: { docId: doc.id } }, select: { code: true } });
+  const ki = codes.map((c) => c.code?.split('\x1d')[0]).filter(Boolean);
+  const buf = Buffer.from(ki.join('\r\n') + '\r\n');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`КИ ${doc.number}.csv`)}`);
+  res.end(buf);
+});
+
 // GET /api/stock/marking/:itemId
 router.get('/marking/:itemId', async (req: AuthRequest, res: Response): Promise<void> => {
   const [row] = await load([req.params.itemId]);

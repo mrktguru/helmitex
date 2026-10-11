@@ -27,13 +27,14 @@ export default function WbWizard() {
   const active = data?.orders.filter((o) => !o.canceled) ?? [];
   const cz = active.filter((o) => o.needCz);
   const czAssigned = cz.filter((o) => o.kiz || o.kizPending).length;
-  const czSent = cz.filter((o) => o.kizSentAt).length;
+  const wbKiz = active.filter((o) => o.wbKiz);
+  const czSent = wbKiz.filter((o) => o.kizSentAt && !KIZ_BAD(o.kizDecision)).length;
   const done = !!data?.supply.done;
 
-  const auto = !data ? 0 : done ? 5 : active.length === 0 ? 0 : czSent < cz.length ? 2 : 4;
+  const auto = !data ? 0 : done ? 5 : active.length === 0 ? 0 : czAssigned < cz.length || czSent < wbKiz.length ? 2 : 4;
   const step = params.has('step') ? Number(params.get('step')) : auto;
   const go = (s: number) => setParams({ step: String(s) });
-  const stepDone = [active.length > 0, active.length > 0 && !!data?.supply.shippingPointId, cz.length === czSent && active.length > 0, false, false, done];
+  const stepDone = [active.length > 0, active.length > 0 && !!data?.supply.shippingPointId, czAssigned === cz.length && czSent === wbKiz.length && active.length > 0, false, false, done];
 
   if (!data) return <div><Link to="/stock/wb" className="text-sm text-brand-700">← Отправки WB</Link>{error ? <p className="text-red-600 mt-3">{error}</p> : <p className="text-sm text-slate-500 mt-3">Загрузка поставки из WB…</p>}</div>;
 
@@ -52,7 +53,7 @@ export default function WbWizard() {
               i === step ? 'bg-white border-brand-600 ring-2 ring-brand-600/20 font-semibold'
                 : stepDone[i] ? 'bg-brand-50 border-brand-200 text-brand-800' : 'bg-white/60 border-slate-200 text-slate-500 hover:bg-white')}>
               <div className={clsx('text-[11px]', (i === step || stepDone[i]) && 'text-brand-600')}>{stepDone[i] ? '✓ ' : ''}Шаг {i + 1}</div>{s}
-              {i === 2 && cz.length > 0 && <div className="text-[11px] font-normal text-slate-500">{czSent}/{cz.length} в WB</div>}
+              {i === 2 && wbKiz.length > 0 && <div className="text-[11px] font-normal text-slate-500">{czSent}/{wbKiz.length} принято WB</div>}
             </button>
           </li>
         ))}
@@ -61,10 +62,10 @@ export default function WbWizard() {
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
       {step === 0 && <StepOrders data={data} reload={load} done={done} />}
       {step === 1 && <StepSupply data={data} reload={load} done={done} />}
-      {step === 2 && <StepCz data={data} reload={load} done={done} assigned={czAssigned} sent={czSent} total={cz.length} />}
+      {step === 2 && <StepCz data={data} reload={load} done={done} assigned={czAssigned} total={cz.length} accepted={czSent} wbTotal={wbKiz.length} />}
       {step === 3 && <StepBoxes id={data.supply.id} done={done} />}
       {step === 4 && <StepPrint data={data} />}
-      {step === 5 && <StepDeliver data={data} reload={load} czLeft={cz.length - czSent} />}
+      {step === 5 && <StepDeliver data={data} reload={load} czLeft={wbKiz.length - czSent} />}
 
       <div className="flex justify-between mt-6">
         {step > 0 ? <button className={btnSecondary} onClick={() => go(step - 1)}>← {STEPS[step - 1]}</button> : <span />}
@@ -90,6 +91,16 @@ function Panel({ title, hint, right, children }: { title: string; hint?: string;
 function localDate(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+
+// Проверка КИЗ в WB (metaDetails.decision)
+const KIZ_OK = new Set(['sgtinIntroduced', 'sgtinSoldB2B']);
+const KIZ_BAD = (d: string | null) => !!d && (d === 'required' || (d.startsWith('sgtin') && !KIZ_OK.has(d)));
+const KIZ_LABEL: Record<string, string> = {
+  filled: 'принят', sgtinIntroduced: 'в обороте ✓', sgtinSoldB2B: 'в обороте ✓', pending: 'проверяется', deadlineExceeded: 'проверяется',
+  sgtinEmitted: 'эмитирован — не введён в оборот', sgtinApplied: 'нанесён — ввод в оборот не завершён', sgtinNotFound: 'не найден в ЧЗ',
+  sgtinAppliedNotPaid: 'не оплачен', sgtinWrittenOff: 'списан', sgtinRetired: 'выбыл', sgtinWithdrawn: 'выведен из оборота',
+  sgtinNoGS: 'нет разделителя GS', sgtinInvalidFormat: 'неверный формат', sgtinInvalidPattern: 'неверная структура', required: 'не указан',
+};
 
 const Badge = ({ cls, children }: { cls: string; children: React.ReactNode }) =>
   <span className={clsx('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap', cls)}>{children}</span>;
@@ -320,7 +331,7 @@ function Shipping({ supply, done, onSaved }: { supply: any; done: boolean; onSav
 
 // ───────────── 3. Честный знак ─────────────
 
-function StepCz({ data, reload, done, assigned, sent, total }: { data: State; reload: () => void; done: boolean; assigned: number; sent: number; total: number }) {
+function StepCz({ data, reload, done, assigned, total, accepted, wbTotal }: { data: State; reload: () => void; done: boolean; assigned: number; total: number; accepted: number; wbTotal: number }) {
   const [busy, setBusy] = useState('');
   const [notes, setNotes] = useState<string[]>([]);
   const [scan, setScan] = useState('');
@@ -329,6 +340,7 @@ function StepCz({ data, reload, done, assigned, sent, total }: { data: State; re
   const orders = data.orders.filter((o) => !o.canceled && (o.needCz || o.needExpiration));
   const czOrders = orders.filter((o) => o.needCz);
   const errors = orders.filter((o) => o.kizError || o.expirationError);
+  const rejected = orders.filter((o) => o.wbKiz && o.kizSentAt && KIZ_BAD(o.kizDecision));
   const expNeeded = data.orders.filter((o) => !o.canceled && o.needExpiration);
 
   async function assign(mode: 'fresh' | 'loose') {
@@ -372,6 +384,16 @@ function StepCz({ data, reload, done, assigned, sent, total }: { data: State; re
     reload();
   }
 
+  async function resend() {
+    setBusy('resend'); setNotes([]);
+    try {
+      const r = await api.wbResendRejected(data.supply.id);
+      setNotes([`Отправлено повторно: ${r.sent} из ${r.reset}. Проверка в WB занимает несколько минут — нажмите «Обновить из WB».`, ...r.errors.slice(0, 5)]);
+    } catch (e: any) { setNotes([e.message]); }
+    setBusy('');
+    reload();
+  }
+
   async function detach(o: any) {
     if (!confirm(`Отвязать код от задания ${o.id}? Код останется на банке («с ЧЗ»).${o.kizSentAt ? '\nВ WB код тоже будет удалён.' : ''}`)) return;
     try { await api.wbDetach(data.supply.id, o.id); reload(); } catch (e: any) { setNotes([e.message]); }
@@ -381,7 +403,18 @@ function StepCz({ data, reload, done, assigned, sent, total }: { data: State; re
     <div className="grid lg:grid-cols-[1fr_340px] gap-5">
       <Panel title="Привяжите коды Честного знака" hint="Коды берутся из базы раздела «Маркировка». Срок годности отправляется из партии.">
         <div className="flex items-center gap-3 mb-1 text-sm"><span className="w-28 text-slate-500">Назначено</span><Bar v={assigned} t={total} /><b>{assigned} / {total}</b></div>
-        <div className="flex items-center gap-3 mb-4 text-sm"><span className="w-28 text-slate-500">Отправлено в WB</span><Bar v={sent} t={total} /><b>{sent} / {total}</b></div>
+        {wbTotal > 0 && <div className="flex items-center gap-3 mb-4 text-sm"><span className="w-28 text-slate-500">Принято WB</span><Bar v={accepted} t={wbTotal} /><b>{accepted} / {wbTotal}</b></div>}
+        {total > wbTotal && <p className="text-xs text-slate-500 mb-3">{total - wbTotal} заданий маркируются, но WB не принимает для них КИЗ (у товара на WB нет поля ЧЗ) — коды остаются в портале.</p>}
+        {rejected.length > 0 && (
+          <div className="text-sm bg-red-50 border border-red-200 rounded-lg p-3 mb-4 space-y-2">
+            <p className="text-red-800"><b>WB отклонил {rejected.length} КИЗ</b>: {KIZ_LABEL[rejected[0].kizDecision] ?? rejected[0].kizDecision}.</p>
+            <p className="text-red-800">Коды нужно ввести в оборот в личном кабинете Честного знака (документ «Ввод в оборот»), затем нажать «Отправить отклонённые повторно».</p>
+            <div className="flex flex-wrap gap-2">
+              <button className={btnSecondary} onClick={() => downloadFile(`/stock/wb/supplies/${encodeURIComponent(data.supply.id)}/ki.csv`, `КИ ${data.supply.id}.csv`).catch((e) => setNotes([e.message]))}>⇩ Коды для ввода в оборот (.csv)</button>
+              <button className={btnPrimary} disabled={!!busy} onClick={resend}>{busy === 'resend' ? 'Отправка…' : 'Отправить отклонённые повторно'}</button>
+            </div>
+          </div>
+        )}
 
         {!done && (
           <>
@@ -410,7 +443,9 @@ function StepCz({ data, reload, done, assigned, sent, total }: { data: State; re
                   <td>{o.itemName ?? o.article}</td>
                   <td className="text-xs">{o.lot ? <>{o.lot.number} · {fmtDate(o.lot.expiresAt)}</> : '—'}</td>
                   <td className="font-mono text-xs">{o.kiz ? `${o.kiz.slice(0, 24)}…` : o.kizPending ? <span className="text-amber-700">распознаётся…</span> : <span className="text-red-600">нет кода</span>}</td>
-                  <td className="text-xs">{o.kizSentAt ? <span className="text-green-700">✓</span> : o.kizError ? <span className="text-red-600" title={o.kizError}>ошибка</span> : '—'}</td>
+                  <td className="text-xs">{!o.wbKiz ? <span className="text-slate-400">не нужен</span>
+                    : o.kizError ? <span className="text-red-600" title={o.kizError}>ошибка</span>
+                    : o.kizSentAt ? <span className={KIZ_BAD(o.kizDecision) ? 'text-red-600' : 'text-green-700'}>{KIZ_LABEL[o.kizDecision] ?? o.kizDecision ?? 'отправлен'}</span> : '—'}</td>
                   <td className="text-right">{(o.kiz || o.kizPending) && !done && <button className="text-xs text-slate-500 hover:text-red-600" onClick={() => detach(o)}>отвязать</button>}</td>
                 </tr>
               ))}
@@ -542,7 +577,7 @@ function StepDeliver({ data, reload, czLeft }: { data: State; reload: () => void
   const checks: [string, boolean][] = [
     ['Есть задания в поставке', active.length > 0],
     ['Все артикулы сопоставлены с SKU', active.every((o) => o.itemId)],
-    ['ЧЗ отправлены в WB', czLeft === 0],
+    ['КИЗ приняты WB (коды в обороте)', czLeft === 0],
     ['Способ отгрузки указан', !!s.shippingPointId],
   ];
   const ready = checks.every(([, ok]) => ok);

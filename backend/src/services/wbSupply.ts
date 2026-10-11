@@ -13,6 +13,11 @@ const WB_CANCELED = new Set(['canceled', 'canceled_by_client', 'declined_by_clie
 
 interface MetaDetail { key: string; value: string | null; decision: string }
 const metaHas = (meta: any, key: string) => Array.isArray(meta?.metaDetails) && meta.metaDetails.some((d: MetaDetail) => d.key === key);
+const metaDecision = (meta: any, key: string): string | null =>
+  (Array.isArray(meta?.metaDetails) && meta.metaDetails.find((d: MetaDetail) => d.key === key)?.decision) || null;
+// Решения WB по КИЗ, при которых код не прошёл проверку в Честном знаке (sgtinIntroduced / sgtinSoldB2B — прошёл)
+const KIZ_OK = new Set(['sgtinIntroduced', 'sgtinSoldB2B']);
+export const KIZ_BAD = (d: string | null) => !!d && (d === 'required' || (d.startsWith('sgtin') && !KIZ_OK.has(d)));
 const metaRequired = (meta: any, key: string) =>
   Array.isArray(meta?.metaDetails) && meta.metaDetails.some((d: MetaDetail) => d.key === key && d.decision === 'required');
 
@@ -165,7 +170,9 @@ export async function supplyState(id: string) {
     return {
       id: o.id, article: o.article, barcode: o.barcode, itemId: o.itemId, itemName: item?.name ?? null,
       stickerA: o.stickerA, stickerB: o.stickerB, hasSticker: !!o.stickerS3Key, canceled: o.canceled, wbStatus: o.wbStatus,
-      needCz, canSgtin: metaHas(o.meta, 'sgtin'), needExpiration: metaHas(o.meta, 'expiration'),
+      // needCz — банку маркируем (код назначается); wbKiz — WB принимает КИЗ для этого задания (есть поле sgtin)
+      needCz, wbKiz: needCz && metaHas(o.meta, 'sgtin'), kizDecision: metaDecision(o.meta, 'sgtin'),
+      needExpiration: metaHas(o.meta, 'expiration'),
       wbExpiration: (o.meta as any)?.meta?.expiration?.value ?? null,
       lot: lot ? { id: lot.id, number: lot.number, expiresAt: lot.expiresAt } : null,
       kiz: o.czCode?.code ?? null, kizPending: !!o.czCodeId && !o.czCode?.code,
@@ -317,7 +324,7 @@ export async function sendMeta(supplyId: string, limit = 25) {
   const expOf = new Map(lots.map((l) => [l.id, l.expiresAt ? fmtRuDate(l.expiresAt) : null]));
   const todo = orders.filter((o) => {
     const exp = o.lotId ? expOf.get(o.lotId) : null;
-    const kiz = o.czCodeId && o.czCode?.code && !o.kizSentAt && !o.kizError;
+    const kiz = metaHas(o.meta, 'sgtin') && o.czCodeId && o.czCode?.code && !o.kizSentAt && !o.kizError;
     const expiration = metaHas(o.meta, 'expiration') && exp && o.expirationSent !== exp && !o.expirationError;
     return kiz || expiration;
   });
@@ -325,7 +332,7 @@ export async function sendMeta(supplyId: string, limit = 25) {
   const errors: string[] = [];
   for (const o of todo.slice(0, limit)) {
     const exp = o.lotId ? expOf.get(o.lotId) : null;
-    if (o.czCodeId && o.czCode?.code && !o.kizSentAt && !o.kizError) {
+    if (metaHas(o.meta, 'sgtin') && o.czCodeId && o.czCode?.code && !o.kizSentAt && !o.kizError) {
       try {
         await wb('PUT', `/api/v3/orders/${o.id}/meta/sgtin`, { sgtins: [o.czCode.code] }, supplyId);
         await prisma.wbOrder.update({ where: { id: o.id }, data: { kizSentAt: new Date(), kizError: null } });
@@ -355,14 +362,31 @@ export async function resetMetaErrors(supplyId: string) {
   await prisma.wbOrder.updateMany({ where: { supplyId }, data: { kizError: null, expirationError: null } });
 }
 
+/** Повторная отправка КИЗ, которые WB отклонил при проверке (например, «эмитирован» — код ещё не введён в оборот). */
+export async function resendRejected(supplyId: string) {
+  await syncSupply(supplyId);
+  const orders = await prisma.wbOrder.findMany({ where: { supplyId, canceled: false, kizSentAt: { not: null } } });
+  const ids = orders.filter((o) => KIZ_BAD(metaDecision(o.meta, 'sgtin'))).map((o) => o.id);
+  await prisma.wbOrder.updateMany({ where: { id: { in: ids } }, data: { kizSentAt: null, kizError: null } });
+  return { reset: ids.length, ...(await sendMeta(supplyId)) };
+}
+
+/** Коды ЧЗ поставки списком (КИ без криптохвоста) — для ввода в оборот в личном кабинете Честного знака. */
+export async function supplyKi(supplyId: string): Promise<string[]> {
+  const orders = await prisma.wbOrder.findMany({ where: { supplyId, canceled: false, czCodeId: { not: null } }, include: { czCode: true } });
+  return orders.map((o) => o.czCode?.code?.split('\x1d')[0]).filter((x): x is string => !!x);
+}
+
 // ───────────── Отгрузка ─────────────
 
 export async function deliver(supplyId: string) {
   const { orders } = await supplyState(supplyId);
   const active = orders.filter((o) => !o.canceled);
   if (!active.length) throw new StockError('В поставке нет заданий');
-  const noKiz = active.filter((o) => o.needCz && !o.kizSentAt);
+  const noKiz = active.filter((o) => o.wbKiz && !o.kizSentAt);
   if (noKiz.length) throw new StockError(`ЧЗ не отправлен в WB у ${noKiz.length} заданий — завершите шаг «Честный знак»`);
+  const bad = active.filter((o) => o.wbKiz && KIZ_BAD(o.kizDecision));
+  if (bad.length) throw new StockError(`WB не принял КИЗ у ${bad.length} заданий (${bad[0].kizDecision}) — введите коды в оборот в Честном знаке и отправьте повторно`);
   await wb('PATCH', `/api/v3/supplies/${encodeURIComponent(supplyId)}/deliver`, undefined, supplyId);
   await syncSupply(supplyId);
 }

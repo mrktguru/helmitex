@@ -8,7 +8,7 @@ import { StockError } from '../services/stock';
 import { getSetting, setSetting } from '../services/ozon';
 import { wb, wbConfigured, wbSupplies } from '../services/wb';
 import {
-  addOrders, applyPickList, assignCodes, createSupply, deliver, detachCode, newOrders, resetMetaErrors, scanCode, sendMeta,
+  addOrders, applyPickList, assignCodes, resendRejected, supplyKi, createSupply, deliver, detachCode, newOrders, resetMetaErrors, scanCode, sendMeta,
   supplyState, syncSupply, writeOff,
 } from '../services/wbSupply';
 import { comboPdf, czXlsx, supplyQrPdf, trbxPdf, wbStickersPdf } from '../services/wbPdf';
@@ -123,6 +123,13 @@ router.post('/wb/supplies/:id/orders/:orderId/detach', h(async (req, res) => {
 }));
 
 router.post('/wb/supplies/:id/send-meta', h(async (req, res) => { res.json(await sendMeta(req.params.id)); }));
+router.post('/wb/supplies/:id/resend-rejected', h(async (req, res) => { res.json(await resendRejected(req.params.id)); }));
+
+// GET /api/stock/wb/supplies/:id/ki.csv — коды поставки для ввода в оборот в Честном знаке
+router.get('/wb/supplies/:id/ki.csv', h(async (req, res) => {
+  sendFile(res, Buffer.from((await supplyKi(req.params.id)).join('\r\n') + '\r\n'), `КИ ${req.params.id}.csv`, 'text/csv; charset=utf-8');
+}));
+
 router.post('/wb/supplies/:id/reset-errors', h(async (req, res) => { await resetMetaErrors(req.params.id); res.json({ ok: true }); }));
 
 // ───────────── Грузоместа ─────────────
