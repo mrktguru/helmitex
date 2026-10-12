@@ -14,7 +14,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ───────────── Синхронизация ─────────────
 
-export async function syncFbs(): Promise<number> {
+export async function syncFbs(userId?: string): Promise<number> {
   const since = new Date(Date.now() - 14 * 86400_000).toISOString();
   const to = new Date(Date.now() + 86400_000).toISOString();
   let offset = 0, n = 0;
@@ -43,7 +43,28 @@ export async function syncFbs(): Promise<number> {
     if (!r.result?.has_next || postings.length === 0) break;
     offset += postings.length;
   }
+  await writeOffPassed(userId);
   return n;
+}
+
+// Статусы, при которых Ozon уже принял груз
+export const PASSED = ['delivering', 'driver_pickup', 'delivered', 'not_accepted'];
+
+/** Переданное в Ozon списывается со склада автоматически — по дню отгрузки, одним документом на день. */
+async function writeOffPassed(userId?: string) {
+  const uid = userId ?? (await prisma.user.findFirst({ where: { role: 'ADMIN' }, orderBy: { createdAt: 'asc' } }))?.id;
+  if (!uid) return;
+  const rows = await prisma.ozonFbsPosting.findMany({ where: { stockDocId: null, status: { in: PASSED } }, select: { postingNumber: true, shipDay: true } });
+  const byDay = new Map<string, string[]>();
+  for (const r of rows) byDay.set(r.shipDay, [...(byDay.get(r.shipDay) ?? []), r.postingNumber]);
+  for (const [day, nums] of byDay) {
+    try {
+      await writeOff(nums, uid);
+      await prisma.ozonFbsDay.updateMany({ where: { day, lastError: { startsWith: 'Списание' } }, data: { lastError: null } });
+    } catch (e) {
+      await prisma.ozonFbsDay.upsert({ where: { day }, create: { day, lastError: `Списание: ${(e as Error).message}` }, update: { lastError: `Списание: ${(e as Error).message}` } });
+    }
+  }
 }
 
 // ───────────── Состояние ─────────────

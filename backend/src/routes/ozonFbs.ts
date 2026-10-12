@@ -23,7 +23,7 @@ const day = (req: AuthRequest) => { if (!DAY.test(req.params.day)) throw new Sto
 const numbers = z.object({ postingNumbers: z.array(z.string().max(40)).max(2000).optional() });
 
 router.get('/ozon-fbs/days', h(async (_req, res) => { res.json(await days()); }));
-router.post('/ozon-fbs/sync', h(async (_req, res) => { await syncFbs(); res.json(await days()); }));
+router.post('/ozon-fbs/sync', h(async (req, res) => { await syncFbs(req.user!.id); res.json(await days()); }));
 router.get('/ozon-fbs/days/:day', h(async (req, res) => { res.json(await dayState(day(req))); }));
 
 router.post('/ozon-fbs/days/:day/ship', h(async (req, res) => {

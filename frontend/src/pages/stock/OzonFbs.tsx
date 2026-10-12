@@ -89,7 +89,7 @@ export default function OzonFbs() {
   }, [data, sel]);
 
   const steps = [
-    ['Новые', `${P.length - cancelled.length} отпр.`],
+    ['Новые', waiting.length ? `${waiting.length} отпр.` : 'нет новых'],
     ['Сборка', waiting.length ? `ждут ${waiting.length}` : 'всё собрано'],
     ['Этикетки 58×40', info?.labelS3Key ? `${info.labelCount} шт. готовы` : packed.length ? `${packed.length} к печати` : '—'],
     ['Акт и отгрузка', info?.actS3Key ? 'акт готов' : shipAt ? `до ${hm(shipAt)}` : '—'],
@@ -160,6 +160,7 @@ export default function OzonFbs() {
         ))}
       </ol>
 
+      {info?.lastError && <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-2.5 text-sm">{info.lastError}</div>}
       {data.unmapped.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-4 py-2.5 text-sm">
           Артикулы Ozon без SKU портала: <b>{data.unmapped.join(', ')}</b> — такие отправления нельзя собрать со списанием. Укажите артикул Ozon в <Link to="/stock/catalog?type=PRODUCT" className="underline">карточке SKU</Link>.
@@ -169,10 +170,11 @@ export default function OzonFbs() {
       {cur === 1 && (
         <div className="bg-white rounded-xl border border-slate-200">
           <div className="px-4 py-3 border-b flex flex-wrap gap-3 items-center">
-            <h2 className="font-semibold">Все отправления дня</h2>
-            <span className="text-sm text-slate-500">{P.length - cancelled.length} отпр. · {fmtQty(units(P.filter((p) => p.status !== 'cancelled')), 0)} шт. · {fmtMoney(sum(P.filter((p) => p.status !== 'cancelled')))} ₽{cancelled.length ? ` · отменено ${cancelled.length}` : ''}</span>
+            <h2 className="font-semibold">Новые — ждут сборки</h2>
+            <span className="text-sm text-slate-500">{waiting.length} отпр. · {fmtQty(units(waiting), 0)} шт. · {fmtMoney(sum(waiting))} ₽
+              {packed.length ? ` · собрано ${packed.length}` : ''}{passed.length ? ` · передано ${passed.length}` : ''}{cancelled.length ? ` · отменено ${cancelled.length}` : ''}</span>
           </div>
-          {table(P)}
+          {table(waiting)}
         </div>
       )}
 
@@ -258,7 +260,7 @@ export default function OzonFbs() {
         <div className="space-y-4">
           {notWritten.length > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex flex-wrap items-center gap-3 text-sm">
-              <span className="text-amber-800">{notWritten.length} отправлений ({units(notWritten)} шт.) собраны, но не списаны со склада — например, собраны в кабинете Ozon.</span>
+              <span className="text-amber-800">{notWritten.length} отправлений ({units(notWritten)} шт.) не списаны со склада — например, собраны в кабинете Ozon. Переданные в Ozon списываются автоматически при обновлении.</span>
               <button disabled={!!busy} className={btnSecondary + ' ml-auto'} onClick={() => run('wo', () => api.ozonFbsWriteOff(day), (r) => { apply(r.state); return r.doc ? `Списано документом ${r.doc.number}` : 'Нечего списывать'; })}>
                 {busy === 'wo' ? 'Списываю…' : `Списать ${units(notWritten)} шт.`}</button>
             </div>
