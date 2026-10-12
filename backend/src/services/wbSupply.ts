@@ -419,10 +419,10 @@ export async function resendRejected(supplyId: string) {
   return { reset: ids.length, ...(await sendMeta(supplyId)) };
 }
 
-/** Коды ЧЗ поставки списком (КИ без криптохвоста) — для ввода в оборот в личном кабинете Честного знака. */
+/** Коды ЧЗ поставки полностью — в .xlsx уходят полным кодом и КИ (для ввода в оборот в Честном знаке). */
 export async function supplyKi(supplyId: string): Promise<string[]> {
   const orders = await prisma.wbOrder.findMany({ where: { supplyId, canceled: false, czCodeId: { not: null } }, include: { czCode: true } });
-  return orders.map((o) => o.czCode?.code?.split('\x1d')[0]).filter((x): x is string => !!x);
+  return orders.map((o) => o.czCode?.code).filter((x): x is string => !!x);
 }
 
 // ───────────── Отгрузка ─────────────

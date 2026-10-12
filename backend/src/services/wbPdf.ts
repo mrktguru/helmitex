@@ -147,13 +147,14 @@ export async function czXlsx(supplyIds: string[]): Promise<Buffer> {
   ws.columns = [
     { header: '№ задания', key: 'id', width: 14 },
     { header: 'Стикер', key: 'sticker', width: 14 },
-    { header: 'КИЗ', key: 'kiz', width: 40 },
+    { header: 'КИЗ', key: 'kiz', width: 95 },
     { header: 'Бренд', key: 'brand', width: 12 },
     { header: 'Наименование', key: 'name', width: 50 },
     { header: 'Артикул продавца', key: 'article', width: 18 },
     { header: 'Поставка', key: 'supply', width: 18 },
     { header: 'Партия', key: 'lot', width: 14 },
     { header: 'Отправлен в WB', key: 'sent', width: 18 },
+    { header: 'КИ (без криптохвоста)', key: 'ki', width: 40 },
   ];
   ws.getRow(1).font = { bold: true };
   for (const supplyId of supplyIds) {
@@ -165,23 +166,31 @@ export async function czXlsx(supplyIds: string[]): Promise<Buffer> {
     for (const o of orders.filter((x) => x.czCode?.code)) {
       ws.addRow({
         id: Number(o.id), sticker: `${o.stickerA ?? ''}${o.stickerB ?? ''}`,
-        // В xlsx нельзя управляющие символы (GS 0x1D): в таблицу идёт идентификатор 01+GTIN+21+серийный номер, без криптохвоста
-        kiz: o.czCode!.code!.split('\x1d')[0],
+        kiz: xlsxCode(o.czCode!.code!), ki: kiOf(o.czCode!.code!),
         brand: 'Helmitex', name: o.itemName ?? '', article: o.article, supply: supplyId,
         lot: o.lotId ? lotNo.get(o.lotId) ?? '' : '', sent: o.kizSentAt ? o.kizSentAt.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }) : '',
       });
     }
   }
   ws.getColumn('kiz').numFmt = '@';
+  ws.getColumn('ki').numFmt = '@';
   return Buffer.from(await wbk.xlsx.writeBuffer());
 }
 
-/** Список кодов (КИ) одним столбцом в .xlsx — для ввода в оборот в Честном знаке. В CSV коды с запятой Excel режет на столбцы. */
+// Полный код ЧЗ для ячейки Excel: GS (0x1D) недопустим в XML, в OOXML он записывается как _x001D_ —
+// Excel показывает и копирует его как настоящий разделитель (так же он хранит отсканированный код)
+const xlsxCode = (code: string) => code.replace(/_x([0-9A-Fa-f]{4})_/g, '_x005F_x$1_').replace(/\x1d/g, '_x001D_');
+const kiOf = (code: string) => code.split('\x1d')[0];
+
+/** Коды ЧЗ в .xlsx: A — код полностью (с проверочным кодом 91 и криптоподписью 92), B — КИ (для ввода в оборот). */
 export async function kiXlsx(codes: string[]): Promise<Buffer> {
   const wbk = new ExcelJS.Workbook();
   const ws = wbk.addWorksheet('Коды');
-  ws.getColumn(1).width = 40;
-  ws.getColumn(1).numFmt = '@';
-  for (const c of codes) ws.addRow([c]);
+  ws.columns = [
+    { header: 'Код маркировки полностью', key: 'full', width: 95, style: { numFmt: '@' } },
+    { header: 'КИ (без криптохвоста)', key: 'ki', width: 40, style: { numFmt: '@' } },
+  ];
+  ws.getRow(1).font = { bold: true };
+  for (const c of codes) ws.addRow({ full: xlsxCode(c), ki: kiOf(c) });
   return Buffer.from(await wbk.xlsx.writeBuffer());
 }

@@ -230,7 +230,7 @@ router.get('/marking/docs/:id/ki.xlsx', async (req: AuthRequest, res: Response):
     where: { outputBatch: { docId: doc.id } }, select: { code: true },
     orderBy: [{ czBatch: { uploadedAt: 'asc' } }, { pageIndex: 'asc' }, { id: 'asc' }],
   });
-  const buf = await kiXlsx(codes.map((c) => c.code?.split('\x1d')[0]).filter((x): x is string => !!x));
+  const buf = await kiXlsx(codes.map((c) => c.code).filter((x): x is string => !!x));
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`КИ ${doc.number}.xlsx`)}`);
   res.end(buf);

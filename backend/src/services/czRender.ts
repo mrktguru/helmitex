@@ -3,7 +3,8 @@ import { downloadFile, uploadFile } from './s3';
 import { convertPdfPageToPng, renderPdfPages } from './pdf';
 import { decodeDataMatrix, encodeDataMatrix } from './datamatrix';
 
-const CACHE_PREFIX = 'cache/cz-dm-v3';
+// v4: GS1 DataMatrix (FNC1) — старый кэш без FNC1 не используется
+const CACHE_PREFIX = 'cache/cz-dm-v4';
 const RASTER_DENSITY = 250;
 /** Pages per Ghostscript process, and how many Ghostscript processes run at once (process-wide). */
 const GS_CHUNK_PAGES = 20;

@@ -123,20 +123,26 @@ export async function decodeDataMatrix(pngBuffer: Buffer, timeoutMs = 15000): Pr
 }
 
 /**
- * Encode arbitrary bytes as a clean square DataMatrix PNG via bwip-js.
- * 0x1d bytes are translated to bwip-js' ^029 FNC1 escape so GS1 boundaries
- * survive the round trip.
+ * Encode a payload as a clean square DataMatrix PNG via bwip-js.
+ * Коды Честного знака (01 + GTIN …) кодируются как GS1 DataMatrix по требованиям ЧЗ: FNC1 в начале,
+ * разделители — символ GS (0x1D). Без начального FNC1 касса/сканер не распознаёт GS1-структуру,
+ * теряет разделители — и проверочный код AI 91 «не сходится».
  */
 export async function encodeDataMatrix(payload: string, scale = 8): Promise<Buffer> {
-  // Escape 0x1d (GS / FNC1) for bwip-js parser
-  let parsed = false;
+  const gs1 = /^01\d{14}21/.test(payload);
+  // ^ в данных — ordinal ^094, чтобы bwip-js не принял его за управляющую последовательность
+  const esc = (t: string) => t.replace(/\^/g, '^094');
   let text = payload;
-  if (text.includes('\x1d')) {
-    parsed = true;
-    text = text.replace(/\x1d/g, '^029');
+  let parse = false;
+  let parsefnc = false;
+  if (gs1) {
+    parse = true; parsefnc = true;
+    // Как в оригиналах Честного знака: FNC1 только в начале, разделители — символ GS (ASCII 29)
+    text = '^FNC1' + payload.split('\x1d').map(esc).join('^029');
+  } else if (payload.includes('\x1d')) {
+    parse = true;
+    text = payload.split('\x1d').map(esc).join('^029');
   }
-  // Also escape literal ^ when parse mode is on
-  if (parsed) text = text.replace(/(?<!\^)\^(?!029)/g, '^^');
 
   const png = await bwipjs.toBuffer({
     bcid: 'datamatrix',
@@ -146,7 +152,8 @@ export async function encodeDataMatrix(payload: string, scale = 8): Promise<Buff
     // size of the DataMatrix. Quiet zone, if needed, must be reserved
     // in the template layout itself.
     padding: 0,
-    parse: parsed,
+    parse,
+    parsefnc,
     backgroundcolor: 'FFFFFF',
   } as any);
   return Buffer.from(png as Buffer);
