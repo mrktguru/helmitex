@@ -44,12 +44,13 @@ export default function StockDocEdit() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [shipment, setShipment] = useState<any>(null);
+  const [rawLines, setRawLines] = useState<any[]>([]);
 
   const isAdj = type === 'ADJUSTMENT';
   const readOnly = status !== 'DRAFT';
 
   function applyDoc(d: any) {
-    setType(d.type); setStatus(d.status); setNumber(d.number); setShipment(d.shipment ?? null);
+    setType(d.type); setStatus(d.status); setNumber(d.number); setShipment(d.shipment ?? null); setRawLines(d.lines);
     setHead({ date: d.date.slice(0, 10), supplier: d.supplier ?? '', docRef: d.docRef ?? '', comment: d.comment ?? '' });
     setLines(d.lines.map((l: any) => ({
       key: String(++seq), itemId: l.itemId, lotKey: l.lotId ? `${l.lotId}|${l.state}` : '',
@@ -145,7 +146,7 @@ export default function StockDocEdit() {
 
   const grouped = ITEM_TYPES.map((t) => ({ ...t, items: items.filter((i) => i.type === t.value) })).filter((g) => g.items.length);
 
-  if (type === 'SHIPMENT') return <ShipmentDoc number={number} date={head.date} comment={head.comment} shipment={shipment} />;
+  if (type === 'SHIPMENT') return <ShipmentDoc number={number} date={head.date} comment={head.comment} shipment={shipment} lines={rawLines} />;
 
   return (
     <div className="space-y-4">
@@ -329,9 +330,15 @@ export default function StockDocEdit() {
 }
 
 // Отгрузка Ozon FBO: только просмотр — что и сколько ушло, по квантам поставки
-function ShipmentDoc({ number, date, comment, shipment }: { number: string; date: string; comment: string; shipment: any }) {
+function ShipmentDoc({ number, date, comment, shipment, lines }: { number: string; date: string; comment: string; shipment: any; lines: any[] }) {
   const quants: any[] = (shipment?.cargoes ?? []).map((c: any) => c.quant);
   const bySku = new Map<string, { name: string; quants: number; units: number; cost: number | null; lots: Set<string> }>();
+  // Ozon FBS / WB FBS: квантов нет — что ушло видно по строкам списания
+  if (!shipment) for (const l of lines) {
+    const g = bySku.get(l.itemId) ?? { name: l.item.name, quants: 0, units: 0, cost: null, lots: new Set<string>() };
+    g.units += Math.abs(l.qty); if (l.lotNumber) g.lots.add(l.lotNumber);
+    bySku.set(l.itemId, g);
+  }
   for (const q of quants) {
     const p = q.quantType.productItem;
     const g = bySku.get(p.id) ?? { name: p.name, quants: 0, units: 0, cost: 0, lots: new Set<string>() };
@@ -373,11 +380,11 @@ function ShipmentDoc({ number, date, comment, shipment }: { number: string; date
             </tr>
           </thead>
           <tbody>
-            {groups.length === 0 && <tr><td colSpan={5} className="px-3 py-4 text-slate-500">Нет данных о квантах поставки.</td></tr>}
+            {groups.length === 0 && <tr><td colSpan={5} className="px-3 py-4 text-slate-500">Нет данных об отправленном.</td></tr>}
             {groups.map((g) => (
               <tr key={g.name} className="border-b last:border-0">
                 <td className="px-3 py-2 font-medium">{g.name}</td>
-                <td className="px-3 py-2 text-right">{g.quants}</td>
+                <td className="px-3 py-2 text-right">{shipment ? g.quants : '—'}</td>
                 <td className="px-3 py-2 text-right font-semibold">{fmtQty(g.units, 0)} шт</td>
                 <td className="px-3 py-2 font-mono text-xs">{[...g.lots].join(', ')}</td>
                 <td className="px-3 py-2 text-right">{fmtMoney(g.cost)}</td>

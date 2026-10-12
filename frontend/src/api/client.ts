@@ -141,6 +141,16 @@ export const api = {
   assignCzImport: (id: string, gtin: string, itemId: string) =>
     request<any>(`/stock/marking/imports/${id}/assign`, { method: 'POST', body: JSON.stringify({ gtin, itemId }) }),
   setGtin: (itemId: string, gtin: string) => request<any>(`/stock/marking/${itemId}/gtin`, { method: 'PUT', body: JSON.stringify({ gtin }) }),
+  ozonFbsDays: () => request<any[]>('/stock/ozon-fbs/days'),
+  ozonFbsSync: () => request<any[]>('/stock/ozon-fbs/sync', { method: 'POST' }),
+  ozonFbsDay: (day: string) => request<any>(`/stock/ozon-fbs/days/${day}`),
+  ozonFbsShip: (day: string, postingNumbers: string[]) =>
+    request<any>(`/stock/ozon-fbs/days/${day}/ship`, { method: 'POST', body: JSON.stringify({ postingNumbers }) }),
+  ozonFbsWriteOff: (day: string, postingNumbers?: string[]) =>
+    request<any>(`/stock/ozon-fbs/days/${day}/write-off`, { method: 'POST', body: JSON.stringify({ postingNumbers }) }),
+  ozonFbsLabels: (day: string, size: 'small' | 'big') =>
+    request<any>(`/stock/ozon-fbs/days/${day}/labels`, { method: 'POST', body: JSON.stringify({ size }) }),
+  ozonFbsAct: (day: string) => request<any>(`/stock/ozon-fbs/days/${day}/act`, { method: 'POST' }),
   wbStatus: () => request<{ configured: boolean }>('/stock/wb/status'),
   wbSupplies: () => request<any[]>('/stock/wb/supplies'),
   wbCreateSupply: (name: string) => request<{ id: string }>('/stock/wb/supplies', { method: 'POST', body: JSON.stringify({ name }) }),

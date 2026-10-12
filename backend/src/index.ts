@@ -18,6 +18,8 @@ import dashboardRouter from './routes/dashboard';
 import adsRouter from './routes/ads';
 import markingRouter from './routes/marking';
 import wbRouter from './routes/wb';
+import ozonFbsRouter from './routes/ozonFbs';
+import { syncFbs } from './services/ozonFbs';
 import { syncAllShipments } from './services/fbo';
 import { ozonConfigured } from './services/ozon';
 import { startAdsSync } from './services/ads';
@@ -55,6 +57,7 @@ app.use('/api/stock', fboRouter);
 app.use('/api/stock', dashboardRouter);
 app.use('/api/stock', markingRouter);
 app.use('/api/stock', wbRouter);
+app.use('/api/stock', ozonFbsRouter);
 app.use('/api/ads', adsRouter);
 app.use('/api', batchesRouter);
 
@@ -68,6 +71,7 @@ app.listen(PORT, () => {
 // Статусы FBO-поставок из Ozon — раз в 15 минут
 if (ozonConfigured()) {
   setInterval(() => { syncAllShipments().catch((e) => console.warn('[fbo sync]', e)); }, 15 * 60_000);
+  setInterval(() => { syncFbs().catch((e) => console.warn('[ozon fbs sync]', e)); }, 15 * 60_000);
   // Статистика рекламы и продаж за последние дни — раз в 3 часа
   startAdsSync();
 }

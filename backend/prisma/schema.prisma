@@ -594,3 +594,38 @@ model CzImport {
   createdAt  DateTime  @default(now())
   finishedAt DateTime?
 }
+
+// ─────────────────────────── Отправки Ozon FBS ───────────────────────────
+
+// Отправление Ozon FBS (зеркало /v3/posting/fbs/list) + что сделали у себя
+model OzonFbsPosting {
+  postingNumber    String    @id // 0186255407-0004-1
+  orderNumber      String?
+  status           String // awaiting_packaging | awaiting_deliver | delivering | delivered | cancelled …
+  substatus        String?
+  shipDay          String // день отгрузки по Москве, YYYY-MM-DD
+  shipmentDate     DateTime
+  inProcessAt      DateTime?
+  deliveringAt     DateTime?
+  deliveryMethodId String?
+  products         Json // [{ offerId, sku, name, qty, price }]
+  shipError        String? // ошибка «Собрать» в Ozon
+  stockDocId       String? // списание со склада при сборке
+  syncedAt         DateTime  @updatedAt
+
+  @@index([shipDay])
+}
+
+// День отгрузки FBS: этикетки и акт
+model OzonFbsDay {
+  day        String    @id // YYYY-MM-DD
+  labelS3Key String?
+  labelType  String? // small_label (58×40) | big_label (75×120)
+  labelCount Int?
+  labelAt    DateTime?
+  actId      String?
+  actStatus  String?
+  actS3Key   String?
+  actAt      DateTime?
+  lastError  String?
+}

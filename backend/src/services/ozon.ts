@@ -52,6 +52,28 @@ export async function ozonCall<T>(method: 'GET' | 'POST', path: string, body: un
   return data as T;
 }
 
+// Метод, который отвечает PDF-файлом (акт): возвращает байты; ошибка Ozon приходит JSON-ом
+export async function ozonPdf(path: string, body: unknown): Promise<Buffer> {
+  const t0 = Date.now();
+  const res = await fetch(BASE + path, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+  const buf = Buffer.from(await res.arrayBuffer());
+  const isPdf = buf.subarray(0, 4).toString() === '%PDF';
+  await prisma.ozonApiLog.create({
+    data: { method: path, status: res.status, request: body as any, response: isPdf ? { pdfBytes: buf.length } : { raw: buf.toString('utf8').slice(0, 2000) }, ms: Date.now() - t0 },
+  }).catch(() => undefined);
+  if (res.ok && isPdf) return buf;
+  // иногда PDF приходит base64 в JSON
+  try {
+    const j = JSON.parse(buf.toString('utf8'));
+    const b64 = j.content ?? j.file_content ?? j.result?.content;
+    if (res.ok && b64) return Buffer.from(b64, 'base64');
+    throw new StockError(`Ozon ${path}: ${res.status} ${j.message ?? JSON.stringify(j).slice(0, 300)}`);
+  } catch (e) {
+    if (e instanceof StockError) throw e;
+    throw new StockError(`Ozon ${path}: ${res.status} — не PDF`);
+  }
+}
+
 export async function ozonGetFile(url: string): Promise<Buffer> {
   // Ссылка на PDF этикеток может требовать те же заголовки авторизации
   let res = await fetch(url);
