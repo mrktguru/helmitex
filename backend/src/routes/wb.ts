@@ -7,7 +7,7 @@ import { StockError } from '../services/stock';
 import { getSetting, setSetting } from '../services/ozon';
 import { wb, wbConfigured, wbSupplies } from '../services/wb';
 import {
-  addOrders, applyPickList, assignCodes, resendRejected, supplyKi, uploadStickers, pdfToText, createSupply, deliver, detachCode, newOrders, resetMetaErrors, scanCode, sendMeta,
+  addOrders, applyPickList, assignCodes, resendRejected, refreshMeta, supplyKi, uploadStickers, pdfToText, createSupply, deliver, detachCode, newOrders, resetMetaErrors, scanCode, sendMeta,
   supplyState, syncSupply, writeOff,
 } from '../services/wbSupply';
 import { comboPdf, czXlsx, kiXlsx, supplyQrPdf, trbxPdf, wbStickersPdf } from '../services/wbPdf';
@@ -114,6 +114,12 @@ router.post('/wb/supplies/:id/scan', h(async (req, res) => {
 router.post('/wb/supplies/:id/orders/:orderId/detach', h(async (req, res) => {
   await detachCode(req.params.id, req.params.orderId);
   res.json({ ok: true });
+}));
+
+// POST /api/stock/wb/supplies/:id/refresh-meta — свежий статус проверки КИЗ из WB
+router.post('/wb/supplies/:id/refresh-meta', h(async (req, res) => {
+  await refreshMeta(req.params.id);
+  res.json(await supplyState(req.params.id));
 }));
 
 router.post('/wb/supplies/:id/send-meta', h(async (req, res) => { res.json(await sendMeta(req.params.id)); }));

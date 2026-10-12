@@ -28,7 +28,7 @@ export default function WbWizard() {
   const cz = active.filter((o) => o.needCz);
   const czAssigned = cz.filter((o) => o.kiz || o.kizPending).length;
   const wbKiz = active.filter((o) => o.wbKiz);
-  const czSent = wbKiz.filter((o) => o.kizSentAt && !KIZ_BAD(o.kizDecision)).length;
+  const czSent = wbKiz.filter((o) => o.kizSentAt && KIZ_ACCEPTED(o.kizDecision)).length;
   const done = !!data?.supply.done;
 
   const auto = !data ? 0 : done ? 5 : active.length === 0 ? 0 : czAssigned < cz.length || czSent < wbKiz.length ? 2 : 4;
@@ -93,10 +93,12 @@ function localDate(d = new Date()) {
 }
 
 // Проверка КИЗ в WB (metaDetails.decision)
-const KIZ_OK = new Set(['sgtinIntroduced', 'sgtinSoldB2B']);
-const KIZ_BAD = (d: string | null) => !!d && (d === 'required' || (d.startsWith('sgtin') && !KIZ_OK.has(d)));
+const KIZ_OK = new Set(['filled', 'sgtinIntroduced', 'sgtinSoldB2B']);
+const KIZ_PENDING = new Set(['pending', 'deadlineExceeded']);
+const KIZ_BAD = (d: string | null) => !!d && !KIZ_OK.has(d) && !KIZ_PENDING.has(d) && (d === 'required' || d.startsWith('sgtin'));
+const KIZ_ACCEPTED = (d: string | null) => !!d && KIZ_OK.has(d);
 const KIZ_LABEL: Record<string, string> = {
-  filled: 'принят', sgtinIntroduced: 'в обороте ✓', sgtinSoldB2B: 'в обороте ✓', pending: 'проверяется', deadlineExceeded: 'проверяется',
+  filled: 'принят ✓', sgtinIntroduced: 'в обороте ✓', sgtinSoldB2B: 'в обороте ✓', pending: 'проверяется…', deadlineExceeded: 'проверяется…',
   sgtinEmitted: 'эмитирован — не введён в оборот', sgtinApplied: 'нанесён — ввод в оборот не завершён', sgtinNotFound: 'не найден в ЧЗ',
   sgtinAppliedNotPaid: 'не оплачен', sgtinWrittenOff: 'списан', sgtinRetired: 'выбыл', sgtinWithdrawn: 'выведен из оборота',
   sgtinNoGS: 'нет разделителя GS', sgtinInvalidFormat: 'неверный формат', sgtinInvalidPattern: 'неверная структура', required: 'не указан',
@@ -341,6 +343,20 @@ function StepCz({ data, reload, done, assigned, total, accepted, wbTotal }: { da
   const czOrders = orders.filter((o) => o.needCz);
   const errors = orders.filter((o) => o.kizError || o.expirationError);
   const rejected = orders.filter((o) => o.wbKiz && o.kizSentAt && KIZ_BAD(o.kizDecision));
+  const checking = orders.filter((o) => o.wbKiz && o.kizSentAt && !KIZ_BAD(o.kizDecision) && !KIZ_ACCEPTED(o.kizDecision));
+  const [checkedAt, setCheckedAt] = useState<Date | null>(null);
+  // Результат проверки КИЗ в WB приходит с задержкой: при открытии шага и пока идёт проверка — обновляем статус
+  useEffect(() => {
+    let alive = true;
+    const tick = () => api.wbRefreshMeta(data.supply.id).then(() => { if (alive) { setCheckedAt(new Date()); reload(); } }).catch(() => {});
+    tick();
+    return () => { alive = false; };
+  }, []);
+  useEffect(() => {
+    if (!checking.length) return;
+    const t = window.setTimeout(() => api.wbRefreshMeta(data.supply.id).then(() => { setCheckedAt(new Date()); reload(); }).catch(() => {}), 20000);
+    return () => window.clearTimeout(t);
+  }, [data]);
   const expNeeded = data.orders.filter((o) => !o.canceled && o.needExpiration);
 
   async function assign(mode: 'fresh' | 'loose') {
@@ -404,6 +420,8 @@ function StepCz({ data, reload, done, assigned, total, accepted, wbTotal }: { da
       <Panel title="Привяжите коды Честного знака" hint="Коды берутся из базы раздела «Маркировка». Срок годности отправляется из партии.">
         <div className="flex items-center gap-3 mb-1 text-sm"><span className="w-28 text-slate-500">Назначено</span><Bar v={assigned} t={total} /><b>{assigned} / {total}</b></div>
         {wbTotal > 0 && <div className="flex items-center gap-3 mb-4 text-sm"><span className="w-28 text-slate-500">Принято WB</span><Bar v={accepted} t={wbTotal} /><b>{accepted} / {wbTotal}</b></div>}
+        {checking.length > 0 && <p className="text-xs text-amber-800 mb-2">WB проверяет {checking.length} КИЗ — статус обновляется сам каждые 20 сек.{checkedAt ? ` Проверено в ${checkedAt.toLocaleTimeString('ru-RU')}.` : ''}</p>}
+        {!checking.length && checkedAt && <p className="text-xs text-slate-500 mb-2">Статус из WB на {checkedAt.toLocaleTimeString('ru-RU')}</p>}
         {total > wbTotal && <p className="text-xs text-slate-500 mb-3">{total - wbTotal} заданий маркируются, но WB не принимает для них КИЗ (у товара на WB нет поля ЧЗ) — коды остаются в портале.</p>}
         {rejected.length > 0 && (
           <div className="text-sm bg-red-50 border border-red-200 rounded-lg p-3 mb-4 space-y-2">
@@ -445,7 +463,8 @@ function StepCz({ data, reload, done, assigned, total, accepted, wbTotal }: { da
                   <td className="font-mono text-xs">{o.kiz ? `${o.kiz.slice(0, 24)}…` : o.kizPending ? <span className="text-amber-700">распознаётся…</span> : <span className="text-red-600">нет кода</span>}</td>
                   <td className="text-xs">{!o.wbKiz ? <span className="text-slate-400">не нужен</span>
                     : o.kizError ? <span className="text-red-600" title={o.kizError}>ошибка</span>
-                    : o.kizSentAt ? <span className={KIZ_BAD(o.kizDecision) ? 'text-red-600' : 'text-green-700'}>{KIZ_LABEL[o.kizDecision] ?? o.kizDecision ?? 'отправлен'}</span> : '—'}</td>
+                    : o.kizSentAt ? <span className={KIZ_BAD(o.kizDecision) ? 'text-red-600' : KIZ_ACCEPTED(o.kizDecision) ? 'text-green-700' : 'text-amber-700'}>
+                        {KIZ_BAD(o.kizDecision) ? 'отклонён: ' : ''}{KIZ_LABEL[o.kizDecision] ?? o.kizDecision ?? 'отправлен'}</span> : '—'}</td>
                   <td className="text-right">{(o.kiz || o.kizPending) && !done && <button className="text-xs text-slate-500 hover:text-red-600" onClick={() => detach(o)}>отвязать</button>}</td>
                 </tr>
               ))}

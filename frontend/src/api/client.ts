@@ -154,6 +154,7 @@ export const api = {
     request<{ orderId: string }>(`/stock/wb/supplies/${encodeURIComponent(id)}/scan`, { method: 'POST', body: JSON.stringify({ code, orderId }) }),
   wbDetach: (id: string, orderId: string) => request<any>(`/stock/wb/supplies/${encodeURIComponent(id)}/orders/${orderId}/detach`, { method: 'POST' }),
   wbSendMeta: (id: string) => request<{ sent: number; errors: string[]; remaining: number }>(`/stock/wb/supplies/${encodeURIComponent(id)}/send-meta`, { method: 'POST' }),
+  wbRefreshMeta: (id: string) => request<any>(`/stock/wb/supplies/${encodeURIComponent(id)}/refresh-meta`, { method: 'POST' }),
   wbResendRejected: (id: string) =>
     request<{ reset: number; sent: number; errors: string[]; remaining: number }>(`/stock/wb/supplies/${encodeURIComponent(id)}/resend-rejected`, { method: 'POST' }),
   wbResetErrors: (id: string) => request<any>(`/stock/wb/supplies/${encodeURIComponent(id)}/reset-errors`, { method: 'POST' }),

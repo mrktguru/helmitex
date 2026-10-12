@@ -18,9 +18,11 @@ interface MetaDetail { key: string; value: string | null; decision: string }
 const metaHas = (meta: any, key: string) => Array.isArray(meta?.metaDetails) && meta.metaDetails.some((d: MetaDetail) => d.key === key);
 const metaDecision = (meta: any, key: string): string | null =>
   (Array.isArray(meta?.metaDetails) && meta.metaDetails.find((d: MetaDetail) => d.key === key)?.decision) || null;
-// Решения WB по КИЗ, при которых код не прошёл проверку в Честном знаке (sgtinIntroduced / sgtinSoldB2B — прошёл)
-const KIZ_OK = new Set(['sgtinIntroduced', 'sgtinSoldB2B']);
-export const KIZ_BAD = (d: string | null) => !!d && (d === 'required' || (d.startsWith('sgtin') && !KIZ_OK.has(d)));
+// Проверка КИЗ в WB (metaDetails.decision): принят / ещё проверяется / отклонён
+const KIZ_OK = new Set(['filled', 'sgtinIntroduced', 'sgtinSoldB2B']);
+const KIZ_PENDING = new Set(['pending', 'deadlineExceeded']);
+export const KIZ_BAD = (d: string | null) => !!d && !KIZ_OK.has(d) && !KIZ_PENDING.has(d) && (d === 'required' || d.startsWith('sgtin'));
+export const KIZ_ACCEPTED = (d: string | null) => !!d && KIZ_OK.has(d);
 const metaRequired = (meta: any, key: string) =>
   Array.isArray(meta?.metaDetails) && meta.metaDetails.some((d: MetaDetail) => d.key === key && d.decision === 'required');
 
@@ -99,13 +101,19 @@ export async function syncSupply(id: string) {
   }
   // Отменённым заданиям код ЧЗ больше не нужен: отвязываем — банка остаётся «с ЧЗ», код можно назначить другому заданию
   await prisma.wbOrder.updateMany({ where: { canceled: true, czCodeId: { not: null } }, data: { czCodeId: null, kizSentAt: null, kizError: null } });
-  for (const part of chunk(ids, 100)) {
-    const r = await wb<{ orders: { id: number; meta: any; metaDetails: MetaDetail[] }[] }>('POST', '/api/marketplace/v3/orders/meta', { orders: part }, id, false);
+  await refreshMeta(id, ids);
+  await loadStickers(id);
+}
+
+/** Идентификаторы заданий из WB (поля ЧЗ/срока годности и результат проверки КИЗ). Без ids — все активные задания поставки. */
+export async function refreshMeta(supplyId: string, ids?: number[]) {
+  const list = ids ?? (await prisma.wbOrder.findMany({ where: { supplyId, canceled: false }, select: { id: true } })).map((o) => Number(o.id));
+  for (const part of chunk(list, 100)) {
+    const r = await wb<{ orders: { id: number; meta: any; metaDetails: MetaDetail[] }[] }>('POST', '/api/marketplace/v3/orders/meta', { orders: part }, supplyId, false);
     for (const m of r.orders ?? []) {
       await prisma.wbOrder.update({ where: { id: String(m.id) }, data: { meta: { meta: m.meta, metaDetails: m.metaDetails } as any } }).catch(() => {});
     }
   }
-  await loadStickers(id);
 }
 
 /** Стикеры заданий 58×40 из API WB → S3. Если WB отказывает — запоминаем ошибку, номера можно взять из листа подбора. */
@@ -402,6 +410,8 @@ export async function sendMeta(supplyId: string, limit = 25) {
       await sleep(220);
     }
   }
+  // Результат проверки WB приходит не сразу — обновляем статусы отправленных
+  if (sent && todo.length <= limit) await refreshMeta(supplyId).catch(() => {});
   return { sent, errors, remaining: Math.max(0, todo.length - limit) };
 }
 
@@ -433,8 +443,12 @@ export async function deliver(supplyId: string) {
   if (!active.length) throw new StockError('В поставке нет заданий');
   const noKiz = active.filter((o) => o.wbKiz && !o.kizSentAt);
   if (noKiz.length) throw new StockError(`ЧЗ не отправлен в WB у ${noKiz.length} заданий — завершите шаг «Честный знак»`);
-  const bad = active.filter((o) => o.wbKiz && KIZ_BAD(o.kizDecision));
+  await refreshMeta(supplyId);
+  const fresh = (await supplyState(supplyId)).orders.filter((o) => !o.canceled && o.wbKiz);
+  const bad = fresh.filter((o) => KIZ_BAD(o.kizDecision));
   if (bad.length) throw new StockError(`WB не принял КИЗ у ${bad.length} заданий (${bad[0].kizDecision}) — введите коды в оборот в Честном знаке и отправьте повторно`);
+  const wait = fresh.filter((o) => !KIZ_ACCEPTED(o.kizDecision));
+  if (wait.length) throw new StockError(`WB ещё проверяет КИЗ у ${wait.length} заданий — подождите и повторите`);
   await wb('PATCH', `/api/v3/supplies/${encodeURIComponent(supplyId)}/deliver`, undefined, supplyId);
   await syncSupply(supplyId);
 }
