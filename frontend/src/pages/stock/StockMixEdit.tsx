@@ -225,32 +225,36 @@ export default function StockMixEdit() {
           {lines.length > 0 && <button onClick={() => window.print()} className={btnSecondary}>Печать карты A4</button>}
         </div>
 
-        <div className="bg-white rounded-xl border p-4 grid grid-cols-2 lg:grid-cols-6 gap-3 items-end">
-          <label className="flex flex-col gap-1 text-xs text-slate-500 col-span-2">Полуфабрикат
+        <div className="bg-white rounded-xl border p-4 grid grid-cols-2 lg:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto] gap-3 items-end">
+          <label className="flex flex-col gap-1 text-xs text-slate-500 col-span-2 lg:col-span-1">Полуфабрикат
             <select disabled={readOnly} value={head.outputItemId} onChange={(e) => setHead({ ...head, outputItemId: e.target.value })} className={inputCls}>
               <option value="">— выберите —</option>
               {semis.map((s) => <option key={s.id} value={s.id} disabled={!s.recipe}>{s.name}{!s.recipe ? ' (нет рецептуры)' : ''}</option>)}
             </select>
           </label>
-          <div className="flex flex-col gap-1 text-xs text-slate-500">
+          <div className="flex flex-col gap-1 text-xs text-slate-500 col-span-2 lg:col-span-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
-              <span>{mode === 'mass' ? 'Масса замеса, кг' : `Вода на ${waterStage ?? 1}-й этап (в бочку), кг`}</span>
+              <span className="whitespace-nowrap truncate" title={mode === 'water' ? `Вода, залитая в бочку на ${waterStage ?? 1}-м этапе — по ней считается масса замеса` : undefined}>
+                {mode === 'mass' ? 'Масса замеса, кг' : `Вода этапа ${waterStage ?? 1}, кг`}
+              </span>
               {!readOnly && (
-                <span className="inline-flex rounded-md border border-slate-200 overflow-hidden">
-                  <button type="button" onClick={() => setMode('mass')} className={clsx('px-1.5 py-0.5', mode === 'mass' ? 'bg-brand-600 text-white' : 'bg-white')}>масса</button>
+                <span className="inline-flex shrink-0 rounded-md border border-slate-200 overflow-hidden text-[11px]">
+                  <button type="button" onClick={() => setMode('mass')} className={clsx('px-2 py-0.5 whitespace-nowrap', mode === 'mass' ? 'bg-brand-600 text-white' : 'bg-white hover:bg-slate-50')}>масса</button>
                   <button type="button" disabled={!waterPct} title={waterPct ? '' : 'В рецептуре нет воды (компонент «без учёта»)'}
-                    onClick={() => { setMode('water'); setWater(''); }} className={clsx('px-1.5 py-0.5 disabled:opacity-40', mode === 'water' ? 'bg-brand-600 text-white' : 'bg-white')}>по воде</button>
+                    onClick={() => { setMode('water'); setWater(''); }} className={clsx('px-2 py-0.5 whitespace-nowrap border-l border-slate-200 disabled:opacity-40', mode === 'water' ? 'bg-brand-600 text-white' : 'bg-white hover:bg-slate-50')}>по воде</button>
                 </span>
               )}
             </div>
             {mode === 'mass' || readOnly
               ? <input disabled={readOnly} value={head.plannedQty} onChange={(e) => setHead({ ...head, plannedQty: e.target.value })} className={inputCls + ' text-right'} />
-              : <input value={water} onChange={(e) => onWater(e.target.value)} className={inputCls + ' text-right'} placeholder="кг воды" />}
-            {mode === 'water' && !readOnly && (
-              <span className="text-[11px] text-slate-600">
-                {head.plannedQty ? <>замес <b>{fmtQty(parseNum(head.plannedQty) ?? 0, 2)} кг</b> · вода этапа {waterStage} — {fmtQty(waterPct, 3)} %</> : `вода этапа ${waterStage} в рецептуре — ${fmtQty(waterPct, 3)} %`}
-              </span>
-            )}
+              : (
+                <div className="flex items-center gap-2">
+                  <input value={water} onChange={(e) => onWater(e.target.value)} className={inputCls + ' text-right w-24 shrink-0'} placeholder="кг" />
+                  <span className="text-slate-600 whitespace-nowrap" title={`Вода этапа ${waterStage} в рецептуре — ${fmtQty(waterPct, 3)} %`}>
+                    {head.plannedQty ? <>→ замес <b className="text-slate-900">{fmtQty(parseNum(head.plannedQty) ?? 0, 2)} кг</b></> : `вода ${fmtQty(waterPct, 3)} % рецептуры`}
+                  </span>
+                </div>
+              )}
           </div>
           <label className="flex flex-col gap-1 text-xs text-slate-500">Бочка
             <input disabled={readOnly} value={head.barrel} onChange={(e) => setHead({ ...head, barrel: e.target.value })} className={inputCls} placeholder="Б-07" />
