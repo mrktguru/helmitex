@@ -21,6 +21,7 @@ export const DOC_TYPES = [
   { value: 'FILL', label: 'Фасовка', short: 'Фасовка' },
   { value: 'QUANT', label: 'Сборка квантов', short: 'Кванты' },
   { value: 'MARK', label: 'Маркировка', short: 'Маркировка' },
+  { value: 'SHIPMENT', label: 'Отгрузка Ozon FBO', short: 'Ozon FBO' }, // создаётся из раздела «Отгрузки FBO»
 ] as const;
 
 const DOC_ROUTE: Record<string, string> = { MIX: 'mix', FILL: 'fill', QUANT: 'quant' };

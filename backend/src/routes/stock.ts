@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
-import { ItemType, Prisma } from '@prisma/client';
+import { DocType, ItemType, Prisma } from '@prisma/client';
 import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { addMonths, allocateFefo, cancelDoc, lotBalance, nextDocNumber, postDoc, PdfJob, StockError } from '../services/stock';
@@ -373,7 +373,7 @@ router.post('/fill/plan', async (req: AuthRequest, res: Response): Promise<void>
 
 // GET /api/stock/docs?type=RECEIPT
 router.get('/docs', async (req: AuthRequest, res: Response) => {
-  const type = docTypes.includes(req.query.type as any) ? (req.query.type as (typeof docTypes)[number]) : undefined;
+  const type = Object.values(DocType).includes(req.query.type as DocType) ? (req.query.type as DocType) : undefined;
   const docs = await prisma.stockDoc.findMany({
     where: { type },
     orderBy: { createdAt: 'desc' },
@@ -384,12 +384,29 @@ router.get('/docs', async (req: AuthRequest, res: Response) => {
       lines: { select: { qty: true, unitCost: true } },
     },
   });
-  res.json(docs.map(({ lines, ...d }) => ({
-    ...d,
-    lineCount: lines.length,
-    total: lines.some((l) => l.unitCost != null)
-      ? lines.reduce((s, l) => s + (l.unitCost ?? 0) * l.qty, 0) : null,
-  })));
+  // Отгрузка FBO строк не имеет — считаем по квантам поставки
+  const shipments = await prisma.fboShipment.findMany({
+    where: { stockDocId: { in: docs.filter((d) => d.type === 'SHIPMENT').map((d) => d.id) } },
+    select: { stockDocId: true, cargoes: { select: { quant: { select: { units: true, unitCost: true } } } } },
+  });
+  const byDoc = new Map(shipments.map((s) => [s.stockDocId, s.cargoes.map((c) => c.quant)]));
+  res.json(docs.map(({ lines, ...d }) => {
+    const quants = byDoc.get(d.id);
+    if (quants) {
+      return {
+        ...d,
+        lineCount: quants.length,
+        summary: `${quants.length} кв. · ${quants.reduce((t, q) => t + q.units, 0)} шт`,
+        total: quants.every((q) => q.unitCost != null) ? quants.reduce((t, q) => t + q.unitCost!, 0) : null,
+      };
+    }
+    return {
+      ...d,
+      lineCount: lines.length,
+      total: lines.some((l) => l.unitCost != null)
+        ? lines.reduce((s, l) => s + (l.unitCost ?? 0) * l.qty, 0) : null,
+    };
+  }));
 });
 
 // GET /api/stock/docs/:id
@@ -406,8 +423,27 @@ router.get('/docs/:id', async (req: AuthRequest, res: Response): Promise<void> =
   const lotIds = [...doc.lines.map((l) => l.lotId), doc.outputLotId, doc.sourceLotId].filter((x): x is string => !!x);
   const lots = await prisma.lot.findMany({ where: { id: { in: lotIds } }, select: { id: true, number: true } });
   const num = new Map(lots.map((l) => [l.id, l.number]));
+  // Отгрузка FBO: что ушло — по квантам поставки
+  let shipment = null;
+  if (doc.type === 'SHIPMENT') {
+    shipment = await prisma.fboShipment.findFirst({
+      where: { stockDocId: doc.id },
+      select: {
+        id: true, number: true, clusterName: true, storageName: true, ozonOrderNumber: true, ozonState: true, shippedAt: true,
+        cargoes: {
+          orderBy: { sort: 'asc' },
+          select: { quant: { select: {
+            id: true, number: true, units: true, unitCost: true,
+            lot: { select: { number: true, expiresAt: true } },
+            quantType: { select: { name: true, productItem: { select: { id: true, name: true } } } },
+          } } },
+        },
+      },
+    });
+  }
   res.json({
     ...doc,
+    shipment,
     outputLotNumber: doc.outputLotId ? num.get(doc.outputLotId) ?? null : null,
     sourceLotNumber: doc.sourceLotId ? num.get(doc.sourceLotId) ?? null : null,
     lines: doc.lines.map((l) => ({ ...l, lotNumber: l.lotId ? num.get(l.lotId) ?? null : null })),

@@ -43,12 +43,13 @@ export default function StockDocEdit() {
   const [balances, setBalances] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [shipment, setShipment] = useState<any>(null);
 
   const isAdj = type === 'ADJUSTMENT';
   const readOnly = status !== 'DRAFT';
 
   function applyDoc(d: any) {
-    setType(d.type); setStatus(d.status); setNumber(d.number);
+    setType(d.type); setStatus(d.status); setNumber(d.number); setShipment(d.shipment ?? null);
     setHead({ date: d.date.slice(0, 10), supplier: d.supplier ?? '', docRef: d.docRef ?? '', comment: d.comment ?? '' });
     setLines(d.lines.map((l: any) => ({
       key: String(++seq), itemId: l.itemId, lotKey: l.lotId ? `${l.lotId}|${l.state}` : '',
@@ -143,6 +144,8 @@ export default function StockDocEdit() {
   }
 
   const grouped = ITEM_TYPES.map((t) => ({ ...t, items: items.filter((i) => i.type === t.value) })).filter((g) => g.items.length);
+
+  if (type === 'SHIPMENT') return <ShipmentDoc number={number} date={head.date} comment={head.comment} shipment={shipment} />;
 
   return (
     <div className="space-y-4">
@@ -320,6 +323,98 @@ export default function StockDocEdit() {
       )}
       {!readOnly && !isAdj && (
         <p className="text-xs text-slate-500">При проведении на каждую строку создаётся лот со своим номером. Цену в начальных остатках можно оставить пустой.</p>
+      )}
+    </div>
+  );
+}
+
+// Отгрузка Ozon FBO: только просмотр — что и сколько ушло, по квантам поставки
+function ShipmentDoc({ number, date, comment, shipment }: { number: string; date: string; comment: string; shipment: any }) {
+  const quants: any[] = (shipment?.cargoes ?? []).map((c: any) => c.quant);
+  const bySku = new Map<string, { name: string; quants: number; units: number; cost: number | null; lots: Set<string> }>();
+  for (const q of quants) {
+    const p = q.quantType.productItem;
+    const g = bySku.get(p.id) ?? { name: p.name, quants: 0, units: 0, cost: 0, lots: new Set<string>() };
+    g.quants++; g.units += q.units; g.lots.add(q.lot.number);
+    g.cost = g.cost == null || q.unitCost == null ? null : g.cost + q.unitCost;
+    bySku.set(p.id, g);
+  }
+  const groups = [...bySku.values()];
+  const totalUnits = groups.reduce((t, g) => t + g.units, 0);
+  const totalCost = groups.every((g) => g.cost != null) ? groups.reduce((t, g) => t + g.cost!, 0) : null;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <Link to="/stock/warehouse?tab=docs" className="text-slate-500 hover:text-slate-900 text-sm">← Документы склада</Link>
+        <h2 className="text-xl font-semibold">{docTypeLabel('SHIPMENT')} <span className="font-mono text-base text-slate-500">{number}</span></h2>
+        <span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', DOC_STATUS.POSTED.cls)}>{DOC_STATUS.POSTED.label}</span>
+      </div>
+
+      <div className="bg-white rounded-xl border p-4 grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+        <div><div className="text-xs text-slate-500">Дата</div>{date ? new Date(date).toLocaleDateString('ru-RU') : '—'}</div>
+        <div><div className="text-xs text-slate-500">Поставка</div>
+          {shipment ? <Link to={`/stock/fbo/${shipment.id}`} className="font-mono text-brand-700 hover:underline">{shipment.number}</Link> : '—'}
+        </div>
+        <div><div className="text-xs text-slate-500">Заявка Ozon</div><span className="font-mono">{shipment?.ozonOrderNumber ?? '—'}</span></div>
+        <div><div className="text-xs text-slate-500">Куда</div>{[shipment?.clusterName, shipment?.storageName].filter(Boolean).join(' · ') || '—'}</div>
+        {!shipment && comment && <div className="col-span-full text-slate-600">{comment}</div>}
+      </div>
+
+      <div className="bg-white rounded-xl border overflow-x-auto">
+        <table className="w-full text-sm tabular-nums">
+          <thead>
+            <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b">
+              <th className="px-3 py-2 font-medium">Что отправлено</th>
+              <th className="px-3 py-2 font-medium text-right">Квантов</th>
+              <th className="px-3 py-2 font-medium text-right">Единиц</th>
+              <th className="px-3 py-2 font-medium">Партии</th>
+              <th className="px-3 py-2 font-medium text-right">Себестоимость, ₽</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groups.length === 0 && <tr><td colSpan={5} className="px-3 py-4 text-slate-500">Нет данных о квантах поставки.</td></tr>}
+            {groups.map((g) => (
+              <tr key={g.name} className="border-b last:border-0">
+                <td className="px-3 py-2 font-medium">{g.name}</td>
+                <td className="px-3 py-2 text-right">{g.quants}</td>
+                <td className="px-3 py-2 text-right font-semibold">{fmtQty(g.units, 0)} шт</td>
+                <td className="px-3 py-2 font-mono text-xs">{[...g.lots].join(', ')}</td>
+                <td className="px-3 py-2 text-right">{fmtMoney(g.cost)}</td>
+              </tr>
+            ))}
+          </tbody>
+          {groups.length > 1 && (
+            <tfoot>
+              <tr className="border-t font-semibold">
+                <td className="px-3 py-2">Итого</td>
+                <td className="px-3 py-2 text-right">{quants.length}</td>
+                <td className="px-3 py-2 text-right">{fmtQty(totalUnits, 0)} шт</td>
+                <td />
+                <td className="px-3 py-2 text-right">{fmtMoney(totalCost)}</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+
+      {quants.length > 0 && (
+        <details className="bg-white rounded-xl border">
+          <summary className="px-4 py-2.5 text-sm cursor-pointer text-slate-600">Кванты ({quants.length})</summary>
+          <table className="w-full text-sm tabular-nums border-t">
+            <tbody>
+              {quants.map((q) => (
+                <tr key={q.id} className="border-b last:border-0">
+                  <td className="px-3 py-1.5"><Link to={`/stock/quants/${q.id}`} className="font-mono text-xs text-brand-700 hover:underline">{q.number}</Link></td>
+                  <td className="px-3 py-1.5">{q.quantType.name}</td>
+                  <td className="px-3 py-1.5 text-right">{q.units} шт</td>
+                  <td className="px-3 py-1.5 font-mono text-xs">{q.lot.number}</td>
+                  <td className="px-3 py-1.5 text-right text-slate-500">{fmtMoney(q.unitCost)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
       )}
     </div>
   );

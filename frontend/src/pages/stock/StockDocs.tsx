@@ -33,7 +33,7 @@ export default function StockDocs({ fixedType, embedded, title, hint }: { fixedT
           ))}
         </div>
         <div className={clsx('flex gap-2 flex-wrap', (embedded || title) && 'hidden')}>
-          {DOC_TYPES.filter((t) => !fixedType || t.value === fixedType).map((t) => (
+          {DOC_TYPES.filter((t) => t.value !== 'SHIPMENT' && (!fixedType || t.value === fixedType)).map((t) => (
             <Link key={t.value} to={newDocPath(t.value)}
               className={clsx('px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap',
                 t.value === (fixedType ?? 'RECEIPT') ? 'bg-brand-600 hover:bg-brand-700 text-white' : 'border bg-white hover:bg-slate-50 text-slate-700')}>
@@ -64,7 +64,7 @@ export default function StockDocs({ fixedType, embedded, title, hint }: { fixedT
                   <td className="px-3 py-2 font-mono text-xs">{d.number}</td>
                   <td className="px-3 py-2">{docTypeLabel(d.type)}</td>
                   <td className="px-3 py-2">{fmtDate(d.date)}</td>
-                  <td className="px-3 py-2 text-slate-600">{[d.outputItem?.name, d.plannedQty && `${d.plannedQty} кг`, d.barrel && `бочка ${d.barrel}`, d.supplier, d.docRef, d.comment].filter(Boolean).join(' · ') || '—'}</td>
+                  <td className="px-3 py-2 text-slate-600">{[d.outputItem?.name, d.plannedQty && `${d.plannedQty} кг`, d.barrel && `бочка ${d.barrel}`, d.supplier, d.docRef, d.comment, d.summary].filter(Boolean).join(' · ') || '—'}</td>
                   <td className="px-3 py-2 text-right">{d.lineCount}</td>
                   <td className="px-3 py-2 text-right">{fmtMoney(d.total)}</td>
                   <td className="px-3 py-2"><span className={clsx('text-xs font-medium px-2 py-0.5 rounded-full', DOC_STATUS[d.status].cls)}>{DOC_STATUS[d.status].label}</span></td>
