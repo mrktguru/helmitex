@@ -77,8 +77,9 @@ export async function syncSupply(id: string) {
     await upsertOrders(await wbOrdersByIds(missing, since), id);
   }
   await prisma.wbOrder.updateMany({ where: { id: { in: ids.map(String) } }, data: { supplyId: id } });
-  // Задания, убранные из поставки в кабинете WB
-  await prisma.wbOrder.updateMany({ where: { supplyId: id, id: { notIn: ids.map(String) } }, data: { supplyId: null } });
+  // Задания, убранные из поставки (отмена покупателем или в кабинете WB) — статус тоже обновляем
+  const removed = await prisma.wbOrder.findMany({ where: { supplyId: id, id: { notIn: ids.map(String) } }, select: { id: true } });
+  await prisma.wbOrder.updateMany({ where: { id: { in: removed.map((r) => r.id) } }, data: { supplyId: null } });
   // Перепривязка SKU — артикулы могли сопоставить после загрузки
   const orders = await prisma.wbOrder.findMany({ where: { supplyId: id } });
   const map = await itemsByArticle([...new Set(orders.map((o) => o.article))]);
@@ -87,7 +88,7 @@ export async function syncSupply(id: string) {
     if (itemId !== o.itemId) await prisma.wbOrder.update({ where: { id: o.id }, data: { itemId } });
   }
 
-  for (const part of chunk(ids, 1000)) {
+  for (const part of chunk([...ids, ...removed.map((r) => Number(r.id))], 1000)) {
     const r = await wb<{ orders: { id: number; supplierStatus: string; wbStatus: string }[] }>('POST', '/api/v3/orders/status', { orders: part }, id, false);
     for (const st of r.orders ?? []) {
       await prisma.wbOrder.update({
@@ -96,6 +97,8 @@ export async function syncSupply(id: string) {
       }).catch(() => {});
     }
   }
+  // Отменённым заданиям код ЧЗ больше не нужен: отвязываем — банка остаётся «с ЧЗ», код можно назначить другому заданию
+  await prisma.wbOrder.updateMany({ where: { canceled: true, czCodeId: { not: null } }, data: { czCodeId: null, kizSentAt: null, kizError: null } });
   for (const part of chunk(ids, 100)) {
     const r = await wb<{ orders: { id: number; meta: any; metaDetails: MetaDetail[] }[] }>('POST', '/api/marketplace/v3/orders/meta', { orders: part }, id, false);
     for (const m of r.orders ?? []) {
