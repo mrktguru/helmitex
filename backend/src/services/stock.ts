@@ -36,25 +36,27 @@ export async function nextNumber(
   prefix: string,
   findLast: (startsWith: string) => Promise<string | null>,
   pad = 2,
+  date?: Date,
 ): Promise<string> {
-  const base = `${prefix}-${datePart()}-`;
+  const base = `${prefix}-${datePart(date)}-`;
   const last = await findLast(base);
   const n = last ? parseInt(last.slice(base.length), 10) + 1 : 1;
   return base + String(n).padStart(pad, '0');
 }
 
-export function nextLotNumber(tx: Tx, type: ItemType) {
+// date — дата в номере (по умолчанию сегодня): приход задним числом нумеруется датой поступления
+export function nextLotNumber(tx: Tx, type: ItemType, date?: Date) {
   return nextNumber(LOT_PREFIX[type], async (startsWith) => {
     const lot = await tx.lot.findFirst({ where: { number: { startsWith } }, orderBy: { number: 'desc' } });
     return lot?.number ?? null;
-  });
+  }, 2, date);
 }
 
-export function nextDocNumber(tx: Tx, type: DocType) {
+export function nextDocNumber(tx: Tx, type: DocType, date?: Date) {
   return nextNumber(DOC_PREFIX[type], async (startsWith) => {
     const doc = await tx.stockDoc.findFirst({ where: { number: { startsWith } }, orderBy: { number: 'desc' } });
     return doc?.number ?? null;
-  });
+  }, 2, date);
 }
 
 export async function lotBalance(tx: Tx, lotId: string, state: ProductState): Promise<number> {
@@ -105,7 +107,9 @@ export async function postDoc(tx: Tx, docId: string): Promise<PdfJob[]> {
     const state = line.item.type === 'PRODUCT' ? (line.state === 'NONE' ? 'UNLABELED' : line.state) : 'NONE';
     const lot = await tx.lot.create({
       data: {
-        number: await nextLotNumber(tx, line.item.type),
+        // Партия поступает датой документа (накладной), а не днём проведения
+        number: await nextLotNumber(tx, line.item.type, doc.date),
+        createdAt: doc.date,
         itemId: line.itemId,
         supplierLot: line.supplierLot,
         expiresAt: line.expiresAt,
@@ -114,7 +118,7 @@ export async function postDoc(tx: Tx, docId: string): Promise<PdfJob[]> {
       },
     });
     await tx.stockDocLine.update({ where: { id: line.id }, data: { lotId: lot.id, state } });
-    await tx.stockMove.create({ data: { docId, lotId: lot.id, state, qty: line.qty } });
+    await tx.stockMove.create({ data: { docId, lotId: lot.id, state, qty: line.qty, createdAt: doc.date } });
   }
 
   await tx.stockDoc.update({ where: { id: docId }, data: { status: 'POSTED', postedAt: new Date() } });

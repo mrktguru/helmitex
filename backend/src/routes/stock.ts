@@ -461,7 +461,7 @@ router.post('/docs', async (req: AuthRequest, res: Response): Promise<void> => {
       const created = await tx.stockDoc.create({
         data: {
           ...headData(head),
-          number: await nextDocNumber(tx, head.type),
+          number: await nextDocNumber(tx, head.type, date ? new Date(date) : undefined),
           date: date ? new Date(date) : new Date(),
           userId: req.user!.id,
           lines: { create: lines.map((l, i) => lineData(l, i)) },
