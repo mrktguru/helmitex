@@ -19,7 +19,7 @@ const itemSchema = z.object({
   minStock: z.number().nonnegative().nullable().optional(),
   noStock: z.boolean().optional(),
 });
-const itemPatchSchema = itemSchema.partial().extend({ archived: z.boolean().optional() });
+const itemPatchSchema = itemSchema.partial().extend({ archived: z.boolean().optional(), recipeId: z.string().uuid().nullable().optional() });
 
 const lineSchema = z.object({
   itemId: z.string().uuid(),
@@ -112,6 +112,10 @@ router.post('/items', async (req: AuthRequest, res: Response): Promise<void> => 
 router.patch('/items/:id', async (req: AuthRequest, res: Response): Promise<void> => {
   const parsed = itemPatchSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
+  if (parsed.data.recipeId) {
+    const item = await prisma.item.findUnique({ where: { id: req.params.id } });
+    if (item?.type !== 'SEMI') { res.status(400).json({ error: 'Рецептура выбирается только для полуфабриката' }); return; }
+  }
   try {
     res.json(await prisma.item.update({ where: { id: req.params.id }, data: parsed.data }));
   } catch (err) { sendError(res, err); }
@@ -165,6 +169,7 @@ router.get('/moves', async (req: AuthRequest, res: Response) => {
 // ───────────── Рецептуры ─────────────
 
 const recipeSchema = z.object({
+  name: z.string().trim().min(1).max(200),
   stages: z.record(z.string().max(300)).nullable().optional(),
   qc: z.string().max(2000).nullable().optional(),
   comment: z.string().max(2000).nullable().optional(),
@@ -175,46 +180,71 @@ const recipeSchema = z.object({
   })).min(1).max(100),
 });
 
-// GET /api/stock/recipes — все полуфабрикаты с рецептурами (если есть)
+const recipeInclude = {
+  lines: { include: { item: true }, orderBy: [{ stage: 'asc' as const }, { sort: 'asc' as const }] },
+  items: { where: { archived: false }, select: { id: true, name: true }, orderBy: { name: 'asc' as const } },
+};
+
+// GET /api/stock/recipes — справочник рецептур (с полуфабрикатами, которые по ним замешиваются)
 router.get('/recipes', async (_req: AuthRequest, res: Response) => {
-  const items = await prisma.item.findMany({
+  res.json(await prisma.recipe.findMany({ orderBy: { name: 'asc' }, include: recipeInclude }));
+});
+
+// GET /api/stock/semis — полуфабрикаты с выбранной рецептурой
+router.get('/semis', async (_req: AuthRequest, res: Response) => {
+  res.json(await prisma.item.findMany({
     where: { type: 'SEMI', archived: false },
     orderBy: { name: 'asc' },
     include: { recipe: { include: { lines: { include: { item: true }, orderBy: [{ stage: 'asc' }, { sort: 'asc' }] } } } },
-  });
-  res.json(items);
+  }));
 });
 
-// PUT /api/stock/recipes/:itemId
-router.put('/recipes/:itemId', async (req: AuthRequest, res: Response): Promise<void> => {
-  const parsed = recipeSchema.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
-  const item = await prisma.item.findUnique({ where: { id: req.params.itemId } });
-  if (item?.type !== 'SEMI') { res.status(400).json({ error: 'Рецептура задаётся только для полуфабриката' }); return; }
-  const { lines, stages, ...rest } = parsed.data;
-  const recipe = await prisma.$transaction(async (tx) => {
+async function saveRecipe(id: string | null, body: unknown) {
+  const parsed = recipeSchema.parse(body);
+  const { lines, stages, ...rest } = parsed;
+  return prisma.$transaction(async (tx) => {
     const data = { ...rest, stages: stages ?? Prisma.JsonNull };
-    const r = await tx.recipe.upsert({
-      where: { itemId: item.id },
-      create: { itemId: item.id, ...data },
-      update: data,
-    });
+    const r = id ? await tx.recipe.update({ where: { id }, data }) : await tx.recipe.create({ data });
     await tx.recipeLine.deleteMany({ where: { recipeId: r.id } });
     await tx.recipeLine.createMany({ data: lines.map((l, i) => ({ ...l, recipeId: r.id, sort: i })) });
-    return r;
+    return tx.recipe.findUnique({ where: { id: r.id }, include: recipeInclude });
   });
-  res.json(recipe);
+}
+
+// POST /api/stock/recipes
+router.post('/recipes', async (req: AuthRequest, res: Response): Promise<void> => {
+  try { res.status(201).json(await saveRecipe(null, req.body)); } catch (err) {
+    if (err instanceof z.ZodError) { res.status(400).json({ error: err.flatten() }); return; }
+    sendError(res, err);
+  }
+});
+
+// PUT /api/stock/recipes/:id
+router.put('/recipes/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+  try { res.json(await saveRecipe(req.params.id, req.body)); } catch (err) {
+    if (err instanceof z.ZodError) { res.status(400).json({ error: err.flatten() }); return; }
+    sendError(res, err);
+  }
+});
+
+// DELETE /api/stock/recipes/:id — только если ни один полуфабрикат её не использует
+router.delete('/recipes/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+  const used = await prisma.item.findMany({ where: { recipeId: req.params.id }, select: { name: true } });
+  if (used.length) { res.status(400).json({ error: `Рецептура выбрана у: ${used.map((u) => u.name).join(', ')}` }); return; }
+  await prisma.recipe.delete({ where: { id: req.params.id } });
+  res.json({ ok: true });
 });
 
 // GET /api/stock/mix/plan?itemId=…&qty=400 — нормы по рецептуре и лоты по FEFO
 router.get('/mix/plan', async (req: AuthRequest, res: Response): Promise<void> => {
   const qty = Number(req.query.qty);
   if (!(qty > 0)) { res.status(400).json({ error: 'Укажите массу замеса' }); return; }
-  const recipe = await prisma.recipe.findUnique({
-    where: { itemId: String(req.query.itemId) },
-    include: { lines: { include: { item: true }, orderBy: [{ stage: 'asc' }, { sort: 'asc' }] } },
+  const semi = await prisma.item.findUnique({
+    where: { id: String(req.query.itemId) },
+    include: { recipe: { include: { lines: { include: { item: true }, orderBy: [{ stage: 'asc' }, { sort: 'asc' }] } } } },
   });
-  if (!recipe || recipe.lines.length === 0) { res.status(400).json({ error: 'Для полуфабриката нет рецептуры' }); return; }
+  const recipe = semi?.recipe;
+  if (!recipe || recipe.lines.length === 0) { res.status(400).json({ error: 'У полуфабриката не выбрана рецептура — выберите её в справочнике' }); return; }
   const lines = [];
   for (const l of recipe.lines) {
     const need = Math.round(qty * l.percent) / 100;

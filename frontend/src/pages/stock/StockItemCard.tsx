@@ -4,7 +4,6 @@ import clsx from 'clsx';
 import { api } from '../../api/client';
 import { PageHeader, Section } from './StockLayout';
 import { TypeChip } from './StockWarehouse';
-import StockRecipes from './StockRecipes';
 import SkuSheet from './SkuSheet';
 import { STATE_LABEL, btnPrimary, btnSecondary, fmtDate, fmtMoney, fmtQty, inputCls, parseNum } from './common';
 
@@ -26,7 +25,7 @@ export default function StockItemCard() {
       <PageHeader title={<span className="flex flex-wrap items-center gap-3">{item.name} <TypeChip type={item.type} />{item.archived && <span className="text-sm font-normal text-slate-400">архив</span>}</span>} />
       <div className="space-y-4">
         <Section title="Основное"><MainForm item={item} onSaved={load} /></Section>
-        {item.type === 'SEMI' && <Section title="Рецептура" hint="Состав в % от массы замеса, этапы и нормы ОТК — печатаются в карте замеса."><StockRecipes itemId={item.id} /></Section>}
+        {item.type === 'SEMI' && <Section title="Рецептура" hint="Выберите рецептуру из справочника — по ней считается замес."><RecipePick item={item} onSaved={load} /></Section>}
         {item.type === 'PRODUCT' && <SkuSheet item={item} />}
         <Section title="Остатки по лотам"><ItemStock item={item} /></Section>
       </div>
@@ -107,6 +106,44 @@ function ItemStock({ item }: { item: any }) {
             ))}
           </tbody>
           <tfoot><tr className="font-semibold"><td className="px-4 py-2" colSpan={2}>Итого</td><td className="px-3 py-2 text-right">{fmtQty(total)} {item.unit}</td><td colSpan={2} /></tr></tfoot>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// Полуфабрикат: рецептура из справочника «Рецептуры» + её состав
+function RecipePick({ item, onSaved }: { item: any; onSaved: () => void }) {
+  const [recipes, setRecipes] = useState<any[] | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => { api.getRecipes().then(setRecipes).catch((e) => setMsg({ ok: false, text: e.message })); }, []);
+  const cur = recipes?.find((r) => r.id === item.recipeId);
+
+  async function choose(recipeId: string) {
+    setMsg(null);
+    try { await api.updateItem(item.id, { recipeId: recipeId || null }); setMsg({ ok: true, text: 'Сохранено' }); onSaved(); } catch (e: any) { setMsg({ ok: false, text: e.message }); }
+  }
+
+  if (!recipes) return <p className="text-sm text-slate-500">Загрузка…</p>;
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <select value={item.recipeId ?? ''} onChange={(e) => choose(e.target.value)} className={clsx(inputCls, 'w-96 max-w-full')}>
+          <option value="">— рецептура не выбрана —</option>
+          {recipes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </select>
+        {cur ? <Link to={`/stock/catalog?type=RECIPES&recipe=${cur.id}`} className="text-sm text-brand-700 hover:underline">Изменить рецептуру →</Link>
+          : <Link to="/stock/catalog?type=RECIPES" className="text-sm text-brand-700 hover:underline">Справочник рецептур →</Link>}
+        {msg && <span className={clsx('text-sm', msg.ok ? 'text-green-700' : 'text-red-600')}>{msg.text}</span>}
+      </div>
+      {cur && (
+        <table className="w-full text-sm tabular-nums">
+          <thead><tr className="text-left text-xs text-slate-500"><th className="py-1 w-16">Этап</th><th>Компонент</th><th className="text-right">%</th></tr></thead>
+          <tbody>
+            {cur.lines.map((l: any) => (
+              <tr key={l.id} className="border-t border-slate-100"><td className="py-1">{l.stage}</td><td>{l.item.name}{l.item.noStock ? <span className="text-xs text-slate-400"> · вода</span> : ''}</td><td className="text-right">{fmtQty(l.percent, 3)}</td></tr>
+            ))}
+          </tbody>
         </table>
       )}
     </div>

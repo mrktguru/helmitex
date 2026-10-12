@@ -57,7 +57,7 @@ export default function StockMixEdit() {
   }
 
   useEffect(() => {
-    api.getRecipes().then(setSemis);
+    api.getSemis().then(setSemis);
     api.getItems('RAW').then(setRaws);
     api.getBalances({ type: 'RAW' }).then(setBalances);
     if (id) api.getDoc(id).then(applyDoc).catch((e) => setError(e.message));
@@ -65,6 +65,15 @@ export default function StockMixEdit() {
 
   // Описание этапов и нормы ОТК берём из текущей рецептуры
   const semi = semis.find((s) => s.id === head.outputItemId);
+  // Масса замеса — задаётся напрямую или считается по залитой воде: вода ÷ доля воды в рецептуре
+  const [mode, setMode] = useState<'mass' | 'water'>('mass');
+  const [water, setWater] = useState('');
+  const waterPct = (semi?.recipe?.lines ?? []).filter((l: any) => l.item.noStock).reduce((s: number, l: any) => s + l.percent, 0);
+  function onWater(v: string) {
+    setWater(v);
+    const w = parseNum(v);
+    setHead((h) => ({ ...h, plannedQty: w && waterPct > 0 ? numStr(Math.round((w * 100 / waterPct) * 100) / 100) : '' }));
+  }
   useEffect(() => {
     setStages(semi?.recipe?.stages ?? {});
     setQc(semi?.recipe?.qc ?? '');
@@ -211,9 +220,26 @@ export default function StockMixEdit() {
               {semis.map((s) => <option key={s.id} value={s.id} disabled={!s.recipe}>{s.name}{!s.recipe ? ' (нет рецептуры)' : ''}</option>)}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-xs text-slate-500">Масса замеса, кг
-            <input disabled={readOnly} value={head.plannedQty} onChange={(e) => setHead({ ...head, plannedQty: e.target.value })} className={inputCls + ' text-right'} />
-          </label>
+          <div className="flex flex-col gap-1 text-xs text-slate-500">
+            <div className="flex items-center justify-between gap-2">
+              <span>{mode === 'mass' ? 'Масса замеса, кг' : 'Залито воды, кг'}</span>
+              {!readOnly && (
+                <span className="inline-flex rounded-md border border-slate-200 overflow-hidden">
+                  <button type="button" onClick={() => setMode('mass')} className={clsx('px-1.5 py-0.5', mode === 'mass' ? 'bg-brand-600 text-white' : 'bg-white')}>масса</button>
+                  <button type="button" disabled={!waterPct} title={waterPct ? '' : 'В рецептуре нет воды (компонент «без учёта»)'}
+                    onClick={() => { setMode('water'); setWater(''); }} className={clsx('px-1.5 py-0.5 disabled:opacity-40', mode === 'water' ? 'bg-brand-600 text-white' : 'bg-white')}>по воде</button>
+                </span>
+              )}
+            </div>
+            {mode === 'mass' || readOnly
+              ? <input disabled={readOnly} value={head.plannedQty} onChange={(e) => setHead({ ...head, plannedQty: e.target.value })} className={inputCls + ' text-right'} />
+              : <input value={water} onChange={(e) => onWater(e.target.value)} className={inputCls + ' text-right'} placeholder="кг воды" />}
+            {mode === 'water' && !readOnly && (
+              <span className="text-[11px] text-slate-600">
+                {head.plannedQty ? <>замес <b>{head.plannedQty} кг</b> · вода {fmtQty(waterPct, 2)} %</> : `вода в рецептуре ${fmtQty(waterPct, 2)} %`}
+              </span>
+            )}
+          </div>
           <label className="flex flex-col gap-1 text-xs text-slate-500">Бочка
             <input disabled={readOnly} value={head.barrel} onChange={(e) => setHead({ ...head, barrel: e.target.value })} className={inputCls} placeholder="Б-07" />
           </label>

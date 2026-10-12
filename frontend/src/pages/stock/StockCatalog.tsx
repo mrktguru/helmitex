@@ -5,6 +5,7 @@ import { api } from '../../api/client';
 import { PageHeader } from './StockLayout';
 import { TypeChip } from './StockWarehouse';
 import { ITEM_TYPES, btnPrimary, btnSecondary, fmtQty, inputCls, parseNum } from './common';
+import StockRecipes from './StockRecipes';
 
 export default function StockCatalog() {
   const navigate = useNavigate();
@@ -12,8 +13,8 @@ export default function StockCatalog() {
   const type = params.get('type') ?? '';
   const [items, setItems] = useState<any[] | null>(null);
   const [specs, setSpecs] = useState<Map<string, any>>(new Map());
-  const [recipes, setRecipes] = useState<Set<string>>(new Set());
   const [qtypes, setQtypes] = useState<Map<string, number>>(new Map());
+  const [recipeNames, setRecipeNames] = useState<Map<string, string>>(new Map());
   const [q, setQ] = useState('');
   const [archived, setArchived] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -23,7 +24,7 @@ export default function StockCatalog() {
     const [i, sp, rc, qt] = await Promise.all([api.getItems(undefined, archived), api.getSpecs(), api.getRecipes(), api.getQuantTypes()]);
     setItems(i);
     setSpecs(new Map(sp.map((x: any) => [x.id, x.spec])));
-    setRecipes(new Set(rc.filter((x: any) => x.recipe?.lines.length).map((x: any) => x.id)));
+    setRecipeNames(new Map(rc.map((x: any) => [x.id, x.name])));
     const m = new Map<string, number>();
     for (const t of qt) if (!t.archived) m.set(t.productItemId, (m.get(t.productItemId) ?? 0) + 1);
     setQtypes(m);
@@ -40,7 +41,7 @@ export default function StockCatalog() {
 
   // Чего не хватает позиции, чтобы она «работала» в цепочке
   function status(i: any): { ok: boolean; text: string } | null {
-    if (i.type === 'SEMI') return recipes.has(i.id) ? { ok: true, text: 'рецептура' } : { ok: false, text: 'нет рецептуры' };
+    if (i.type === 'SEMI') return i.recipeId ? { ok: true, text: `рецептура: ${recipeNames.get(i.recipeId) ?? '—'}` } : { ok: false, text: 'нет рецептуры' };
     if (i.type === 'PRODUCT') {
       const sp = specs.get(i.id);
       const miss = [!sp?.netQty && 'нетто', !sp?.ozonSku && 'Ozon', !qtypes.get(i.id) && 'тип кванта'].filter(Boolean);
@@ -51,7 +52,7 @@ export default function StockCatalog() {
 
   return (
     <div>
-      <PageHeader title="Справочники" hint="Всё, что учитывается: сырьё, тара, упаковка, этикетки, полуфабрикаты и SKU. Рецептура, Ozon и кванты — в карточке позиции.">
+      <PageHeader title="Справочники" hint="Всё, что учитывается: сырьё, тара, упаковка, этикетки, полуфабрикаты и SKU; рецептуры замесов. Рецептура полуфабриката выбирается в его карточке.">
         <button onClick={() => { setImporting(true); setAdding(false); }} className={btnSecondary}>Импорт SKU из Ozon</button>
         <button onClick={() => { setAdding(true); setImporting(false); }} className={btnPrimary}>+ Позиция</button>
       </PageHeader>
@@ -66,10 +67,15 @@ export default function StockCatalog() {
             {t.label} <span className="opacity-60">{(items ?? []).filter((i) => !t.value || i.type === t.value).length}</span>
           </button>
         ))}
+        <button onClick={() => setParams({ type: 'RECIPES' })}
+          className={clsx('px-3 py-1.5 rounded-full text-sm border', type === 'RECIPES' ? 'bg-brand-600 text-white border-brand-600' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-400')}>
+          Рецептуры <span className="opacity-60">{recipeNames.size}</span>
+        </button>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск" className={inputCls + ' w-56 ml-auto'} />
         <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} /> Архив</label>
       </div>
 
+      {type === 'RECIPES' ? <StockRecipes /> : (
       <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
         {!items ? <p className="p-6 text-slate-500">Загрузка…</p> : list.length === 0 ? <p className="p-6 text-slate-500 text-sm">Позиций нет.</p> : (
           <table className="w-full text-sm">
@@ -99,6 +105,7 @@ export default function StockCatalog() {
           </table>
         )}
       </div>
+      )}
     </div>
   );
 }

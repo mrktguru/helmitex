@@ -115,7 +115,7 @@ export const api = {
     request<any[]>(`/stock/items?${new URLSearchParams({ ...(type ? { type } : {}), ...(archived ? { archived: '1' } : {}) })}`),
   createItem: (data: { type: string; name: string; unit: string; minStock?: number | null; noStock?: boolean }) =>
     request<any>('/stock/items', { method: 'POST', body: JSON.stringify(data) }),
-  updateItem: (id: string, data: Partial<{ name: string; unit: string; minStock: number | null; noStock: boolean; archived: boolean }>) =>
+  updateItem: (id: string, data: Partial<{ name: string; unit: string; minStock: number | null; noStock: boolean; archived: boolean; recipeId: string | null }>) =>
     request<any>(`/stock/items/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   getBalances: (params: { type?: string; itemId?: string } = {}) =>
     request<any[]>(`/stock/balances?${new URLSearchParams(params as Record<string, string>)}`),
@@ -211,8 +211,10 @@ export const api = {
     request<{ outputBatchId: string }>(`/stock/quants/${quantId}/replace-code`, { method: 'POST', body: JSON.stringify({ quantCodeId }) }),
   deleteDoc: (id: string) => request<{ ok: true }>(`/stock/docs/${id}`, { method: 'DELETE' }),
   getRecipes: () => request<any[]>('/stock/recipes'),
-  saveRecipe: (itemId: string, data: any) =>
-    request<any>(`/stock/recipes/${itemId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getSemis: () => request<any[]>('/stock/semis'),
+  saveRecipe: (id: string | null, data: any) =>
+    request<any>(id ? `/stock/recipes/${id}` : '/stock/recipes', { method: id ? 'PUT' : 'POST', body: JSON.stringify(data) }),
+  deleteRecipe: (id: string) => request<any>(`/stock/recipes/${id}`, { method: 'DELETE' }),
   getSpecs: () => request<any[]>('/stock/specs'),
   saveSpec: (itemId: string, data: any) =>
     request<any>(`/stock/specs/${itemId}`, { method: 'PUT', body: JSON.stringify(data) }),
