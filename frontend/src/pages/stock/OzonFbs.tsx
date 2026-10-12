@@ -59,7 +59,8 @@ export default function OzonFbs() {
   const P: any[] = data?.postings ?? [];
   const by = (s: string) => P.filter((p) => p.status === s);
   const waiting = by('awaiting_packaging'), packed = by('awaiting_deliver'), passed = P.filter((p) => PASSED.includes(p.status)), cancelled = by('cancelled');
-  const notWritten = P.filter((p) => !p.stockDocId && (p.status === 'awaiting_deliver' || PASSED.includes(p.status)));
+  // до 13.10 отгрузки ушли до ввода остатков на портале — не списываются
+  const notWritten = day && day >= '2026-10-13' ? P.filter((p) => !p.stockDocId && (p.status === 'awaiting_deliver' || PASSED.includes(p.status))) : [];
   const info = data?.info;
   const auto = waiting.length ? 2 : packed.length && !info?.labelS3Key ? 3 : packed.length ? 4 : 5;
   const cur = step ?? auto;

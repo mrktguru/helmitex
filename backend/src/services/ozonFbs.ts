@@ -49,12 +49,14 @@ export async function syncFbs(userId?: string): Promise<number> {
 
 // Статусы, при которых Ozon уже принял груз
 export const PASSED = ['delivering', 'driver_pickup', 'delivered', 'not_accepted'];
+// Отгрузки раньше этого дня ушли до ввода остатков на портале — их не списываем
+const WRITE_OFF_SINCE = '2026-10-13';
 
 /** Переданное в Ozon списывается со склада автоматически — по дню отгрузки, одним документом на день. */
 async function writeOffPassed(userId?: string) {
   const uid = userId ?? (await prisma.user.findFirst({ where: { role: 'ADMIN' }, orderBy: { createdAt: 'asc' } }))?.id;
   if (!uid) return;
-  const rows = await prisma.ozonFbsPosting.findMany({ where: { stockDocId: null, status: { in: PASSED } }, select: { postingNumber: true, shipDay: true } });
+  const rows = await prisma.ozonFbsPosting.findMany({ where: { stockDocId: null, status: { in: PASSED }, shipDay: { gte: WRITE_OFF_SINCE } }, select: { postingNumber: true, shipDay: true } });
   const byDay = new Map<string, string[]>();
   for (const r of rows) byDay.set(r.shipDay, [...(byDay.get(r.shipDay) ?? []), r.postingNumber]);
   for (const [day, nums] of byDay) {
@@ -166,7 +168,7 @@ async function writeOff(numbers: string[], userId: string) {
 /** Списать отправления, которые уже собраны (в т. ч. в кабинете Ozon), но не списаны. */
 export async function writeOffDay(day: string, numbers: string[] | undefined, userId: string) {
   const rows = await prisma.ozonFbsPosting.findMany({
-    where: { shipDay: day, stockDocId: null, status: { notIn: ['awaiting_packaging', 'awaiting_registration', 'acceptance_in_progress', 'awaiting_approve', 'cancelled'] }, ...(numbers ? { postingNumber: { in: numbers } } : {}) },
+    where: { shipDay: { equals: day, gte: WRITE_OFF_SINCE }, stockDocId: null, status: { notIn: ['awaiting_packaging', 'awaiting_registration', 'acceptance_in_progress', 'awaiting_approve', 'cancelled'] }, ...(numbers ? { postingNumber: { in: numbers } } : {}) },
   });
   return writeOff(rows.map((r) => r.postingNumber), userId);
 }
