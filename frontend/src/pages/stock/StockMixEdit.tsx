@@ -65,11 +65,13 @@ export default function StockMixEdit() {
 
   // Описание этапов и нормы ОТК берём из текущей рецептуры
   const semi = semis.find((s) => s.id === head.outputItemId);
-  // Масса замеса — задаётся напрямую или считается по залитой основной воде: вода ÷ её доля в рецептуре.
-  // Основная вода — первый по порядку компонент «без учёта»; вода на разведение загустителя и т.п. — отдельные строки.
+  // Масса замеса — задаётся напрямую или считается по воде, залитой в бочку на первом этапе: вода ÷ её доля в рецептуре.
+  // Учитывается вода самого раннего этапа с водой (компоненты «без учёта»); вода на разведение загустителя на поздних этапах — нет.
   const [mode, setMode] = useState<'mass' | 'water'>('mass');
   const [water, setWater] = useState('');
-  const waterPct: number = (semi?.recipe?.lines ?? []).find((l: any) => l.item.noStock)?.percent ?? 0;
+  const waterLines = (semi?.recipe?.lines ?? []).filter((l: any) => l.item.noStock);
+  const waterStage: number | null = waterLines.length ? Math.min(...waterLines.map((l: any) => l.stage)) : null;
+  const waterPct: number = waterLines.filter((l: any) => l.stage === waterStage).reduce((s: number, l: any) => s + l.percent, 0);
   function onWater(v: string) {
     setWater(v);
     const w = parseNum(v);
@@ -223,7 +225,7 @@ export default function StockMixEdit() {
           </label>
           <div className="flex flex-col gap-1 text-xs text-slate-500">
             <div className="flex items-center justify-between gap-2">
-              <span>{mode === 'mass' ? 'Масса замеса, кг' : 'Основная вода, кг'}</span>
+              <span>{mode === 'mass' ? 'Масса замеса, кг' : `Вода на ${waterStage ?? 1}-й этап (в бочку), кг`}</span>
               {!readOnly && (
                 <span className="inline-flex rounded-md border border-slate-200 overflow-hidden">
                   <button type="button" onClick={() => setMode('mass')} className={clsx('px-1.5 py-0.5', mode === 'mass' ? 'bg-brand-600 text-white' : 'bg-white')}>масса</button>
@@ -237,7 +239,7 @@ export default function StockMixEdit() {
               : <input value={water} onChange={(e) => onWater(e.target.value)} className={inputCls + ' text-right'} placeholder="кг воды" />}
             {mode === 'water' && !readOnly && (
               <span className="text-[11px] text-slate-600">
-                {head.plannedQty ? <>замес <b>{head.plannedQty} кг</b> · основная вода {fmtQty(waterPct, 3)} %</> : `основная вода в рецептуре ${fmtQty(waterPct, 3)} %`}
+                {head.plannedQty ? <>замес <b>{head.plannedQty} кг</b> · вода этапа {waterStage} — {fmtQty(waterPct, 3)} %</> : `вода этапа ${waterStage} в рецептуре — ${fmtQty(waterPct, 3)} %`}
               </span>
             )}
           </div>
