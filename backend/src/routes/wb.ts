@@ -1,6 +1,5 @@
 import { Router, Response } from 'express';
 import multer from 'multer';
-import { spawn } from 'child_process';
 import { z } from 'zod';
 import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
@@ -8,7 +7,7 @@ import { StockError } from '../services/stock';
 import { getSetting, setSetting } from '../services/ozon';
 import { wb, wbConfigured, wbSupplies } from '../services/wb';
 import {
-  addOrders, applyPickList, assignCodes, resendRejected, supplyKi, createSupply, deliver, detachCode, newOrders, resetMetaErrors, scanCode, sendMeta,
+  addOrders, applyPickList, assignCodes, resendRejected, supplyKi, uploadStickers, pdfToText, createSupply, deliver, detachCode, newOrders, resetMetaErrors, scanCode, sendMeta,
   supplyState, syncSupply, writeOff,
 } from '../services/wbSupply';
 import { comboPdf, czXlsx, supplyQrPdf, trbxPdf, wbStickersPdf } from '../services/wbPdf';
@@ -33,17 +32,6 @@ function sendFile(res: Response, buf: Buffer, name: string, type = 'application/
   res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(name)}`);
   res.setHeader('Content-Length', String(buf.length));
   res.end(buf);
-}
-
-function pdfToText(buf: Buffer): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const p = spawn('pdftotext', ['-layout', '-', '-']);
-    let out = '';
-    p.stdout.on('data', (d) => { out += d; });
-    p.on('error', reject);
-    p.on('close', (code) => (code === 0 ? resolve(out) : reject(new StockError('Не удалось прочитать PDF'))));
-    p.stdin.end(buf);
-  });
 }
 
 const SHIPPING_KEY = 'wb.shipping';
@@ -105,6 +93,12 @@ router.post('/wb/supplies/:id/picklist', uploadPdf.single('file'), h(async (req,
   const n = await applyPickList(req.params.id, await pdfToText(req.file.buffer));
   if (!n) throw new StockError('В файле не найдено ни одного задания этой поставки');
   res.json({ matched: n });
+}));
+
+// POST /api/stock/wb/supplies/:id/stickers — PDF стикеров заданий из кабинета WB
+router.post('/wb/supplies/:id/stickers', uploadPdf.single('file'), h(async (req, res) => {
+  if (!req.file) throw new StockError('Нужен PDF стикеров заданий');
+  res.json(await uploadStickers(req.params.id, req.file.buffer));
 }));
 
 router.post('/wb/supplies/:id/assign', h(async (req, res) => {

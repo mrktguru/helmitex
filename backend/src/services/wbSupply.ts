@@ -3,6 +3,8 @@ import prisma from '../prisma/client';
 import { PdfJob, StockError, allocateFefo, consume, nextDocNumber } from './stock';
 import { looseCodes, markLot } from './marking';
 import { uploadFile } from './s3';
+import { PDFDocument } from 'pdf-lib';
+import { spawn } from 'child_process';
 import { sleep } from './ozon';
 import { WbOrderApi, WbSupplyApi, chunk, fmtRuDate, printOrder, wb, wbOrdersByIds } from './wb';
 
@@ -135,6 +137,50 @@ export async function applyPickList(supplyId: string, text: string): Promise<num
     n += r.count;
   }
   return n;
+}
+
+export function pdfToText(buf: Buffer): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const p = spawn('pdftotext', ['-layout', '-', '-']);
+    let out = '';
+    p.stdout.on('data', (d) => { out += d; });
+    p.on('error', reject);
+    p.on('close', (code) => (code === 0 ? resolve(out) : reject(new StockError('Не удалось прочитать PDF'))));
+    p.stdin.end(buf);
+  });
+}
+
+/**
+ * Стикеры заданий из кабинета WB (PDF, страница = стикер): номер стикера со страницы → задание поставки
+ * (номера заданий известны из API или листа подбора). Каждая страница сохраняется отдельным PDF.
+ */
+export async function uploadStickers(supplyId: string, buf: Buffer) {
+  const orders = await prisma.wbOrder.findMany({ where: { supplyId, canceled: false } });
+  const byNo = new Map(orders.filter((o) => o.stickerA && o.stickerB).map((o) => [`${o.stickerA} ${o.stickerB}`, o]));
+  if (!byNo.size) throw new StockError('Номера стикеров заданий неизвестны — сначала загрузите «Лист подбора» этой поставки');
+  const pagesText = (await pdfToText(buf)).split('\f');
+  const src = await PDFDocument.load(buf);
+  const unmatched: string[] = [];
+  const unreadable: number[] = [];
+  const done = new Set<string>();
+  for (let i = 0; i < src.getPageCount(); i++) {
+    const tok = pagesText[i]?.match(/\d+/g) ?? [];
+    const a = tok.findIndex((x) => x.length >= 5 && x.length <= 9);
+    const b = a >= 0 ? tok.slice(a + 1).find((x) => x.length === 4) : undefined;
+    if (a < 0 || !b) { unreadable.push(i + 1); continue; }
+    const no = `${tok[a]} ${b}`;
+    const o = byNo.get(no);
+    if (!o) { unmatched.push(no); continue; }
+    const one = await PDFDocument.create();
+    const [pg] = await one.copyPages(src, [i]);
+    one.addPage(pg);
+    const key = `wb/stickers/${o.id}.pdf`;
+    await uploadFile(key, Buffer.from(await one.save()), 'application/pdf');
+    await prisma.wbOrder.update({ where: { id: o.id }, data: { stickerS3Key: key } });
+    done.add(o.id);
+  }
+  const missing = orders.filter((o) => !done.has(o.id) && !o.stickerS3Key).length;
+  return { pages: src.getPageCount(), matched: done.size, unmatched, unreadable, missing };
 }
 
 export async function addOrders(supplyId: string, ids: string[]) {

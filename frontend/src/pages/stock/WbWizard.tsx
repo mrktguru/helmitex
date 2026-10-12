@@ -64,7 +64,7 @@ export default function WbWizard() {
       {step === 1 && <StepSupply data={data} reload={load} done={done} />}
       {step === 2 && <StepCz data={data} reload={load} done={done} assigned={czAssigned} total={cz.length} accepted={czSent} wbTotal={wbKiz.length} />}
       {step === 3 && <StepBoxes id={data.supply.id} done={done} />}
-      {step === 4 && <StepPrint data={data} />}
+      {step === 4 && <StepPrint data={data} reload={load} />}
       {step === 5 && <StepDeliver data={data} reload={load} czLeft={wbKiz.length - czSent} />}
 
       <div className="flex justify-between mt-6">
@@ -523,12 +523,16 @@ function StepBoxes({ id, done }: { id: string; done: boolean }) {
 
 // ───────────── 5. Печать ─────────────
 
-function StepPrint({ data }: { data: State }) {
+function StepPrint({ data, reload }: { data: State; reload: () => void }) {
   const id = data.supply.id;
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
+  const [upl, setUpl] = useState<string[]>([]);
+  const stickersRef = useRef<HTMLInputElement>(null);
+  const pickRef = useRef<HTMLInputElement>(null);
   const active = data.orders.filter((o) => !o.canceled);
   const withSticker = active.filter((o) => o.hasSticker).length;
+  const withNumber = active.filter((o) => o.stickerB).length;
   const combo = active.filter((o) => o.labelBatch).length;
   const generating = active.some((o) => o.labelBatch && o.labelBatch.jobStatus !== 'done');
 
@@ -538,10 +542,34 @@ function StepPrint({ data }: { data: State }) {
     setBusy('');
   }
 
+  async function uploadPick(f: File) {
+    setBusy('pick'); setError(''); setUpl([]);
+    try {
+      const r = await uploadForm<{ matched: number }>(`/stock/wb/supplies/${encodeURIComponent(id)}/picklist`, f);
+      setUpl([`Лист подбора: номера стикеров у ${r.matched} заданий`]);
+      reload();
+    } catch (e: any) { setError(e.message); }
+    setBusy('');
+  }
+
+  async function uploadStickers(f: File) {
+    setBusy('st'); setError(''); setUpl([]);
+    try {
+      const r = await uploadForm<{ pages: number; matched: number; unmatched: string[]; unreadable: number[]; missing: number }>(`/stock/wb/supplies/${encodeURIComponent(id)}/stickers`, f);
+      setUpl([
+        `Стикеров в файле: ${r.pages} · сопоставлено с заданиями: ${r.matched}`,
+        ...(r.unmatched.length ? [`Не из этой поставки: ${r.unmatched.length} (${r.unmatched.slice(0, 5).join(', ')}${r.unmatched.length > 5 ? '…' : ''})`] : []),
+        ...(r.unreadable.length ? [`Не прочитаны страницы: ${r.unreadable.slice(0, 10).join(', ')}`] : []),
+        ...(r.missing ? [`Без стикера осталось заданий: ${r.missing}`] : []),
+      ]);
+      reload();
+    } catch (e: any) { setError(e.message); }
+    setBusy('');
+  }
+
   const rows: [string, string, string, string, boolean][] = [
-    ['pdf/stickers', 'Стикеры заданий WB', `${withSticker} шт. · 58×40 · в порядке листа подбора`, `Стикеры заданий ${id}.pdf`, withSticker > 0],
-    ['pdf/combo', 'Объединённые стикеры (EAN-13 + ЧЗ)', `${combo} шт. · макет этикетки SKU с партией и сроком годности${generating ? ' · ещё генерируются' : ''}`, `Стикеры ЧЗ ${id}.pdf`, combo > 0],
-    ['pdf/pairs', 'Попарно: стикер WB → стикер ЧЗ', 'Для одного рулона: на каждую банку два стикера подряд', `Стикеры WB + ЧЗ ${id}.pdf`, withSticker > 0 && combo > 0],
+    ['pdf/combo', 'Объединённые стикеры (EAN-13 + ЧЗ)', `${combo} шт. · макет этикетки SKU с партией и сроком годности · номер стикера WB в углу${generating ? ' · ещё генерируются' : ''}`, `Стикеры ЧЗ ${id}.pdf`, combo > 0],
+    ['pdf/pairs', 'Попарно: стикер WB → стикер ЧЗ', withSticker < active.length ? `Нужны стикеры WB у всех заданий: есть ${withSticker} из ${active.length}` : 'Один рулон: на каждую банку два стикера подряд, стикер WB вписан в размер этикетки', `Стикеры WB + ЧЗ ${id}.pdf`, withSticker === active.length && combo > 0],
     ['pdf/trbx', 'Стикеры грузомест', 'QR WB, по одному на место', `Грузоместа ${id}.pdf`, true],
     ['pdf/qr', 'Стикер поставки (QR)', data.supply.done ? 'QR WB' : 'Доступен после передачи в доставку', `QR поставки ${id}.pdf`, !!data.supply.done],
   ];
@@ -549,8 +577,24 @@ function StepPrint({ data }: { data: State }) {
   return (
     <Panel title="Печать и выгрузки" hint="Все PDF — в одном порядке, как лист подбора WB">
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
-      {data.supply.stickerError && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">Стикеры заданий WB не получены по API — печатайте их из кабинета WB. Объединённые стикеры идут в том же порядке, если загружен лист подбора (шаг «Поставка»).</p>}
       <div className="divide-y divide-slate-100">
+        <div className="py-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex-1 min-w-[240px]">
+              <div className="font-medium">Стикеры заданий WB</div>
+              <div className="text-sm text-slate-500">Есть у {withSticker} из {active.length} заданий · номера стикеров известны у {withNumber}</div>
+            </div>
+            <button className={btnSecondary} disabled={!!busy} onClick={() => pickRef.current?.click()}>{busy === 'pick' ? 'Загрузка…' : 'Лист подбора (PDF)'}</button>
+            <button className={btnSecondary} disabled={!!busy || !withNumber} title={withNumber ? '' : 'Сначала загрузите лист подбора'} onClick={() => stickersRef.current?.click()}>{busy === 'st' ? 'Проверка…' : 'Загрузить стикеры (PDF)'}</button>
+            <button className={withSticker ? btnPrimary : btnSecondary} disabled={!withSticker || !!busy} onClick={() => dl('pdf/stickers', `Стикеры заданий ${id}.pdf`)}>{busy === 'pdf/stickers' ? 'Готовлю…' : '⇩ PDF'}</button>
+            <input ref={pickRef} type="file" accept="application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) uploadPick(f); }} />
+            <input ref={stickersRef} type="file" accept="application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) uploadStickers(f); }} />
+          </div>
+          {withSticker < active.length && (
+            <p className="text-xs text-slate-500 mt-2">WB не отдаёт стикеры по API — скачайте в кабинете WB «Лист подбора» и «Стикеры» этой поставки и загрузите сюда: портал сверит номер каждого стикера с заданием.</p>
+          )}
+          {upl.length > 0 && <div className="text-sm bg-slate-50 rounded-lg p-3 mt-2 space-y-0.5">{upl.map((t, i) => <p key={i}>{t}</p>)}</div>}
+        </div>
         {rows.map(([kind, title, hint, name, ok]) => (
           <div key={kind} className="flex flex-wrap items-center gap-3 py-3">
             <div className="flex-1 min-w-[240px]"><div className="font-medium">{title}</div><div className="text-sm text-slate-500">{hint}</div></div>

@@ -1,4 +1,4 @@
-import { PDFDocument, PDFPage } from 'pdf-lib';
+import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb } from 'pdf-lib';
 import ExcelJS from 'exceljs';
 import prisma from '../prisma/client';
 import { downloadFile } from './s3';
@@ -24,21 +24,58 @@ async function sortedOrders(supplyId: string) {
   return printOrder(orders.map((o) => ({ ...o, itemName: o.itemId ? name.get(o.itemId) ?? null : null })));
 }
 
-/** Стикеры заданий WB 58×40 в порядке листа подбора. */
+// Стикер задания: PDF-страница из кабинета WB или PNG из API
+async function stickerPage(out: PDFDocument, key: string, size?: [number, number]): Promise<void> {
+  const buf = await downloadFile(key);
+  if (key.endsWith('.pdf')) {
+    const src = await PDFDocument.load(buf);
+    if (!size) { const [p] = await out.copyPages(src, [0]); out.addPage(p); return; }
+    // Вписываем в размер объединённой этикетки — один рулон для обоих стикеров
+    const emb = await out.embedPage(src.getPage(0));
+    const page = out.addPage(size);
+    const k = Math.min(size[0] / emb.width, size[1] / emb.height);
+    page.drawPage(emb, { x: (size[0] - emb.width * k) / 2, y: (size[1] - emb.height * k) / 2, width: emb.width * k, height: emb.height * k });
+    return;
+  }
+  const img = await out.embedPng(buf);
+  const [w, h] = size ?? [58 * MM, 40 * MM];
+  const page = out.addPage([w, h]);
+  const k = Math.min(w / img.width, h / img.height);
+  page.drawImage(img, { x: (w - img.width * k) / 2, y: (h - img.height * k) / 2, width: img.width * k, height: img.height * k });
+}
+
+// Номер стикера задания (0503) в правом верхнем углу объединённой этикетки
+function stampNumber(page: PDFPage, font: PDFFont, text: string) {
+  const { width, height } = page.getSize();
+  const size = 7;
+  const tw = font.widthOfTextAtSize(text, size);
+  page.drawRectangle({ x: width - tw - 4, y: height - size - 3, width: tw + 3, height: size + 2.5, color: rgb(1, 1, 1) });
+  page.drawText(text, { x: width - tw - 2.5, y: height - size - 1.5, size, font, color: rgb(0, 0, 0) });
+}
+
+/** Стикеры заданий WB в порядке листа подбора (из API или загруженные из кабинета). */
 export async function wbStickersPdf(supplyId: string): Promise<Buffer> {
   const orders = (await sortedOrders(supplyId)).filter((o) => o.stickerS3Key);
-  if (!orders.length) throw new StockError('Стикеры заданий не получены из WB — скачайте их в кабинете WB');
-  return pngsToPdf(await Promise.all(orders.map((o) => downloadFile(o.stickerS3Key!))));
+  if (!orders.length) throw new StockError('Стикеров заданий нет — загрузите PDF стикеров из кабинета WB');
+  const out = await PDFDocument.create();
+  for (const o of orders) await stickerPage(out, o.stickerS3Key!);
+  return Buffer.from(await out.save());
 }
 
 /**
- * Объединённые стикеры (макет этикетки SKU: EAN-13 + ЧЗ + партия + годен до) в порядке листа подбора.
- * Страницы берутся из уже сгенерированных тиражей: номер страницы = позиция кода в тираже (тот же порядок, что у генератора).
- * pairs — после каждого стикера WB идёт его объединённый стикер.
+ * Объединённые стикеры (макет этикетки SKU: EAN-13 + ЧЗ + партия + годен до) в порядке листа подбора,
+ * с номером стикера задания в углу. Страницы берутся из уже сгенерированных тиражей:
+ * номер страницы = позиция кода в тираже (тот же порядок, что у генератора).
+ * pairs — перед каждым объединённым стикером идёт стикер задания WB того же размера.
  */
 export async function comboPdf(supplyId: string, pairs = false): Promise<Buffer> {
-  const orders = (await sortedOrders(supplyId)).filter((o) => o.czCode?.outputBatchId || (pairs && o.stickerS3Key));
-  const batchIds = [...new Set(orders.map((o) => o.czCode?.outputBatchId).filter((x): x is string => !!x))];
+  const all = await sortedOrders(supplyId);
+  const orders = all.filter((o) => o.czCode?.outputBatchId);
+  if (pairs) {
+    const noSticker = all.filter((o) => !o.stickerS3Key);
+    if (noSticker.length) throw new StockError(`Нет стикера WB у ${noSticker.length} заданий (например, ${noSticker[0].id}) — загрузите PDF стикеров из кабинета WB`);
+  }
+  const batchIds = [...new Set(orders.map((o) => o.czCode!.outputBatchId!))];
   const batches = await prisma.outputBatch.findMany({ where: { id: { in: batchIds } } });
   const notReady = batches.find((b) => b.jobStatus !== 'done' || !b.s3Key);
   if (notReady) throw new StockError(notReady.jobStatus === 'error' ? 'Ошибка генерации этикеток ЧЗ — см. «Маркировка → Промаркированы»' : 'Этикетки ЧЗ ещё генерируются, повторите через минуту');
@@ -53,19 +90,17 @@ export async function comboPdf(supplyId: string, pairs = false): Promise<Buffer>
     pdfOf.set(b.id, await PDFDocument.load(await downloadFile(b.s3Key)));
   }
   const out = await PDFDocument.create();
-  for (const o of orders) {
-    if (pairs && o.stickerS3Key) {
-      const img = await out.embedPng(await downloadFile(o.stickerS3Key));
-      const page: PDFPage = out.addPage([58 * MM, 40 * MM]);
-      page.drawImage(img, { x: 0, y: 0, width: 58 * MM, height: 40 * MM });
-    }
-    const bid = o.czCode?.outputBatchId;
-    if (!bid) continue;
-    const src = pdfOf.get(bid)!;
+  const font = await out.embedFont(StandardFonts.HelveticaBold);
+  for (const o of pairs ? all : orders) {
+    // Задание без ЧЗ в попарной печати — только стикер WB
+    if (!o.czCode?.outputBatchId) { if (pairs && o.stickerS3Key) await stickerPage(out, o.stickerS3Key); continue; }
+    const src = pdfOf.get(o.czCode!.outputBatchId!)!;
     const idx = pageOf.get(o.czCode!.id);
     if (idx == null || idx >= src.getPageCount()) continue;
     const [p] = await out.copyPages(src, [idx]);
+    if (pairs) { const { width, height } = p.getSize(); await stickerPage(out, o.stickerS3Key!, [width, height]); }
     out.addPage(p);
+    if (o.stickerB) stampNumber(p, font, o.stickerB);
   }
   if (!out.getPageCount()) throw new StockError('Нет объединённых стикеров: коды ЧЗ ещё не назначены');
   return Buffer.from(await out.save());
