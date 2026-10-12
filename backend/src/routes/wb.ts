@@ -10,7 +10,7 @@ import {
   addOrders, applyPickList, assignCodes, resendRejected, supplyKi, uploadStickers, pdfToText, createSupply, deliver, detachCode, newOrders, resetMetaErrors, scanCode, sendMeta,
   supplyState, syncSupply, writeOff,
 } from '../services/wbSupply';
-import { comboPdf, czXlsx, supplyQrPdf, trbxPdf, wbStickersPdf } from '../services/wbPdf';
+import { comboPdf, czXlsx, kiXlsx, supplyQrPdf, trbxPdf, wbStickersPdf } from '../services/wbPdf';
 
 // Отправки WB FBS: мастер сборки поставки
 const router = Router();
@@ -119,9 +119,9 @@ router.post('/wb/supplies/:id/orders/:orderId/detach', h(async (req, res) => {
 router.post('/wb/supplies/:id/send-meta', h(async (req, res) => { res.json(await sendMeta(req.params.id)); }));
 router.post('/wb/supplies/:id/resend-rejected', h(async (req, res) => { res.json(await resendRejected(req.params.id)); }));
 
-// GET /api/stock/wb/supplies/:id/ki.csv — коды поставки для ввода в оборот в Честном знаке
-router.get('/wb/supplies/:id/ki.csv', h(async (req, res) => {
-  sendFile(res, Buffer.from((await supplyKi(req.params.id)).join('\r\n') + '\r\n'), `КИ ${req.params.id}.csv`, 'text/csv; charset=utf-8');
+// GET /api/stock/wb/supplies/:id/ki.xlsx — коды поставки для ввода в оборот в Честном знаке
+router.get('/wb/supplies/:id/ki.xlsx', h(async (req, res) => {
+  sendFile(res, await kiXlsx(await supplyKi(req.params.id)), `КИ ${req.params.id}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 }));
 
 router.post('/wb/supplies/:id/reset-errors', h(async (req, res) => { await resetMetaErrors(req.params.id); res.json({ ok: true }); }));

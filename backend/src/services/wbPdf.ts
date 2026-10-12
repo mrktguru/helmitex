@@ -175,3 +175,13 @@ export async function czXlsx(supplyIds: string[]): Promise<Buffer> {
   ws.getColumn('kiz').numFmt = '@';
   return Buffer.from(await wbk.xlsx.writeBuffer());
 }
+
+/** Список кодов (КИ) одним столбцом в .xlsx — для ввода в оборот в Честном знаке. В CSV коды с запятой Excel режет на столбцы. */
+export async function kiXlsx(codes: string[]): Promise<Buffer> {
+  const wbk = new ExcelJS.Workbook();
+  const ws = wbk.addWorksheet('Коды');
+  ws.getColumn(1).width = 40;
+  ws.getColumn(1).numFmt = '@';
+  for (const c of codes) ws.addRow([c]);
+  return Buffer.from(await wbk.xlsx.writeBuffer());
+}

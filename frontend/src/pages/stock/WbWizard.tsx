@@ -410,7 +410,7 @@ function StepCz({ data, reload, done, assigned, total, accepted, wbTotal }: { da
             <p className="text-red-800"><b>WB отклонил {rejected.length} КИЗ</b>: {KIZ_LABEL[rejected[0].kizDecision] ?? rejected[0].kizDecision}.</p>
             <p className="text-red-800">Коды нужно ввести в оборот в личном кабинете Честного знака (документ «Ввод в оборот»), затем нажать «Отправить отклонённые повторно».</p>
             <div className="flex flex-wrap gap-2">
-              <button className={btnSecondary} onClick={() => downloadFile(`/stock/wb/supplies/${encodeURIComponent(data.supply.id)}/ki.csv`, `КИ ${data.supply.id}.csv`).catch((e) => setNotes([e.message]))}>⇩ Коды для ввода в оборот (.csv)</button>
+              <button className={btnSecondary} onClick={() => downloadFile(`/stock/wb/supplies/${encodeURIComponent(data.supply.id)}/ki.xlsx`, `КИ ${data.supply.id}.xlsx`).catch((e) => setNotes([e.message]))}>⇩ Коды для ввода в оборот (.xlsx)</button>
               <button className={btnPrimary} disabled={!!busy} onClick={resend}>{busy === 'resend' ? 'Отправка…' : 'Отправить отклонённые повторно'}</button>
             </div>
           </div>

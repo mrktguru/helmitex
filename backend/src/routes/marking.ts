@@ -8,6 +8,7 @@ import multer from 'multer';
 import { assignUnassigned, distribute, gtinTargets } from '../services/czImport';
 import { uploadFile } from '../services/s3';
 import { unescapeGs } from './cz';
+import { kiXlsx } from '../services/wbPdf';
 
 // Маркировка: SKU, которым нужен ЧЗ, — их база кодов (проект этикетки) и выпущенный без ЧЗ остаток
 const router = Router();
@@ -221,15 +222,17 @@ router.put('/marking/:itemId/gtin', async (req: AuthRequest, res: Response): Pro
   res.json({ ok: true });
 });
 
-// GET /api/stock/marking/docs/:id/ki.csv — коды маркировки списком (КИ без криптохвоста) для ввода в оборот в Честном знаке
-router.get('/marking/docs/:id/ki.csv', async (req: AuthRequest, res: Response): Promise<void> => {
+// GET /api/stock/marking/docs/:id/ki.xlsx — коды маркировки списком (КИ без криптохвоста) для ввода в оборот в Честном знаке
+router.get('/marking/docs/:id/ki.xlsx', async (req: AuthRequest, res: Response): Promise<void> => {
   const doc = await prisma.stockDoc.findUnique({ where: { id: req.params.id } });
   if (doc?.type !== 'MARK') { res.status(404).json({ error: 'Документ маркировки не найден' }); return; }
-  const codes = await prisma.czCode.findMany({ where: { outputBatch: { docId: doc.id } }, select: { code: true } });
-  const ki = codes.map((c) => c.code?.split('\x1d')[0]).filter(Boolean);
-  const buf = Buffer.from(ki.join('\r\n') + '\r\n');
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`КИ ${doc.number}.csv`)}`);
+  const codes = await prisma.czCode.findMany({
+    where: { outputBatch: { docId: doc.id } }, select: { code: true },
+    orderBy: [{ czBatch: { uploadedAt: 'asc' } }, { pageIndex: 'asc' }, { id: 'asc' }],
+  });
+  const buf = await kiXlsx(codes.map((c) => c.code?.split('\x1d')[0]).filter((x): x is string => !!x));
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`КИ ${doc.number}.xlsx`)}`);
   res.end(buf);
 });
 

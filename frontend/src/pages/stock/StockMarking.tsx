@@ -198,7 +198,7 @@ function History() {
                   <td>{d.status === 'CANCELLED' ? <Badge cls="bg-slate-100 text-slate-500">отменена</Badge> : job && <Badge cls={job.cls}>{job.label}</Badge>}</td>
                   <td className="px-4 text-right whitespace-nowrap space-x-3">
                     {d.status === 'POSTED' && (
-                      <button className="text-brand-700 hover:underline" title="Коды для ввода в оборот в Честном знаке" onClick={() => downloadFile(`/stock/marking/docs/${d.id}/ki.csv`, `КИ ${d.number}.csv`).catch((e) => setError(e.message))}>⇩ коды</button>
+                      <button className="text-brand-700 hover:underline" title="Коды для ввода в оборот в Честном знаке" onClick={() => downloadFile(`/stock/marking/docs/${d.id}/ki.xlsx`, `КИ ${d.number}.xlsx`).catch((e) => setError(e.message))}>⇩ коды</button>
                     )}
                     {d.status === 'POSTED' && d.batch?.jobStatus === 'done' && (
                       <button className="text-brand-700 hover:underline" onClick={() => downloadFile(`/stock/batches/${d.batch.id}/pdf`, `${d.number}.pdf`).catch((e) => setError(e.message))}>⇩ PDF</button>
