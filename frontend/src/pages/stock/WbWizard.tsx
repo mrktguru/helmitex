@@ -533,6 +533,7 @@ function StepPrint({ data, reload }: { data: State; reload: () => void }) {
   const active = data.orders.filter((o) => !o.canceled);
   const withSticker = active.filter((o) => o.hasSticker).length;
   const withNumber = active.filter((o) => o.stickerB).length;
+  const noSticker = active.filter((o) => !o.hasSticker);
   const combo = active.filter((o) => o.labelBatch).length;
   const generating = active.some((o) => o.labelBatch && o.labelBatch.jobStatus !== 'done');
 
@@ -569,7 +570,7 @@ function StepPrint({ data, reload }: { data: State; reload: () => void }) {
 
   const rows: [string, string, string, string, boolean][] = [
     ['pdf/combo', 'Объединённые стикеры (EAN-13 + ЧЗ)', `${combo} шт. · макет этикетки SKU с партией и сроком годности · номер стикера WB в углу${generating ? ' · ещё генерируются' : ''}`, `Стикеры ЧЗ ${id}.pdf`, combo > 0],
-    ['pdf/pairs', 'Попарно: стикер WB → стикер ЧЗ', withSticker < active.length ? `Нужны стикеры WB у всех заданий: есть ${withSticker} из ${active.length}` : 'Один рулон: на каждую банку два стикера подряд, стикер WB вписан в размер этикетки', `Стикеры WB + ЧЗ ${id}.pdf`, withSticker === active.length && combo > 0],
+    ['pdf/pairs', 'Попарно: стикер WB → стикер ЧЗ', `Один рулон: на каждую банку два стикера подряд, стикер WB вписан в размер этикетки${noSticker.length ? ` · без стикера WB: ${noSticker.map((o) => o.id).slice(0, 3).join(', ')}${noSticker.length > 3 ? '…' : ''} — только стикер ЧЗ` : ''}`, `Стикеры WB + ЧЗ ${id}.pdf`, withSticker > 0 && combo > 0],
     ['pdf/trbx', 'Стикеры грузомест', 'QR WB, по одному на место', `Грузоместа ${id}.pdf`, true],
     ['pdf/qr', 'Стикер поставки (QR)', data.supply.done ? 'QR WB' : 'Доступен после передачи в доставку', `QR поставки ${id}.pdf`, !!data.supply.done],
   ];

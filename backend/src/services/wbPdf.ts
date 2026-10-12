@@ -71,34 +71,39 @@ export async function wbStickersPdf(supplyId: string): Promise<Buffer> {
 export async function comboPdf(supplyId: string, pairs = false): Promise<Buffer> {
   const all = await sortedOrders(supplyId);
   const orders = all.filter((o) => o.czCode?.outputBatchId);
-  if (pairs) {
-    const noSticker = all.filter((o) => !o.stickerS3Key);
-    if (noSticker.length) throw new StockError(`Нет стикера WB у ${noSticker.length} заданий (например, ${noSticker[0].id}) — загрузите PDF стикеров из кабинета WB`);
-  }
   const batchIds = [...new Set(orders.map((o) => o.czCode!.outputBatchId!))];
   const batches = await prisma.outputBatch.findMany({ where: { id: { in: batchIds } } });
   const notReady = batches.find((b) => b.jobStatus !== 'done' || !b.s3Key);
   if (notReady) throw new StockError(notReady.jobStatus === 'error' ? 'Ошибка генерации этикеток ЧЗ — см. «Маркировка → Промаркированы»' : 'Этикетки ЧЗ ещё генерируются, повторите через минуту');
   const pageOf = new Map<string, number>();
-  const pdfOf = new Map<string, PDFDocument>();
+  const srcOf = new Map<string, PDFDocument>();
   for (const b of batches) {
     const codes = await prisma.czCode.findMany({
       where: { outputBatchId: b.id }, select: { id: true },
       orderBy: [{ czBatch: { uploadedAt: 'asc' } }, { pageIndex: 'asc' }, { id: 'asc' }],
     });
     codes.forEach((c, i) => pageOf.set(c.id, i));
-    pdfOf.set(b.id, await PDFDocument.load(await downloadFile(b.s3Key)));
+    srcOf.set(b.id, await PDFDocument.load(await downloadFile(b.s3Key)));
   }
   const out = await PDFDocument.create();
+  // Страницы одного тиража копируются одним вызовом — шрифты и картинки макета не дублируются на каждую страницу
+  const copied = new Map<string, PDFPage>();
+  for (const [bid, src] of srcOf) {
+    const need = orders.filter((o) => o.czCode!.outputBatchId === bid)
+      .map((o) => ({ codeId: o.czCode!.id, idx: pageOf.get(o.czCode!.id) }))
+      .filter((x): x is { codeId: string; idx: number } => x.idx != null && x.idx < src.getPageCount());
+    const pages = await out.copyPages(src, need.map((x) => x.idx));
+    need.forEach((x, i) => copied.set(x.codeId, pages[i]));
+  }
   const font = await out.embedFont(StandardFonts.HelveticaBold);
   for (const o of pairs ? all : orders) {
-    // Задание без ЧЗ в попарной печати — только стикер WB
-    if (!o.czCode?.outputBatchId) { if (pairs && o.stickerS3Key) await stickerPage(out, o.stickerS3Key); continue; }
-    const src = pdfOf.get(o.czCode!.outputBatchId!)!;
-    const idx = pageOf.get(o.czCode!.id);
-    if (idx == null || idx >= src.getPageCount()) continue;
-    const [p] = await out.copyPages(src, [idx]);
-    if (pairs) { const { width, height } = p.getSize(); await stickerPage(out, o.stickerS3Key!, [width, height]); }
+    const p = o.czCode ? copied.get(o.czCode.id) : undefined;
+    // Задание без ЧЗ или без стикера WB — печатается то, что есть
+    if (pairs && o.stickerS3Key) {
+      const size = p ? [p.getWidth(), p.getHeight()] as [number, number] : undefined;
+      await stickerPage(out, o.stickerS3Key, size);
+    }
+    if (!p) continue;
     out.addPage(p);
     if (o.stickerB) stampNumber(p, font, o.stickerB);
   }
