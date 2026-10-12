@@ -206,11 +206,17 @@ function StockTable() {
             {items.length === 0 ? <>Номенклатура пуста. <Link to="/stock/catalog" className="text-brand-700 hover:underline">Заведите позиции</Link>, затем внесите остатки документом.</> : 'Ничего не найдено. Снимите фильтры или отключите «Только в наличии».'}
           </div>
         ) : (
-          <table className="w-full text-sm tabular-nums">
+          <table className="w-full min-w-[980px] table-fixed text-sm tabular-nums">
+            {/* фиксированные ширины — колонки не прыгают при переключении категорий */}
+            <colgroup>
+              <col className="w-10" /><col /><col className="w-40" /><col className="w-36" /><col className="w-36" />
+              <col className="w-20" /><col className="w-28" /><col className="w-32" /><col className="w-28" />
+            </colgroup>
             <thead className="bg-slate-50/80">
               <tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
                 <th className="pl-4 pr-2 py-2.5 font-medium w-6" />
                 <th className="px-2 py-2.5 font-medium">Позиция</th>
+                <th className="px-3 py-2.5 font-medium">Тип</th>
                 <th className="px-3 py-2.5 font-medium">Категория</th>
                 <th className="px-3 py-2.5 font-medium text-right">Остаток</th>
                 <th className="px-3 py-2.5 font-medium text-right">Лотов</th>
@@ -230,11 +236,11 @@ function StockTable() {
                     <tr onClick={() => setOpen((s) => { const n = new Set(s); n.has(g.item.id) ? n.delete(g.item.id) : n.add(g.item.id); return n; })}
                       className={clsx('border-b border-slate-100 cursor-pointer hover:bg-slate-50', isOpen && 'bg-slate-50')}>
                       <td className="pl-4 pr-2 py-2.5 text-slate-400">{g.rows.length > 0 ? (isOpen ? '▾' : '▸') : ''}</td>
-                      <td className="px-2 py-2.5">
+                      <td className="px-2 py-2.5 break-words">
                         <Link to={`/stock/catalog/${g.item.id}`} onClick={(e) => e.stopPropagation()} className="font-medium hover:text-brand-700">{g.item.name}</Link>
-                        {g.item.kind && <span className="ml-2 text-xs text-slate-500">{g.item.kind}</span>}
                         {g.item.noStock && <span className="ml-2 text-xs text-slate-400">без учёта</span>}
                       </td>
+                      <td className="px-3 py-2.5 text-slate-600 truncate" title={g.item.kind ?? undefined}>{g.item.kind ?? <span className="text-slate-300">—</span>}</td>
                       <td className="px-3 py-2.5"><TypeChip type={g.item.type} /></td>
                       <td className="px-3 py-2.5 text-right whitespace-nowrap">
                         <span className={clsx('font-semibold', g.total === 0 && 'text-slate-400', low && 'text-amber-700')}>{fmtQty(g.total)} {g.item.unit}</span>
@@ -257,7 +263,7 @@ function StockTable() {
                       return (
                         <tr key={r.lotId + r.state} className="border-b border-slate-100 bg-slate-50/60 text-[13px]">
                           <td />
-                          <td className="px-2 py-1.5 pl-6" colSpan={2}>
+                          <td className="px-2 py-1.5 pl-6" colSpan={3}>
                             <Link to={`/stock/warehouse?tab=moves&lotId=${r.lotId}`} className="font-mono text-xs text-brand-700 hover:underline">{r.lot.number}</Link>
                             <span className="text-slate-500 ml-2 text-xs">
                               {[r.lot.barrel && `бочка ${r.lot.barrel}`, r.lot.supplierLot && `лот пост. ${r.lot.supplierLot}`, STATE_LABEL[r.state]].filter(Boolean).join(' · ')}
@@ -282,7 +288,7 @@ function StockTable() {
                     <tr onClick={() => setOpen((s) => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n; })}
                       className={clsx('border-b border-slate-100 cursor-pointer hover:bg-slate-50', isOpen && 'bg-slate-50')}>
                       <td className="pl-4 pr-2 py-2.5 text-slate-400">{isOpen ? '▾' : '▸'}</td>
-                      <td className="px-2 py-2.5">
+                      <td className="px-2 py-2.5 break-words" colSpan={2}>
                         <Link to={`/stock/quants?typeId=${g.id}`} onClick={(e) => e.stopPropagation()} className="font-medium hover:text-brand-700">{g.name}</Link>
                         <div className="text-xs text-slate-500">{g.sku}</div>
                       </td>
@@ -303,7 +309,7 @@ function StockTable() {
                     {isOpen && g.quants.map((x) => (
                       <tr key={x.id} className="border-b border-slate-100 bg-slate-50/60 text-[13px]">
                         <td />
-                        <td className="px-2 py-1.5 pl-6" colSpan={2}>
+                        <td className="px-2 py-1.5 pl-6" colSpan={3}>
                           <Link to={`/stock/quants/${x.id}`} className="font-mono text-xs text-brand-700 hover:underline">{x.number}</Link>
                           <span className="text-slate-500 ml-2 text-xs">партия {x.lot.number}{x.status === 'RESERVED' ? ' · в поставке' : ''}{x._count.codes ? ` · ЧЗ ${x._count.codes}` : ''}</span>
                         </td>
@@ -321,7 +327,7 @@ function StockTable() {
             {total > 0 && (
               <tfoot>
                 <tr className="font-semibold">
-                  <td colSpan={6} className="px-4 py-2.5 text-right text-slate-500">Итого по известным ценам</td>
+                  <td colSpan={7} className="px-4 py-2.5 text-right text-slate-500">Итого по известным ценам</td>
                   <td className="px-3 py-2.5 text-right">{fmtMoney(total)}</td>
                   <td />
                 </tr>

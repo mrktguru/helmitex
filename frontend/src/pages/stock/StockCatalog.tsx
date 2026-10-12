@@ -79,7 +79,11 @@ export default function StockCatalog() {
       {type === 'RECIPES' ? <StockRecipes /> : (
       <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
         {!items ? <p className="p-6 text-slate-500">Загрузка…</p> : list.length === 0 ? <p className="p-6 text-slate-500 text-sm">Позиций нет.</p> : (
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[900px] table-fixed text-sm">
+            {/* фиксированные ширины — колонки не прыгают при переключении категорий */}
+            <colgroup>
+              <col /><col className="w-44" /><col className="w-40" /><col className="w-20" /><col className="w-32" /><col className="w-72" />
+            </colgroup>
             <thead className="bg-slate-50/80">
               <tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
                 <th className="px-4 py-2.5 font-medium">Наименование</th>
@@ -95,12 +99,12 @@ export default function StockCatalog() {
                 const st = status(i);
                 return (
                   <tr key={i.id} onClick={() => navigate(`/stock/catalog/${i.id}`)} className={clsx('border-b border-slate-100 last:border-0 cursor-pointer hover:bg-slate-50', i.archived && 'text-slate-400')}>
-                    <td className="px-4 py-2.5 font-medium">{i.name}{i.noStock && <span className="ml-2 text-xs font-normal text-slate-400">без учёта</span>}{i.archived && <span className="ml-2 text-xs font-normal">архив</span>}</td>
-                    <td className="px-3 py-2.5 text-slate-600">{i.kind ?? <span className="text-slate-300">—</span>}</td>
+                    <td className="px-4 py-2.5 font-medium break-words">{i.name}{i.noStock && <span className="ml-2 text-xs font-normal text-slate-400">без учёта</span>}{i.archived && <span className="ml-2 text-xs font-normal">архив</span>}</td>
+                    <td className="px-3 py-2.5 text-slate-600 truncate" title={i.kind ?? undefined}>{i.kind ?? <span className="text-slate-300">—</span>}</td>
                     <td className="px-3 py-2.5"><TypeChip type={i.type} /></td>
                     <td className="px-3 py-2.5 text-slate-600">{i.unit}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">{i.minStock != null ? fmtQty(i.minStock) : '—'}</td>
-                    <td className="px-4 py-2.5">{st && <span className={clsx('text-xs', st.ok ? 'text-emerald-700' : 'text-amber-700')}>{st.ok ? '✓ ' : '! '}{st.text}</span>}</td>
+                    <td className="px-4 py-2.5 truncate" title={st?.text}>{st && <span className={clsx('text-xs', st.ok ? 'text-emerald-700' : 'text-amber-700')}>{st.ok ? '✓ ' : '! '}{st.text}</span>}</td>
                   </tr>
                 );
               })}
