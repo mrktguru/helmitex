@@ -1,4 +1,4 @@
-import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument, PDFEmbeddedPage, PDFFont, PDFPage, StandardFonts, rgb } from 'pdf-lib';
 import ExcelJS from 'exceljs';
 import prisma from '../prisma/client';
 import { downloadFile } from './s3';
@@ -24,24 +24,36 @@ async function sortedOrders(supplyId: string) {
   return printOrder(orders.map((o) => ({ ...o, itemName: o.itemId ? name.get(o.itemId) ?? null : null })));
 }
 
-// Стикер задания: PDF-страница из кабинета WB или PNG из API
-async function stickerPage(out: PDFDocument, key: string, size?: [number, number]): Promise<void> {
-  const buf = await downloadFile(key);
-  if (key.endsWith('.pdf')) {
-    const src = await PDFDocument.load(buf);
-    if (!size) { const [p] = await out.copyPages(src, [0]); out.addPage(p); return; }
-    // Вписываем в размер объединённой этикетки — один рулон для обоих стикеров
-    const emb = await out.embedPage(src.getPage(0));
-    const page = out.addPage(size);
-    const k = Math.min(size[0] / emb.width, size[1] / emb.height);
-    page.drawPage(emb, { x: (size[0] - emb.width * k) / 2, y: (size[1] - emb.height * k) / 2, width: emb.width * k, height: emb.height * k });
-    return;
+// Стикеры заданий: «файл.pdf#страница» (загружены из кабинета WB) или PNG из API.
+// Страницы одного файла встраиваются одним вызовом — шрифты стикеров не дублируются.
+async function stickerSource(out: PDFDocument, keys: string[], embed: boolean) {
+  const pdfPages = new Map<string, number[]>();
+  for (const k of keys) {
+    const [file, page] = k.split('#');
+    if (page != null) pdfPages.set(file, [...(pdfPages.get(file) ?? []), Number(page)]);
   }
-  const img = await out.embedPng(buf);
+  const copied = new Map<string, PDFPage>();
+  const embedded = new Map<string, PDFEmbeddedPage>();
+  for (const [file, pages] of pdfPages) {
+    const src = await PDFDocument.load(await downloadFile(file));
+    const uniq = [...new Set(pages)];
+    if (embed) (await out.embedPages(uniq.map((i) => src.getPage(i)))).forEach((e, j) => embedded.set(`${file}#${uniq[j]}`, e));
+    else (await out.copyPages(src, uniq)).forEach((p, j) => copied.set(`${file}#${uniq[j]}`, p));
+  }
+  return { copied, embedded };
+}
+
+async function drawSticker(out: PDFDocument, key: string, src: Awaited<ReturnType<typeof stickerSource>>, size?: [number, number]) {
+  const plain = src.copied.get(key);
+  if (plain) { out.addPage(plain); return; }
   const [w, h] = size ?? [58 * MM, 40 * MM];
+  const emb = src.embedded.get(key);
   const page = out.addPage([w, h]);
-  const k = Math.min(w / img.width, h / img.height);
-  page.drawImage(img, { x: (w - img.width * k) / 2, y: (h - img.height * k) / 2, width: img.width * k, height: img.height * k });
+  // Вписываем в размер объединённой этикетки — один рулон для обоих стикеров
+  const fit = (iw: number, ih: number) => { const k = Math.min(w / iw, h / ih); return { x: (w - iw * k) / 2, y: (h - ih * k) / 2, width: iw * k, height: ih * k }; };
+  if (emb) { page.drawPage(emb, fit(emb.width, emb.height)); return; }
+  const img = await out.embedPng(await downloadFile(key));
+  page.drawImage(img, fit(img.width, img.height));
 }
 
 // Номер стикера задания (0503) в правом верхнем углу объединённой этикетки
@@ -58,7 +70,8 @@ export async function wbStickersPdf(supplyId: string): Promise<Buffer> {
   const orders = (await sortedOrders(supplyId)).filter((o) => o.stickerS3Key);
   if (!orders.length) throw new StockError('Стикеров заданий нет — загрузите PDF стикеров из кабинета WB');
   const out = await PDFDocument.create();
-  for (const o of orders) await stickerPage(out, o.stickerS3Key!);
+  const src = await stickerSource(out, orders.map((o) => o.stickerS3Key!), false);
+  for (const o of orders) await drawSticker(out, o.stickerS3Key!, src);
   return Buffer.from(await out.save());
 }
 
@@ -96,12 +109,13 @@ export async function comboPdf(supplyId: string, pairs = false): Promise<Buffer>
     need.forEach((x, i) => copied.set(x.codeId, pages[i]));
   }
   const font = await out.embedFont(StandardFonts.HelveticaBold);
+  const stickers = pairs ? await stickerSource(out, all.map((o) => o.stickerS3Key).filter((x): x is string => !!x), true) : null;
   for (const o of pairs ? all : orders) {
     const p = o.czCode ? copied.get(o.czCode.id) : undefined;
     // Задание без ЧЗ или без стикера WB — печатается то, что есть
     if (pairs && o.stickerS3Key) {
       const size = p ? [p.getWidth(), p.getHeight()] as [number, number] : undefined;
-      await stickerPage(out, o.stickerS3Key, size);
+      await drawSticker(out, o.stickerS3Key, stickers!, size);
     }
     if (!p) continue;
     out.addPage(p);

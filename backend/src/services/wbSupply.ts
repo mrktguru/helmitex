@@ -5,6 +5,7 @@ import { looseCodes, markLot } from './marking';
 import { uploadFile } from './s3';
 import { PDFDocument } from 'pdf-lib';
 import { spawn } from 'child_process';
+import crypto from 'crypto';
 import { sleep } from './ozon';
 import { WbOrderApi, WbSupplyApi, chunk, fmtRuDate, printOrder, wb, wbOrdersByIds } from './wb';
 
@@ -160,6 +161,9 @@ export async function uploadStickers(supplyId: string, buf: Buffer) {
   if (!byNo.size) throw new StockError('Номера стикеров заданий неизвестны — сначала загрузите «Лист подбора» этой поставки');
   const pagesText = (await pdfToText(buf)).split('\f');
   const src = await PDFDocument.load(buf);
+  // Файл хранится один раз; у задания — ссылка «файл#страница» (страницы одного файла делят шрифты)
+  const srcKey = `wb/stickers-src/${supplyId}/${crypto.createHash('sha256').update(buf).digest('hex').slice(0, 16)}.pdf`;
+  await uploadFile(srcKey, buf, 'application/pdf');
   const unmatched: string[] = [];
   const unreadable: number[] = [];
   const done = new Set<string>();
@@ -171,12 +175,7 @@ export async function uploadStickers(supplyId: string, buf: Buffer) {
     const no = `${tok[a]} ${b}`;
     const o = byNo.get(no);
     if (!o) { unmatched.push(no); continue; }
-    const one = await PDFDocument.create();
-    const [pg] = await one.copyPages(src, [i]);
-    one.addPage(pg);
-    const key = `wb/stickers/${o.id}.pdf`;
-    await uploadFile(key, Buffer.from(await one.save()), 'application/pdf');
-    await prisma.wbOrder.update({ where: { id: o.id }, data: { stickerS3Key: key } });
+    await prisma.wbOrder.update({ where: { id: o.id }, data: { stickerS3Key: `${srcKey}#${i}` } });
     done.add(o.id);
   }
   const missing = orders.filter((o) => !done.has(o.id) && !o.stickerS3Key).length;
