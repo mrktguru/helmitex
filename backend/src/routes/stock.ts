@@ -247,7 +247,8 @@ router.get('/mix/plan', async (req: AuthRequest, res: Response): Promise<void> =
   if (!recipe || recipe.lines.length === 0) { res.status(400).json({ error: 'У полуфабриката не выбрана рецептура — выберите её в справочнике' }); return; }
   const lines = [];
   for (const l of recipe.lines) {
-    const need = Math.round(qty * l.percent) / 100;
+    // норма с точностью до грамма: малые компоненты (микросферы 0,455 кг) не должны терять 5 г
+    const need = Math.round(qty * l.percent * 10) / 1000;
     const alloc = l.item.noStock
       ? { allocations: [{ lotId: null, lotNumber: null, qty: need }], shortage: 0 }
       : await allocateFefo(prisma, l.itemId, need);
