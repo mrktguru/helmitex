@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { api } from '../../api/client';
-import { DOC_STATUS, btnPrimary, btnSecondary, deviation, fmtDate, fmtMoney, fmtQty, inputCls, parseNum } from './common';
+import { DOC_STATUS, btnPrimary, btnSecondary, deviation, fmtDate, fmtMoney, fmtQty, inputCls, itemLabel, parseNum } from './common';
 
 interface Line {
   key: string;
@@ -108,7 +108,7 @@ export default function StockMixEdit() {
           next.push({ key: String(++seq), itemId: pl.item.id, stage: pl.stage, planQty: a.qty, qty: numStr(a.qty), lotId: a.lotId ?? '', reason: '' });
         }
         if (pl.shortage > 0) {
-          short.push(`${pl.item.name}: не хватает ${kgStr(pl.shortage)}`);
+          short.push(`${itemLabel(pl.item)}: не хватает ${kgStr(pl.shortage)}`);
           next.push({ key: String(++seq), itemId: pl.item.id, stage: pl.stage, planQty: pl.shortage, qty: numStr(pl.shortage), lotId: '', reason: '' });
         }
       }
@@ -157,7 +157,7 @@ export default function StockMixEdit() {
     for (const l of lines) {
       const it = rawById.get(l.itemId);
       if (!l.itemId) throw new Error('В корректировке не выбран компонент');
-      if (parseNum(l.qty) == null || parseNum(l.qty)! < 0) throw new Error(`Укажите факт: ${it?.name}`);
+      if (parseNum(l.qty) == null || parseNum(l.qty)! < 0) throw new Error(`Укажите факт: ${itemLabel(it)}`);
     }
     return {
       type: 'MIX',
@@ -304,13 +304,13 @@ export default function StockMixEdit() {
                             <div className="flex flex-col gap-1">
                               <select value={l.itemId} onChange={(e) => patch(l.key, { itemId: e.target.value, lotId: '' })} className={inputCls}>
                                 <option value="">— корректировка —</option>
-                                {raws.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                                {raws.map((r) => <option key={r.id} value={r.id}>{itemLabel(r)}</option>)}
                               </select>
                               <input value={l.reason} onChange={(e) => patch(l.key, { reason: e.target.value })} placeholder="Причина" className={inputCls + ' text-xs'} />
                             </div>
                           ) : (
                             <>
-                              {it?.name ?? '…'}
+                              {it ? itemLabel(it) : '…'}
                               {l.planQty == null && <span className="text-xs text-amber-700 ml-1">корр.{l.reason && `: ${l.reason}`}</span>}
                             </>
                           )}
@@ -428,7 +428,7 @@ export default function StockMixEdit() {
                     {head2 && <tr><td colSpan={6} className="border border-slate-400 px-1.5 py-1 font-bold bg-slate-100">Этап {l.stage}{stages[l.stage] ? ` · ${stages[l.stage]}` : ''}</td></tr>}
                     <tr>
                       <td className="border border-slate-400 px-1.5 py-1 w-6">{n}</td>
-                      <td className="border border-slate-400 px-1.5 py-1">{rawById.get(l.itemId)?.name}</td>
+                      <td className="border border-slate-400 px-1.5 py-1">{itemLabel(rawById.get(l.itemId))}</td>
                       <td className="border border-slate-400 px-1.5 py-1 whitespace-nowrap">{kgStr(l.planQty!)}</td>
                       <td className="border border-slate-400 px-1.5 py-1 w-20" />
                       <td className="border border-slate-400 px-1.5 py-1 w-28 text-slate-500">{rawById.get(l.itemId)?.noStock ? '—' : l.lotNumber ?? lotsFor(l.itemId).find((b) => b.lotId === l.lotId)?.lot.number ?? ''}</td>

@@ -6,6 +6,7 @@ import { PageHeader } from './StockLayout';
 import { TypeChip } from './StockWarehouse';
 import { ITEM_TYPES, btnPrimary, btnSecondary, fmtQty, inputCls, parseNum } from './common';
 import StockRecipes from './StockRecipes';
+import { useKinds } from './StockItemCard';
 
 export default function StockCatalog() {
   const navigate = useNavigate();
@@ -35,7 +36,7 @@ export default function StockCatalog() {
     const s = q.trim().toLowerCase();
     return (items ?? [])
       .filter((i) => !type || i.type === type)
-      .filter((i) => !s || i.name.toLowerCase().includes(s))
+      .filter((i) => !s || i.name.toLowerCase().includes(s) || (i.kind ?? '').toLowerCase().includes(s))
       .sort((a, b) => ITEM_TYPES.findIndex((t) => t.value === a.type) - ITEM_TYPES.findIndex((t) => t.value === b.type) || a.name.localeCompare(b.name, 'ru'));
   }, [items, type, q]);
 
@@ -52,7 +53,7 @@ export default function StockCatalog() {
 
   return (
     <div>
-      <PageHeader title="Справочники" hint="Всё, что учитывается: сырьё, тара, упаковка, этикетки, полуфабрикаты и SKU; рецептуры замесов. Рецептура полуфабриката выбирается в его карточке.">
+      <PageHeader title="Справочники" hint="Всё, что учитывается, по категориям: сырьё, тара, упаковка, этикетки, полуфабрикаты и SKU; рецептуры замесов. Тип — уточнение внутри категории: «Биоцид», «Загуститель», размер короба, «Шпатлёвка».">
         <button onClick={() => { setImporting(true); setAdding(false); }} className={btnSecondary}>Импорт SKU из Ozon</button>
         <button onClick={() => { setAdding(true); setImporting(false); }} className={btnPrimary}>+ Позиция</button>
       </PageHeader>
@@ -83,6 +84,7 @@ export default function StockCatalog() {
               <tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
                 <th className="px-4 py-2.5 font-medium">Наименование</th>
                 <th className="px-3 py-2.5 font-medium">Тип</th>
+                <th className="px-3 py-2.5 font-medium">Категория</th>
                 <th className="px-3 py-2.5 font-medium">Ед.</th>
                 <th className="px-3 py-2.5 font-medium text-right">Мин. остаток</th>
                 <th className="px-4 py-2.5 font-medium">Настройка</th>
@@ -94,6 +96,7 @@ export default function StockCatalog() {
                 return (
                   <tr key={i.id} onClick={() => navigate(`/stock/catalog/${i.id}`)} className={clsx('border-b border-slate-100 last:border-0 cursor-pointer hover:bg-slate-50', i.archived && 'text-slate-400')}>
                     <td className="px-4 py-2.5 font-medium">{i.name}{i.noStock && <span className="ml-2 text-xs font-normal text-slate-400">без учёта</span>}{i.archived && <span className="ml-2 text-xs font-normal">архив</span>}</td>
+                    <td className="px-3 py-2.5 text-slate-600">{i.kind ?? <span className="text-slate-300">—</span>}</td>
                     <td className="px-3 py-2.5"><TypeChip type={i.type} /></td>
                     <td className="px-3 py-2.5 text-slate-600">{i.unit}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">{i.minStock != null ? fmtQty(i.minStock) : '—'}</td>
@@ -111,23 +114,28 @@ export default function StockCatalog() {
 }
 
 function AddItem({ defaultType, onDone }: { defaultType: string; onDone: (id?: string) => void }) {
-  const [f, setF] = useState<{ type: string; name: string; unit: string; minStock: string; noStock: boolean }>({
-    type: defaultType, name: '', unit: ITEM_TYPES.find((t) => t.value === defaultType)?.unit ?? 'шт', minStock: '', noStock: false,
+  const [f, setF] = useState<{ type: string; kind: string; name: string; unit: string; minStock: string; noStock: boolean }>({
+    type: defaultType, kind: '', name: '', unit: ITEM_TYPES.find((t) => t.value === defaultType)?.unit ?? 'шт', minStock: '', noStock: false,
   });
+  const kinds = useKinds(f.type);
   const [error, setError] = useState('');
   async function save(e: React.FormEvent) {
     e.preventDefault(); setError('');
     try {
-      const it = await api.createItem({ type: f.type, name: f.name.trim(), unit: f.unit.trim(), minStock: parseNum(f.minStock), noStock: f.type === 'RAW' && f.noStock });
+      const it = await api.createItem({ type: f.type, kind: f.kind.trim() || null, name: f.name.trim(), unit: f.unit.trim(), minStock: parseNum(f.minStock), noStock: f.type === 'RAW' && f.noStock });
       onDone(it.id);
     } catch (err: any) { setError(err.message); }
   }
   return (
     <form onSubmit={save} className="bg-white rounded-xl border border-brand-200 p-4 mb-4 flex flex-wrap items-end gap-3">
-      <label className="flex flex-col gap-1 text-xs text-slate-500">Тип
+      <label className="flex flex-col gap-1 text-xs text-slate-500">Категория
         <select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value, unit: ITEM_TYPES.find((t) => t.value === e.target.value)!.unit })} className={inputCls}>
           {ITEM_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-slate-500 w-44">Тип
+        <input value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })} list="add-kinds" className={inputCls} placeholder="напр. Биоцид" />
+        <datalist id="add-kinds">{kinds.map((k) => <option key={k} value={k} />)}</datalist>
       </label>
       <label className="flex flex-col gap-1 text-xs text-slate-500 flex-1 min-w-[240px]">Наименование
         <input autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} className={inputCls} />

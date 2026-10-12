@@ -9,6 +9,10 @@ export const ITEM_TYPES = [
 
 export const typeLabel = (t: string) => ITEM_TYPES.find((x) => x.value === t)?.label ?? t;
 
+// Название позиции с типом: «МК-40 (наполнитель)» — в списках выбора и составах, где категория не видна
+export const itemLabel = (i: { name: string; kind?: string | null } | null | undefined) =>
+  !i ? '' : i.kind ? `${i.name} (${i.kind.toLowerCase()})` : i.name;
+
 export const DOC_TYPES = [
   { value: 'RECEIPT', label: 'Приход', short: 'Приход' },
   { value: 'OPENING', label: 'Ввод начальных остатков', short: 'Нач. остатки' },

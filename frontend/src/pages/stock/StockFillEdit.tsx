@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { api } from '../../api/client';
-import { DOC_STATUS, btnPrimary, btnSecondary, fmtDate, fmtMoney, fmtQty, inputCls, parseNum } from './common';
+import { DOC_STATUS, btnPrimary, btnSecondary, fmtDate, fmtMoney, fmtQty, inputCls, parseNum, itemLabel } from './common';
 
 interface Out { key: string; itemId: string; planQty: string; qty: string; lotNumber?: string | null; lotId?: string | null }
 interface Mat { key: string; itemId: string; planQty: number | null; qty: string; lotId: string; lotNumber?: string | null }
@@ -253,7 +253,7 @@ export default function StockFillEdit() {
                 const it = itemById.get(m.itemId);
                 return (
                   <tr key={m.key} className="border-b last:border-0">
-                    <td className="px-3 py-1.5">{it?.name}</td>
+                    <td className="px-3 py-1.5">{itemLabel(it)}</td>
                     <td className="px-3 py-1.5 text-right text-slate-600 whitespace-nowrap">{m.planQty != null ? `${fmtQty(m.planQty)} ${it?.unit ?? ''}` : '—'}</td>
                     <td className="px-3 py-1.5 text-right"><input disabled={readOnly} value={m.qty} onChange={(e) => patchMat(m.key, { qty: e.target.value })} className={inputCls + ' w-24 text-right'} /></td>
                     <td className="px-3 py-1.5">

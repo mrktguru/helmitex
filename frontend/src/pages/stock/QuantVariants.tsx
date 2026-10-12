@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { api } from '../../api/client';
-import { btnPrimary, btnSecondary, inputCls, parseNum } from './common';
+import { btnPrimary, btnSecondary, inputCls, parseNum, itemLabel } from './common';
 import { Section } from './StockLayout';
 
 interface Mat { key: string; itemId: string; qty: string }
@@ -97,7 +97,7 @@ export default function QuantVariants({ item, spec }: { item: any; spec: any }) 
                   <td className="py-2 px-3">
                     <select value={r.boxItemId} onChange={(e) => patch(r.key, { boxItemId: e.target.value })} className={inputCls + ' w-full'}>
                       <option value="">— без короба —</option>
-                      {boxes.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      {boxes.map((b) => <option key={b.id} value={b.id}>{itemLabel(b)}</option>)}
                     </select>
                   </td>
                   <td className="py-2 text-right">{r.id ? `${r.inStock} кв.` : '—'}</td>
@@ -115,7 +115,7 @@ export default function QuantVariants({ item, spec }: { item: any; spec: any }) 
                           <div key={m.key} className="flex gap-2 mb-1.5 items-center">
                             <select value={m.itemId} onChange={(e) => patch(r.key, { materials: r.materials.map((x) => (x.key === m.key ? { ...x, itemId: e.target.value } : x)) })} className={inputCls + ' flex-1'}>
                               <option value="">— материал —</option>
-                              {mats.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+                              {mats.map((i) => <option key={i.id} value={i.id}>{itemLabel(i)}</option>)}
                             </select>
                             <input value={m.qty} onChange={(e) => patch(r.key, { materials: r.materials.map((x) => (x.key === m.key ? { ...x, qty: e.target.value } : x)) })} className={inputCls + ' w-20 text-right'} />
                             <button onClick={() => patch(r.key, { materials: r.materials.filter((x) => x.key !== m.key) })} className="text-slate-400 hover:text-red-600 px-1">✕</button>

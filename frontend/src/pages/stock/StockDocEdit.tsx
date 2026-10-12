@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import clsx from 'clsx';
 import { api } from '../../api/client';
 import {
-  DOC_STATUS, ITEM_TYPES, STATE_LABEL, btnPrimary, btnSecondary, docTypeLabel,
+  DOC_STATUS, ITEM_TYPES, STATE_LABEL, itemLabel, btnPrimary, btnSecondary, docTypeLabel,
   fmtMoney, fmtQty, inputCls, parseNum,
 } from './common';
 
@@ -211,7 +211,7 @@ export default function StockDocEdit() {
                       <option value="">— выберите —</option>
                       {grouped.map((g) => (
                         <optgroup key={g.value} label={g.label}>
-                          {g.items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+                          {g.items.map((i) => <option key={i.id} value={i.id}>{itemLabel(i)}</option>)}
                         </optgroup>
                       ))}
                     </select>

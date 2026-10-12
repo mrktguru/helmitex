@@ -15,6 +15,7 @@ const states = ['NONE', 'UNLABELED', 'LABELED'] as const;
 const itemSchema = z.object({
   type: z.enum(itemTypes),
   name: z.string().trim().min(1).max(200),
+  kind: z.string().trim().max(100).nullable().optional().transform((v) => v || null),
   unit: z.string().trim().min(1).max(10),
   minStock: z.number().nonnegative().nullable().optional(),
   noStock: z.boolean().optional(),

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 import { api } from '../../api/client';
-import { btnPrimary, btnSecondary, fmtQty, inputCls, parseNum } from './common';
+import { btnPrimary, btnSecondary, fmtQty, inputCls, itemLabel, parseNum } from './common';
 import QuantVariants from './QuantVariants';
 import { Section } from './StockLayout';
 
@@ -104,7 +104,7 @@ export default function SkuSheet({ item }: { item: any }) {
             <div key={l.key} className="flex gap-2 mb-1.5 items-center">
               <select value={l.itemId} onChange={(e) => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, itemId: e.target.value } : x)))} className={inputCls + ' flex-1'}>
                 <option value="">— материал —</option>
-                {mats.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                {mats.map((m) => <option key={m.id} value={m.id}>{itemLabel(m)}</option>)}
               </select>
               <input value={l.qty} onChange={(e) => setLines((ls) => ls.map((x) => (x.key === l.key ? { ...x, qty: e.target.value } : x)))} className={inputCls + ' w-20 text-right'} />
               <span className="text-xs text-slate-500 w-6">{mats.find((m) => m.id === l.itemId)?.unit}</span>

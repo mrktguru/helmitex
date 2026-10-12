@@ -5,7 +5,7 @@ import { api } from '../../api/client';
 import { PageHeader, Section } from './StockLayout';
 import { TypeChip } from './StockWarehouse';
 import SkuSheet from './SkuSheet';
-import { STATE_LABEL, btnPrimary, btnSecondary, fmtDate, fmtMoney, fmtQty, inputCls, parseNum } from './common';
+import { STATE_LABEL, btnPrimary, btnSecondary, fmtDate, fmtMoney, fmtQty, inputCls, itemLabel, parseNum, typeLabel } from './common';
 
 // Единая карточка позиции на одном листе: основное → (рецептура | производство, ЧЗ, Ozon, кванты) → остатки
 export default function StockItemCard() {
@@ -22,7 +22,7 @@ export default function StockItemCard() {
   return (
     <div className="max-w-5xl">
       <Link to="/stock/catalog" className="text-sm text-slate-500 hover:text-slate-900">← Справочники</Link>
-      <PageHeader title={<span className="flex flex-wrap items-center gap-3">{item.name} <TypeChip type={item.type} />{item.archived && <span className="text-sm font-normal text-slate-400">архив</span>}</span>} />
+      <PageHeader title={<span className="flex flex-wrap items-center gap-3">{item.name}{item.kind && <span className="text-base font-normal text-slate-500">{item.kind}</span>} <TypeChip type={item.type} />{item.archived && <span className="text-sm font-normal text-slate-400">архив</span>}</span>} />
       <div className="space-y-4">
         <Section title="Основное"><MainForm item={item} onSaved={load} /></Section>
         {item.type === 'SEMI' && <Section title="Рецептура" hint="Выберите рецептуру из справочника — по ней считается замес."><RecipePick item={item} onSaved={load} /></Section>}
@@ -34,12 +34,13 @@ export default function StockItemCard() {
 }
 
 function MainForm({ item, onSaved }: { item: any; onSaved: () => void }) {
-  const [f, setF] = useState({ name: item.name, unit: item.unit, minStock: item.minStock != null ? String(item.minStock).replace('.', ',') : '', noStock: item.noStock });
+  const [f, setF] = useState({ name: item.name, kind: item.kind ?? '', unit: item.unit, minStock: item.minStock != null ? String(item.minStock).replace('.', ',') : '', noStock: item.noStock });
+  const kinds = useKinds(item.type);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   async function save() {
     setMsg(null);
     try {
-      await api.updateItem(item.id, { name: f.name.trim(), unit: f.unit.trim(), minStock: parseNum(f.minStock), noStock: f.noStock });
+      await api.updateItem(item.id, { name: f.name.trim(), kind: f.kind.trim() || null, unit: f.unit.trim(), minStock: parseNum(f.minStock), noStock: f.noStock });
       setMsg({ ok: true, text: 'Сохранено' }); onSaved();
     } catch (e: any) { setMsg({ ok: false, text: e.message }); }
   }
@@ -49,9 +50,13 @@ function MainForm({ item, onSaved }: { item: any; onSaved: () => void }) {
   }
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-[1fr_100px_140px] gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-[1fr_200px_100px_140px] gap-3">
         <label className="flex flex-col gap-1 text-xs text-slate-500">Наименование
           <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} className={inputCls} />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-slate-500">Тип <span className="sr-only">в категории {typeLabel(item.type)}</span>
+          <input value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })} list="item-kinds" className={inputCls} placeholder="—" />
+          <datalist id="item-kinds">{kinds.map((k) => <option key={k} value={k} />)}</datalist>
         </label>
         <label className="flex flex-col gap-1 text-xs text-slate-500">Единица
           <input value={f.unit} onChange={(e) => setF({ ...f, unit: e.target.value })} className={inputCls} />
@@ -141,11 +146,20 @@ function RecipePick({ item, onSaved }: { item: any; onSaved: () => void }) {
           <thead><tr className="text-left text-xs text-slate-500"><th className="py-1 w-16">Этап</th><th>Компонент</th><th className="text-right">%</th></tr></thead>
           <tbody>
             {cur.lines.map((l: any) => (
-              <tr key={l.id} className="border-t border-slate-100"><td className="py-1">{l.stage}</td><td>{l.item.name}{l.item.noStock ? <span className="text-xs text-slate-400"> · вода</span> : ''}</td><td className="text-right">{fmtQty(l.percent, 3)}</td></tr>
+              <tr key={l.id} className="border-t border-slate-100"><td className="py-1">{l.stage}</td><td>{itemLabel(l.item)}{l.item.noStock ? <span className="text-xs text-slate-400"> · без учёта</span> : ''}</td><td className="text-right">{fmtQty(l.percent, 3)}</td></tr>
             ))}
           </tbody>
         </table>
       )}
     </div>
   );
+}
+
+// Уже введённые типы в категории — подсказки для поля «Тип»
+export function useKinds(type: string) {
+  const [kinds, setKinds] = useState<string[]>([]);
+  useEffect(() => {
+    api.getItems(type as any, true).then((list) => setKinds([...new Set(list.map((i: any) => i.kind).filter(Boolean))].sort((a: any, b: any) => a.localeCompare(b, 'ru')) as string[])).catch(() => {});
+  }, [type]);
+  return kinds;
 }

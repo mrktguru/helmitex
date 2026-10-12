@@ -211,7 +211,7 @@ function StockTable() {
               <tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
                 <th className="pl-4 pr-2 py-2.5 font-medium w-6" />
                 <th className="px-2 py-2.5 font-medium">Позиция</th>
-                <th className="px-3 py-2.5 font-medium">Тип</th>
+                <th className="px-3 py-2.5 font-medium">Категория</th>
                 <th className="px-3 py-2.5 font-medium text-right">Остаток</th>
                 <th className="px-3 py-2.5 font-medium text-right">Лотов</th>
                 <th className="px-3 py-2.5 font-medium">Ближ. срок</th>
@@ -232,6 +232,7 @@ function StockTable() {
                       <td className="pl-4 pr-2 py-2.5 text-slate-400">{g.rows.length > 0 ? (isOpen ? '▾' : '▸') : ''}</td>
                       <td className="px-2 py-2.5">
                         <Link to={`/stock/catalog/${g.item.id}`} onClick={(e) => e.stopPropagation()} className="font-medium hover:text-brand-700">{g.item.name}</Link>
+                        {g.item.kind && <span className="ml-2 text-xs text-slate-500">{g.item.kind}</span>}
                         {g.item.noStock && <span className="ml-2 text-xs text-slate-400">без учёта</span>}
                       </td>
                       <td className="px-3 py-2.5"><TypeChip type={g.item.type} /></td>

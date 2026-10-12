@@ -113,9 +113,9 @@ export const api = {
   // Stock
   getItems: (type?: string, archived = false) =>
     request<any[]>(`/stock/items?${new URLSearchParams({ ...(type ? { type } : {}), ...(archived ? { archived: '1' } : {}) })}`),
-  createItem: (data: { type: string; name: string; unit: string; minStock?: number | null; noStock?: boolean }) =>
+  createItem: (data: { type: string; kind?: string | null; name: string; unit: string; minStock?: number | null; noStock?: boolean }) =>
     request<any>('/stock/items', { method: 'POST', body: JSON.stringify(data) }),
-  updateItem: (id: string, data: Partial<{ name: string; unit: string; minStock: number | null; noStock: boolean; archived: boolean; recipeId: string | null }>) =>
+  updateItem: (id: string, data: Partial<{ name: string; kind: string | null; unit: string; minStock: number | null; noStock: boolean; archived: boolean; recipeId: string | null }>) =>
     request<any>(`/stock/items/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   getBalances: (params: { type?: string; itemId?: string } = {}) =>
     request<any[]>(`/stock/balances?${new URLSearchParams(params as Record<string, string>)}`),

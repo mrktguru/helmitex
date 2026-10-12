@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { api } from '../../api/client';
-import { btnPrimary, btnSecondary, fmtQty, inputCls, parseNum } from './common';
+import { btnPrimary, btnSecondary, fmtQty, inputCls, itemLabel, parseNum } from './common';
 
 interface Line { key: string; itemId: string; percent: string; stage: string }
 
@@ -123,7 +123,7 @@ export default function StockRecipes() {
                     <td className="px-3 py-1.5">
                       <select value={l.itemId} onChange={(e) => patch(l.key, { itemId: e.target.value })} className={inputCls + ' w-full'}>
                         <option value="">— сырьё —</option>
-                        {raws.map((r) => <option key={r.id} value={r.id}>{r.name}{r.noStock ? ' (без учёта)' : ''}</option>)}
+                        {raws.map((r) => <option key={r.id} value={r.id}>{itemLabel(r)}{r.noStock ? ' — без учёта' : ''}</option>)}
                       </select>
                     </td>
                     <td className="px-3 py-1.5 text-right"><input value={l.percent} onChange={(e) => patch(l.key, { percent: e.target.value })} className={inputCls + ' w-24 text-right'} /></td>

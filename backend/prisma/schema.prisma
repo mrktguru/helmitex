@@ -126,7 +126,8 @@ enum ProductState {
 
 model Item {
   id          String              @id @default(uuid())
-  type        ItemType
+  type        ItemType // категория: сырьё, тара, упаковка, этикетки, полуфабрикаты, готовая продукция
+  kind        String? // тип внутри категории (свободный): «Биоцид», «Загуститель», для коробов — размер, для ГП — «Шпатлёвка»
   name        String
   unit        String // "кг" | "шт" | "л"
   minStock    Float?
