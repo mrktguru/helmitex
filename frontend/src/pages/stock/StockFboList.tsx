@@ -26,6 +26,15 @@ export default function StockFboList() {
   }
   useEffect(() => { load(); }, []);
 
+  // Статусы активных поставок из Ozon; отправленные Ozon-ом отгружаются автоматически
+  const [syncing, setSyncing] = useState(false);
+  async function refresh() {
+    setSyncing(true); setError('');
+    try { await api.syncFboAll(); } catch (e: any) { setError(e.message); }
+    await load();
+    setSyncing(false);
+  }
+
   const total = Object.values(counts).reduce((s, v) => s + (Number(v) || 0), 0);
 
   async function create() {
@@ -155,7 +164,7 @@ export default function StockFboList() {
           </table>
         )}
       </div>
-      <button onClick={load} className={btnSecondary}>Обновить</button>
+      <button disabled={syncing} onClick={refresh} className={btnSecondary}>{syncing ? 'Обновляю из Ozon…' : 'Обновить статусы из Ozon'}</button>
       </>}
     </div>
   );

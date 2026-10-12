@@ -188,6 +188,7 @@ export const api = {
   createFboPlan: (items: { clusterId: string; clusterName: string; quantTypeId: string; count: number }[]) =>
     request<any>('/stock/fbo/plan', { method: 'POST', body: JSON.stringify({ items }) }),
   getFboList: (active = false) => request<any[]>(`/stock/fbo${active ? '?active=1' : ''}`),
+  syncFboAll: () => request<any>('/stock/fbo/sync-all', { method: 'POST' }),
   getFbo: (id: string) => request<any>(`/stock/fbo/${id}`),
   createFbo: (data: any) => request<any>('/stock/fbo', { method: 'POST', body: JSON.stringify(data) }),
   fboDraft: (id: string, data: any) => request<any>(`/stock/fbo/${id}/draft`, { method: 'POST', body: JSON.stringify(data) }),

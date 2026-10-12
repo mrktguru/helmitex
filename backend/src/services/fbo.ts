@@ -320,11 +320,20 @@ export async function syncShipment(id: string) {
       storageName: supply?.storage_warehouse?.name ?? s.storageName,
       dropOffName: o.drop_off_warehouse?.name ?? s.dropOffName,
       ...(ts && !s.timeslotFrom ? { timeslotFrom: ts.from, timeslotTo: ts.to } : {}),
-      ...(o.state === 'COMPLETED' && s.status === 'SHIPPED' ? { status: 'COMPLETED' } : {}),
     },
   });
+  // Ozon уже принял груз, а у нас поставка не отгружена — списываем кванты сами
+  if (SHIPPED_STATES.includes(o.state) && ['BOOKED', 'CARGOES_SET', 'LABELS_READY'].includes(s.status)) {
+    await ship(id, s.userId);
+  }
+  if (o.state === 'COMPLETED') {
+    await prisma.fboShipment.updateMany({ where: { id, status: 'SHIPPED' }, data: { status: 'COMPLETED' } });
+  }
   return load(id);
 }
+
+// Состояния заявки Ozon, при которых груз уже передан
+const SHIPPED_STATES = ['ACCEPTED_AT_SUPPLY_WAREHOUSE', 'IN_TRANSIT', 'ACCEPTANCE_AT_STORAGE_WAREHOUSE', 'REPORTS_CONFIRMATION_AWAITING', 'COMPLETED'];
 
 // Фоновая синхронизация всех активных поставок
 export async function syncAllShipments(): Promise<void> {

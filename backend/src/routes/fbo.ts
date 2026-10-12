@@ -6,7 +6,7 @@ import { StockError } from '../services/stock';
 import {
   OZON_DEFAULTS_KEY, OZON_STATE_LABEL, OzonDefaults, defaultOzonSettings, getSetting, ozon, ozonConfigured, setSetting,
 } from '../services/ozon';
-import { book, cancelShipment, createOzonDraft, createShipment, getTimeslots, makeLabels, setCargoes, ship, syncShipment, syncSkus } from '../services/fbo';
+import { book, cancelShipment, createOzonDraft, createShipment, getTimeslots, makeLabels, setCargoes, ship, syncAllShipments, syncShipment, syncSkus } from '../services/fbo';
 import { downloadFile } from '../services/s3';
 import { getDemand } from '../services/demand';
 
@@ -197,6 +197,9 @@ router.get('/fbo', h(async (req, res) => {
     ozonStateLabel: s.ozonState ? OZON_STATE_LABEL[s.ozonState] ?? s.ozonState : null,
   })));
 }));
+
+// POST /api/stock/fbo/sync-all — статусы всех активных поставок из Ozon
+router.post('/fbo/sync-all', h(async (_req, res) => { await syncAllShipments(); res.json({ ok: true }); }));
 
 router.get('/fbo/:id', h(async (req, res) => { res.json(await full(req.params.id)); }));
 
