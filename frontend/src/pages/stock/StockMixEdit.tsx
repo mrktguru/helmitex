@@ -75,7 +75,8 @@ export default function StockMixEdit() {
   function onWater(v: string) {
     setWater(v);
     const w = parseNum(v);
-    setHead((h) => ({ ...h, plannedQty: w && waterPct > 0 ? numStr(Math.round((w * 100 / waterPct) * 100) / 100) : '' }));
+    // без округления массы — иначе вода этапа от округлённой массы уйдёт на граммы (20 → 20,001)
+    setHead((h) => ({ ...h, plannedQty: w && waterPct > 0 ? numStr(w * 100 / waterPct) : '' }));
   }
   useEffect(() => {
     setStages(semi?.recipe?.stages ?? {});
@@ -109,6 +110,14 @@ export default function StockMixEdit() {
         if (pl.shortage > 0) {
           short.push(`${pl.item.name}: не хватает ${kgStr(pl.shortage)}`);
           next.push({ key: String(++seq), itemId: pl.item.id, stage: pl.stage, planQty: pl.shortage, qty: numStr(pl.shortage), lotId: '', reason: '' });
+        }
+      }
+      // Режим «по воде»: вода первого этапа — ровно столько, сколько залито в бочку
+      const w = parseNum(water);
+      if (mode === 'water' && w && waterPct > 0) {
+        for (const l of next) {
+          const rl = waterLines.find((x: any) => x.itemId === l.itemId && x.stage === l.stage && x.stage === waterStage);
+          if (rl) { const exact = Math.round((w * rl.percent / waterPct) * 1000) / 1000; l.planQty = exact; l.qty = numStr(exact); }
         }
       }
       setLines(next);
@@ -239,7 +248,7 @@ export default function StockMixEdit() {
               : <input value={water} onChange={(e) => onWater(e.target.value)} className={inputCls + ' text-right'} placeholder="кг воды" />}
             {mode === 'water' && !readOnly && (
               <span className="text-[11px] text-slate-600">
-                {head.plannedQty ? <>замес <b>{head.plannedQty} кг</b> · вода этапа {waterStage} — {fmtQty(waterPct, 3)} %</> : `вода этапа ${waterStage} в рецептуре — ${fmtQty(waterPct, 3)} %`}
+                {head.plannedQty ? <>замес <b>{fmtQty(parseNum(head.plannedQty) ?? 0, 2)} кг</b> · вода этапа {waterStage} — {fmtQty(waterPct, 3)} %</> : `вода этапа ${waterStage} в рецептуре — ${fmtQty(waterPct, 3)} %`}
               </span>
             )}
           </div>
