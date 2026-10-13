@@ -105,20 +105,20 @@ export default function OzonFbs() {
           {checks && <th className="pl-4 w-8"><input type="checkbox" checked={list.length > 0 && list.every((p) => sel.has(p.postingNumber))}
             onChange={(e) => setSel(e.target.checked ? new Set(list.map((p) => p.postingNumber)) : new Set())} /></th>}
           <th className="px-3 py-2 font-medium">Отправление</th><th className="px-3 py-2 font-medium">Состав</th>
-          <th className="px-3 py-2 font-medium">Принят</th><th className="px-3 py-2 font-medium text-right">Сумма, ₽</th><th className="px-3 py-2 font-medium">Статус</th>
+          <th className="px-3 py-2 font-medium hidden sm:table-cell">Принят</th><th className="px-3 py-2 font-medium text-right hidden sm:table-cell">Сумма, ₽</th><th className="px-3 py-2 font-medium">Статус</th>
         </tr></thead>
         <tbody>
           {list.slice(0, n).map((p) => (
             <tr key={p.postingNumber} className="border-b border-slate-100 last:border-0">
               {checks && <td className="pl-4"><input type="checkbox" checked={sel.has(p.postingNumber)}
                 onChange={() => setSel((s) => { const x = new Set(s); x.has(p.postingNumber) ? x.delete(p.postingNumber) : x.add(p.postingNumber); return x; })} /></td>}
-              <td className="px-3 py-2 font-mono text-xs">{p.postingNumber}</td>
+              <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{p.postingNumber}</td>
               <td className="px-3 py-2">{p.products.map((x: any) => (
                 <span key={x.offerId} className={clsx('inline-block mr-1 text-[11px] font-medium px-2 py-0.5 rounded-full', x.item ? 'bg-amber-50 text-amber-800' : 'bg-rose-100 text-rose-700')} title={x.name}>
                   {x.item ? short(x.item.name) : x.offerId} × {x.qty}</span>))}
                 {p.shipError && <div className="text-xs text-red-600 mt-0.5">{p.shipError}</div>}</td>
-              <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{dt(p.inProcessAt)}</td>
-              <td className="px-3 py-2 text-right">{fmtMoney(p.products.reduce((s: number, x: any) => s + x.qty * x.price, 0))}</td>
+              <td className="px-3 py-2 text-slate-500 whitespace-nowrap hidden sm:table-cell">{dt(p.inProcessAt)}</td>
+              <td className="px-3 py-2 text-right hidden sm:table-cell">{fmtMoney(p.products.reduce((s: number, x: any) => s + x.qty * x.price, 0))}</td>
               <td className="px-3 py-2">{stPill(p.status)}{p.stockDocId && <span className="ml-1 text-[11px] text-slate-400" title="списано со склада">✓ склад</span>}</td>
             </tr>
           ))}
@@ -134,7 +134,7 @@ export default function OzonFbs() {
       <PageHeader title="Отправки Ozon FBS"
         hint={day ? `Отгрузка ${dayLabel(day)}${shipAt ? ` до ${hm(shipAt)}` : ''} · склад FBS «Рощино» · статусы обновляются из Ozon каждые 15 минут` : 'Отправления FBS из кабинета Ozon'}>
         {days && days.length > 0 && (
-          <select value={day ?? ''} onChange={(e) => { setStep(null); setParams({ day: e.target.value }); }} className="border border-slate-300 rounded-lg px-2 py-2 text-sm bg-white">
+          <select value={day ?? ''} onChange={(e) => { setStep(null); setParams({ day: e.target.value }); }} className="border border-slate-300 rounded-lg px-2 py-2 text-sm bg-white flex-1 sm:flex-none min-w-0">
             {days.map((d) => {
               const c = d.counts; const total = Object.values(c as Record<string, number>).reduce((a, b) => a + b, 0);
               return <option key={d.day} value={d.day}>Отгрузка {dayLabel(d.day)} · {total} отпр.{c.awaiting_packaging ? ` · ждут ${c.awaiting_packaging}` : ''}</option>;
@@ -148,10 +148,10 @@ export default function OzonFbs() {
       {msg && <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-4 py-2.5 text-sm">{msg}</div>}
       {!days || (day && !data) ? <p className="text-slate-500">Загрузка…</p> : !day ? <p className="text-slate-500">Отправлений FBS за последние 14 дней нет.</p> : (<>
 
-      <ol className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+      <ol className="flex sm:grid sm:grid-cols-5 gap-2 overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 pb-1">
         {steps.map(([t, s], i) => (
-          <li key={t}>
-            <button onClick={() => setStep(i + 1)} className={clsx('w-full text-left rounded-xl border px-3 py-2.5',
+          <li key={t} className="shrink-0 w-[42%] sm:w-auto">
+            <button onClick={() => setStep(i + 1)} className={clsx('w-full h-full text-left rounded-xl border px-3 py-2.5',
               cur === i + 1 ? 'bg-brand-600 border-brand-600 text-white' : done[i] ? 'bg-white border-brand-200' : 'bg-white border-slate-200 text-slate-500')}>
               <div className={clsx('text-xs', cur === i + 1 ? 'text-brand-100' : 'text-slate-500')}>Шаг {i + 1} {done[i] && '✓'}</div>
               <div className="font-semibold">{t}</div>
@@ -188,7 +188,7 @@ export default function OzonFbs() {
             </div>
             {table(waiting, true)}
           </div>
-          <div className="space-y-4 lg:sticky lg:top-4">
+          <div className="space-y-4 lg:sticky lg:top-4 order-first lg:order-none">
             <div className="bg-white rounded-xl border border-slate-200 p-4">
               <h3 className="font-semibold mb-3">Лист подбора</h3>
               <div className="space-y-1.5 text-sm">

@@ -91,6 +91,7 @@ export default function StockFboList() {
           <p className="text-sm text-slate-500">Нет собранных квантов на складе. <Link to="/stock/quant/new" className="text-brand-600 hover:underline">Собрать кванты</Link></p>
         ) : (
           <>
+            <div className="overflow-x-auto">
             <table className="w-full text-sm tabular-nums">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b">
@@ -121,6 +122,7 @@ export default function StockFboList() {
                 })}
               </tbody>
             </table>
+            </div>
             <div className="flex flex-wrap items-end gap-3">
               <label className="flex flex-col gap-1 text-xs text-slate-500 flex-1 min-w-[200px]">Комментарий
                 <input value={comment} onChange={(e) => setComment(e.target.value)} className={inputCls} />

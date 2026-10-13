@@ -82,7 +82,7 @@ function Panel({ title, hint, right, children }: { title: string; hint?: string;
         <div><h2 className="font-semibold">{title}</h2>{hint && <p className="text-xs text-slate-500 mt-0.5">{hint}</p>}</div>
         {right}
       </div>
-      <div className="p-5">{children}</div>
+      <div className="p-4 sm:p-5 overflow-x-auto">{children}</div>
     </section>
   );
 }
@@ -119,7 +119,7 @@ function MapArticle({ article, onDone }: { article: string; onDone: () => void }
   const [err, setErr] = useState('');
   return (
     <span className="inline-flex items-center gap-2">
-      <select className={clsx(inputCls, 'w-64')} defaultValue="" onChange={async (e) => {
+      <select className={clsx(inputCls, 'w-full sm:w-64')} defaultValue="" onChange={async (e) => {
         if (!e.target.value) return;
         try { await api.wbMapArticle(article, e.target.value); onDone(); } catch (x: any) { setErr(x.message); }
       }}>
@@ -226,8 +226,8 @@ function StepSupply({ data, reload, done }: { data: State; reload: (sync?: boole
   }
 
   return (
-    <div className="grid lg:grid-cols-[1fr_380px] gap-5">
-      <div className="space-y-5">
+    <div className="grid lg:grid-cols-[minmax(0,1fr)_380px] gap-5">
+      <div className="space-y-5 min-w-0">
         <Panel title="Состав и остатки" hint="Хватит ли товара на складе портала и кодов ЧЗ">
           <table className="w-full text-sm">
             <thead className="text-left text-xs text-slate-500"><tr><th className="pb-2">Товар</th><th className="text-right">Заданий</th><th className="text-right">Без ЧЗ</th><th className="text-right">С ЧЗ</th><th className="text-right">Свободных кодов</th></tr></thead>
@@ -600,7 +600,7 @@ function StepPrint({ data, reload }: { data: State; reload: () => void }) {
       <div className="divide-y divide-slate-100">
         <div className="py-3">
           <div className="flex flex-wrap items-center gap-3">
-            <div className="flex-1 min-w-[240px]">
+            <div className="flex-1 min-w-[200px]">
               <div className="font-medium">Стикеры заданий WB</div>
               <div className="text-sm text-slate-500">Есть у {withSticker} из {active.length} заданий · номера стикеров известны у {withNumber}</div>
             </div>
@@ -617,12 +617,12 @@ function StepPrint({ data, reload }: { data: State; reload: () => void }) {
         </div>
         {rows.map(([kind, title, hint, name, ok]) => (
           <div key={kind} className="flex flex-wrap items-center gap-3 py-3">
-            <div className="flex-1 min-w-[240px]"><div className="font-medium">{title}</div><div className="text-sm text-slate-500">{hint}</div></div>
+            <div className="flex-1 min-w-[200px]"><div className="font-medium">{title}</div><div className="text-sm text-slate-500">{hint}</div></div>
             <button className={ok ? btnPrimary : btnSecondary} disabled={!ok || !!busy} onClick={() => dl(kind, name)}>{busy === kind ? 'Готовлю…' : '⇩ PDF'}</button>
           </div>
         ))}
         <div className="flex flex-wrap items-center gap-3 py-3">
-          <div className="flex-1 min-w-[240px]"><div className="font-medium">Таблица использованных ЧЗ</div><div className="text-sm text-slate-500">Формат шаблона WB: № задания, Стикер, КИЗ, Бренд, Наименование, Артикул (+ партия)</div></div>
+          <div className="flex-1 min-w-[200px]"><div className="font-medium">Таблица использованных ЧЗ</div><div className="text-sm text-slate-500">Формат шаблона WB: № задания, Стикер, КИЗ, Бренд, Наименование, Артикул (+ партия)</div></div>
           <button className={btnSecondary} disabled={!!busy} onClick={() => downloadFile(`/stock/wb/cz.xlsx?supplies=${encodeURIComponent(id)}`, `ЧЗ ${id}.xlsx`).catch((e) => setError(e.message))}>⇩ .xlsx</button>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api } from '../api/client';
+import { api, saveBlob } from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
 
 interface Props { projectId: string; czKey?: number; onCzChange?: () => void; }
@@ -97,15 +97,7 @@ export default function ExportSection({ projectId, czKey, onCzChange }: Props) {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `batch-${b.fromIndex}-${b.toIndex}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      saveBlob(await res.blob(), `batch-${b.fromIndex}-${b.toIndex}.pdf`);
     } catch (err: any) {
       setError(`Ошибка скачивания: ${err.message}`);
     }

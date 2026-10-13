@@ -55,12 +55,51 @@ export async function downloadFile(path: string, fallbackName: string): Promise<
   const cd = res.headers.get('Content-Disposition') ?? '';
   const m = cd.match(/filename\*=UTF-8''([^;]+)/);
   const name = m ? decodeURIComponent(m[1]) : fallbackName;
-  const url = URL.createObjectURL(await res.blob());
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  saveBlob(await res.blob(), name);
+}
+
+// Телефон/планшет: программный клик после await браузеры блокируют — показываем панель с кнопками
+const isTouch = () => typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+
+export function saveBlob(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob);
+  if (!isTouch()) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    return;
+  }
+  document.getElementById('dl-sheet')?.remove();
+  const file = new File([blob], name, { type: blob.type || 'application/octet-stream' });
+  const canShare = !!navigator.canShare?.({ files: [file] });
+  const size = blob.size > 1e6 ? `${(blob.size / 1e6).toFixed(1)} МБ` : `${Math.max(1, Math.round(blob.size / 1e3))} КБ`;
+  const wrap = document.createElement('div');
+  wrap.id = 'dl-sheet';
+  wrap.className = 'fixed inset-0 z-[100] bg-black/40 flex items-end sm:items-center justify-center p-3';
+  const btn = 'block w-full text-center rounded-xl py-3 text-base font-medium';
+  wrap.innerHTML = `
+    <div class="w-full max-w-md bg-white rounded-2xl p-4 space-y-2 shadow-xl">
+      <div class="text-sm text-slate-500">Файл готов · ${size}</div>
+      <div class="font-semibold break-all pb-1"></div>
+      ${canShare ? `<button data-a="share" class="${btn} bg-brand-600 text-white">Поделиться / сохранить в «Файлы»</button>` : ''}
+      <a data-a="save" class="${btn} ${canShare ? 'bg-slate-100 text-slate-800' : 'bg-brand-600 text-white'}">Скачать</a>
+      <a data-a="open" target="_blank" rel="noopener" class="${btn} bg-slate-100 text-slate-800">Открыть в браузере</a>
+      <button data-a="close" class="${btn} text-slate-500">Закрыть</button>
+    </div>`;
+  (wrap.querySelector('.font-semibold') as HTMLElement).textContent = name;
+  const save = wrap.querySelector('[data-a=save]') as HTMLAnchorElement;
+  save.href = url; save.download = name;
+  (wrap.querySelector('[data-a=open]') as HTMLAnchorElement).href = url;
+  const close = () => { wrap.remove(); setTimeout(() => URL.revokeObjectURL(url), 60_000); };
+  wrap.addEventListener('click', (e) => {
+    const a = (e.target as HTMLElement).closest('[data-a]')?.getAttribute('data-a');
+    if (e.target === wrap || a === 'close') close();
+    if (a === 'share') navigator.share({ files: [file], title: name }).then(close).catch(() => undefined);
+    if (a === 'save' || a === 'open') setTimeout(close, 500);
+  });
+  document.body.appendChild(wrap);
 }
 
 // Загрузка файла формой (multipart) с авторизацией

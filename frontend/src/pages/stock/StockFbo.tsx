@@ -93,7 +93,7 @@ export default function StockFbo() {
       )}
 
       {/* Состав */}
-      <div className="bg-white rounded-xl border p-4 space-y-2">
+      <div className="bg-white rounded-xl border p-4 space-y-2 overflow-x-auto">
         <h3 className="font-semibold text-sm">Состав: {s.cargoes.length} коробок · {units} шт</h3>
         <table className="w-full text-sm tabular-nums">
           <tbody>
@@ -201,6 +201,7 @@ export default function StockFbo() {
             <button onClick={() => dl(`/stock/quant-labels.pdf?ids=${quantIds}`)} className={btnSecondary}>Этикетки квантов</button>
             <button onClick={() => dl(`/stock/quant-codes.csv?ids=${quantIds}`)} className={btnSecondary}>Коды ЧЗ поставки (CSV)</button>
           </div>
+          <div className="overflow-x-auto">
           <table className="w-full text-sm tabular-nums">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b">
@@ -227,6 +228,7 @@ export default function StockFbo() {
               ))}
             </tbody>
           </table>
+          </div>
           {s.labelS3Key && <p className="text-xs text-slate-500">Стикеры Ozon в PDF идут в том же порядке, что строки таблицы: первый стикер — на коробку №1 и т. д.</p>}
 
           {['BOOKED', 'CARGOES_SET', 'LABELS_READY'].includes(s.status) && (

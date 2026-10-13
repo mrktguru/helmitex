@@ -5,3 +5,8 @@
 body {
   @apply bg-gray-50 text-gray-900;
 }
+
+/* iOS увеличивает страницу при фокусе на поле со шрифтом < 16px */
+@media (max-width: 640px) and (pointer: coarse) {
+  input, select, textarea { font-size: 16px !important; }
+}
