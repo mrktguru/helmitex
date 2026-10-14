@@ -284,7 +284,7 @@ export const api = {
   adsCampaignBid: (id: string, sku: string, bid: number) => request<{ ok: true }>(`/ads/campaigns/${id}/bid`, { method: 'PUT', body: JSON.stringify({ sku, bid }) }),
   adsCampaignBudget: (id: string, data: { weeklyBudget?: number | null; dailyBudget?: number | null }) =>
     request<{ ok: true }>(`/ads/campaigns/${id}/budget`, { method: 'PATCH', body: JSON.stringify(data) }),
-  adsCreateCampaign: (data: { title: string; placement: string; weeklyBudget?: number | null; dailyBudget?: number | null; skus: { sku: string; bid: number }[]; activate: boolean }) =>
+  adsCreateCampaign: (data: { title: string; placement: string; strategy?: 'NO_AUTO_STRATEGY' | 'TARGET_BIDS' | 'MAX_CLICKS'; fromDate?: string | null; toDate?: string | null; weeklyBudget?: number | null; dailyBudget?: number | null; skus: { sku: string; bid: number }[]; activate: boolean; bidder?: { targetCpo: number } | null }) =>
     request<{ id: string; activated: boolean; activateError: string | null }>('/ads/campaigns', { method: 'POST', body: JSON.stringify(data) }),
   adsSelected: (sku: string, on: boolean) => request<{ ok: true }>(`/ads/selected/${sku}`, { method: 'POST', body: JSON.stringify({ on }) }),
   adsSelectedBid: (sku: string, bid: number) => request<{ ok: true }>(`/ads/selected/${sku}/bid`, { method: 'PUT', body: JSON.stringify({ bid }) }),
@@ -295,6 +295,10 @@ export const api = {
   adsJournalAdd: (data: { sku: string | null; at: string; kind: string; text: string }) =>
     request<any>('/ads/journal', { method: 'POST', body: JSON.stringify(data) }),
   adsJournalDelete: (id: string) => request<{ ok: true }>(`/ads/journal/${id}`, { method: 'DELETE' }),
+  adsIntraday: (id: string, day: string, step: 30 | 60 | 180) => request<any>(`/ads/campaigns/${id}/intraday?${new URLSearchParams({ day, step: String(step) })}`),
+  adsBidder: (id: string) => request<any>(`/ads/bidder/${id}`),
+  adsBidderSave: (id: string, data: any) => request<any>(`/ads/bidder/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  adsBidderPreview: (id: string) => request<any>(`/ads/bidder/${id}/preview`, { method: 'POST' }),
 
   // Users (admin)
   getUsers: () => request<any[]>('/users'),

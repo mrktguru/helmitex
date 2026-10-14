@@ -607,6 +607,11 @@ export async function getReport(sku: string, from: string, to: string, force = f
       total,
     },
     series,
+    campaignDays: Object.fromEntries(cpcIds.map((id) => [id, days.map((d) => {
+      const rows = camDays.filter((x) => x.campaignId === id && ymd(x.date) === d);
+      const s = (k: 'views' | 'clicks' | 'toCart' | 'orders' | 'ordersMoney' | 'spend') => round(rows.reduce((t, x) => t + x[k], 0));
+      return { date: d, views: s('views'), clicks: s('clicks'), toCart: s('toCart'), orders: s('orders'), ordersMoney: s('ordersMoney'), spend: s('spend') };
+    })])),
     journal,
     anomalies,
     syncedAt: (await prisma.adSyncDay.findFirst({ where: { kind: 'seller' }, orderBy: { fetchedAt: 'desc' } }))?.fetchedAt ?? null,
@@ -670,9 +675,13 @@ export async function setSelectedBid(sku: string, bid: number, actor: Actor) {
   await campaignMeta(true, true);
 }
 
-export async function createCampaign(d: { title: string; placement: string; weeklyBudget?: number | null; dailyBudget?: number | null; skus: { sku: string; bid: number }[]; activate: boolean }, actor: Actor) {
+export async function createCampaign(d: { title: string; placement: string; strategy?: 'NO_AUTO_STRATEGY' | 'TARGET_BIDS' | 'MAX_CLICKS'; fromDate?: string | null; toDate?: string | null; weeklyBudget?: number | null; dailyBudget?: number | null; skus: { sku: string; bid: number }[]; activate: boolean }, actor: Actor) {
   if (!d.skus.length) throw new StockError('Добавьте хотя бы один товар');
-  const body: Record<string, unknown> = { title: d.title, placement: d.placement, productAutopilotStrategy: 'NO_AUTO_STRATEGY' };
+  // «Максимум кликов» в поиске у Ozon — отдельное значение TOP_MAX_CLICKS
+  const strategy = d.strategy === 'MAX_CLICKS' && d.placement === 'PLACEMENT_TOP_PROMOTION' ? 'TOP_MAX_CLICKS' : d.strategy ?? 'NO_AUTO_STRATEGY';
+  const body: Record<string, unknown> = { title: d.title, placement: d.placement, productAutopilotStrategy: strategy };
+  if (d.fromDate) body.fromDate = d.fromDate;
+  if (d.toDate) body.toDate = d.toDate;
   if (d.weeklyBudget) body.weeklyBudget = toMicro(d.weeklyBudget);
   if (d.dailyBudget) body.dailyBudget = toMicro(d.dailyBudget);
   const r = await perf<{ campaignId: string }>('POST', '/api/client/campaign/cpc/v2/product', body);
@@ -754,8 +763,49 @@ export async function snapshotIntraday(): Promise<number> {
   return saved;
 }
 
+// Прирост между соседними снимками: снимки хранят накопленное с полуночи (МСК)
+export interface IntradayStep { at: Date; views: number; clicks: number; toCart: number; orders: number; ordersMoney: number; spend: number }
+export function increments(rows: { at: Date; day: Date; views: number; clicks: number; toCart: number; orders: number; ordersMoney: number; spend: number }[]): IntradayStep[] {
+  const out: IntradayStep[] = [];
+  const sorted = [...rows].sort((a, b) => a.at.getTime() - b.at.getTime());
+  for (let i = 0; i < sorted.length; i++) {
+    const r = sorted[i], p = sorted[i - 1];
+    const same = p && p.day.getTime() === r.day.getTime();
+    // первый снимок дня позже 00:40 МСК (сбор только начался или был перерыв) — накопленное за неизвестный промежуток, пропускаем
+    if (!same && (r.at.getTime() + 3 * 3600_000) % DAY > 40 * 60_000) continue;
+    const k = (f: 'views' | 'clicks' | 'toCart' | 'orders' | 'ordersMoney' | 'spend') => Math.max(0, r[f] - (same ? p[f] : 0));
+    out.push({ at: r.at, views: k('views'), clicks: k('clicks'), toCart: k('toCart'), orders: k('orders'), ordersMoney: k('ordersMoney'), spend: k('spend') });
+  }
+  return out;
+}
+
+// Статистика кампании за день (МСК) по корзинам 30/60/180 минут + то же время вчера
+export async function getIntraday(campaignId: string, day: string, stepMin: 30 | 60 | 180) {
+  const prevDay = ymd(new Date(dt(day).getTime() - DAY));
+  const rows = await prisma.adIntraday.findMany({ where: { campaignId, day: { in: [dt(prevDay), dt(day)] } }, orderBy: { at: 'asc' } });
+  const inc = increments(rows);
+  const slots = (d: string) => {
+    const start = dt(d).getTime() - 3 * 3600_000; // 00:00 МСК
+    const n = (24 * 60) / stepMin;
+    return Array.from({ length: n }, (_, i) => {
+      const from = start + i * stepMin * 60_000, to = from + stepMin * 60_000;
+      // прирост снимка в момент T — за полчаса до T; относим к интервалу, где лежит T − 2 мин (снимки бывают на пару секунд позже :00/:30)
+      const part = inc.filter((x) => { const t = x.at.getTime() - 120_000; return t >= from && t < to; });
+      const sum = (f: keyof Omit<IntradayStep, 'at'>) => round(part.reduce((t, x) => t + x[f], 0));
+      const label = new Date(from + 3 * 3600_000).toISOString().slice(11, 16);
+      return { from: label, views: sum('views'), clicks: sum('clicks'), toCart: sum('toCart'), orders: sum('orders'), ordersMoney: sum('ordersMoney'), spend: sum('spend'), hasData: part.length > 0 };
+    });
+  };
+  const last = rows.filter((r) => ymd(r.day) === day).pop();
+  return {
+    day, stepMin, today: slots(day), yesterday: slots(prevDay),
+    lastSnapshot: last?.at ?? null, state: last?.state ?? null, bids: last?.bids ?? null,
+    collectingSince: (await prisma.adIntraday.findFirst({ orderBy: { at: 'asc' } }))?.at ?? null,
+  };
+}
+
 // Фоновая загрузка последних дней — раз в 3 часа; снимок рекламы — каждые 30 минут (:00 и :30)
-export function startAdsSync() {
+export function startAdsSync(afterSnapshot?: () => Promise<void>) {
   const run = () => {
     const to = lastFullDay();
     const from = ymd(new Date(dt(to).getTime() - 6 * DAY));
@@ -764,7 +814,7 @@ export function startAdsSync() {
   setTimeout(run, 60_000);
   setInterval(run, 3 * 3600_000);
 
-  const snap = () => snapshotIntraday().catch((e) => console.warn('[ads intraday]', e));
+  const snap = () => snapshotIntraday().then(() => afterSnapshot?.()).catch((e) => console.warn('[ads intraday]', e));
   const toNext = 30 * 60_000 - (Date.now() % (30 * 60_000));
   setTimeout(() => { snap(); setInterval(snap, 30 * 60_000); }, toNext);
 }

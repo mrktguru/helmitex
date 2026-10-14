@@ -10,3 +10,7 @@ body {
 @media (max-width: 640px) and (pointer: coarse) {
   input, select, textarea { font-size: 16px !important; }
 }
+
+/* Тонкие полосы прокрутки в таблицах */
+.thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }

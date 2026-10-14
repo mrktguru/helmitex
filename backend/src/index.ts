@@ -23,6 +23,7 @@ import { syncFbs } from './services/ozonFbs';
 import { syncAllShipments } from './services/fbo';
 import { ozonConfigured } from './services/ozon';
 import { startAdsSync } from './services/ads';
+import { runAllBidders } from './services/bidder';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
@@ -73,7 +74,8 @@ if (ozonConfigured()) {
   setInterval(() => { syncAllShipments().catch((e) => console.warn('[fbo sync]', e)); }, 15 * 60_000);
   setInterval(() => { syncFbs().catch((e) => console.warn('[ozon fbs sync]', e)); }, 15 * 60_000);
   // Статистика рекламы и продаж за последние дни — раз в 3 часа
-  startAdsSync();
+  // после каждого снимка (раз в 30 мин) — решения биддера по кампаниям, где он включён
+  startAdsSync(runAllBidders);
 }
 
 export default app;

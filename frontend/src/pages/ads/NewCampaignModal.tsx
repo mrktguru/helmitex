@@ -10,7 +10,7 @@ const PLACEMENTS = [
 ];
 
 // Новая кампания с оплатой за клик: товары со ставками, размещение, бюджет, запуск
-export default function NewCampaignModal({ products, sku, onClose, onCreated }: { products: any[]; sku: string; onClose: () => void; onCreated: (msg: string) => Promise<void> }) {
+export default function NewCampaignModal({ products, sku, suggestCpo, onClose, onCreated }: { products: any[]; sku: string; suggestCpo: number | null; onClose: () => void; onCreated: (msg: string) => Promise<void> }) {
   const cur = products.find((p) => p.sku === sku);
   const today = new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
   const [title, setTitle] = useState(`${cur?.name ?? sku} / поиск / ${today}`);
@@ -19,6 +19,11 @@ export default function NewCampaignModal({ products, sku, onClose, onCreated }: 
   const [budget, setBudget] = useState('50000');
   const [bids, setBids] = useState<Record<string, string>>({ [sku]: '20' });
   const [activate, setActivate] = useState(true);
+  const [strategy, setStrategy] = useState<'NO_AUTO_STRATEGY' | 'TARGET_BIDS' | 'MAX_CLICKS'>('TARGET_BIDS');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [bidder, setBidder] = useState(true);
+  const [targetCpo, setTargetCpo] = useState(String(suggestCpo ?? 220));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -32,8 +37,11 @@ export default function NewCampaignModal({ products, sku, onClose, onCreated }: 
     const b = parseNum(budget);
     setBusy(true); setError('');
     try {
+      const t = parseNum(targetCpo);
+      if (bidder && !(t && t > 0)) { setError('Укажите целевую цену заказа для биддера'); setBusy(false); return; }
       const r = await api.adsCreateCampaign({
-        title: title.trim(), placement, skus, activate,
+        title: title.trim(), placement, skus, activate, strategy, fromDate: fromDate || null, toDate: toDate || null,
+        bidder: bidder && strategy !== 'MAX_CLICKS' ? { targetCpo: t! } : null,
         weeklyBudget: budgetType === 'week' ? b : null, dailyBudget: budgetType === 'day' ? b : null,
       });
       await onCreated(r.activated ? `Кампания № ${r.id} создана и запущена` : r.activateError ? `Кампания № ${r.id} создана, но не запущена: ${r.activateError}` : `Кампания № ${r.id} создана (не запущена)`);
@@ -60,6 +68,23 @@ export default function NewCampaignModal({ products, sku, onClose, onCreated }: 
             ))}
           </div>
         </fieldset>
+
+        <fieldset>
+          <legend className="text-sm font-medium mb-1">Как управлять ставкой</legend>
+          <div className="grid sm:grid-cols-3 gap-2">
+            {([['NO_AUTO_STRATEGY', 'Вручную', 'ставка за клик как есть'], ['TARGET_BIDS', 'Средняя цена клика', 'Ozon держит средний клик около ставки — так работают ваши кампании'], ['MAX_CLICKS', 'Максимум кликов', 'Ozon сам тратит бюджет на максимум кликов, ставки не задаются']] as const).map(([k, l, d]) => (
+              <label key={k} className={clsx('border rounded-lg px-3 py-2 cursor-pointer', strategy === k ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:bg-slate-50')}>
+                <span className="flex items-center gap-2 text-sm font-medium"><input type="radio" name="strategy" checked={strategy === k} onChange={() => setStrategy(k)} className="accent-brand-600" />{l}</span>
+                <span className="block text-xs text-slate-500 mt-0.5">{d}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+
+        <div className="grid grid-cols-2 gap-3">
+          <label className="text-sm flex flex-col gap-1"><span className="font-medium">Старт</span><input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="border rounded-lg px-2.5 py-2 text-sm" /><span className="text-xs text-slate-500">пусто — сегодня</span></label>
+          <label className="text-sm flex flex-col gap-1"><span className="font-medium">Окончание</span><input type="date" value={toDate} min={fromDate} onChange={(e) => setToDate(e.target.value)} className="border rounded-lg px-2.5 py-2 text-sm" /><span className="text-xs text-slate-500">пусто — без даты окончания</span></label>
+        </div>
 
         <fieldset>
           <legend className="text-sm font-medium mb-1">Бюджет</legend>
@@ -98,6 +123,19 @@ export default function NewCampaignModal({ products, sku, onClose, onCreated }: 
           </div>
         </fieldset>
 
+        <div className="rounded-lg border border-slate-200 px-3 py-2.5 space-y-2">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={bidder && strategy !== 'MAX_CLICKS'} disabled={strategy === 'MAX_CLICKS'} onChange={(e) => setBidder(e.target.checked)} className="accent-brand-600" />
+            Включить биддер сразу — цель «цена корзины»
+          </label>
+          {bidder && strategy !== 'MAX_CLICKS' && (
+            <label className="flex items-center gap-2 text-xs text-slate-500 pl-6">Целевая цена заказа
+              <input value={targetCpo} onChange={(e) => setTargetCpo(e.target.value)} inputMode="decimal" className="w-24 border rounded-lg px-2 py-1 text-sm tabular-nums" /> ₽
+              {suggestCpo != null && <span>· по экономике товара {suggestCpo} ₽</span>}
+            </label>
+          )}
+          {strategy === 'MAX_CLICKS' && <p className="text-xs text-slate-500 pl-6">При «максимуме кликов» ставками управляет Ozon — биддер не нужен.</p>}
+        </div>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={activate} onChange={(e) => setActivate(e.target.checked)} className="accent-brand-600" />
           Запустить сразу после создания

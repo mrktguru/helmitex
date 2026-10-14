@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../../api/client';
 import Modal from './Modal';
-import { InlineNumber } from './SourceFunnel';
+import InlineNumber from './InlineNumber';
 import { fmtDate } from '../stock/common';
 import { parseNum, pct, rub } from './util';
 

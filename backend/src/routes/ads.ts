@@ -6,8 +6,9 @@ import { StockError } from '../services/stock';
 import { ozonConfigured } from '../services/ozon';
 import { perfConfigured } from '../services/perf';
 import {
-  createCampaign, getProducts, getReport, lastFullDay, setActionPrice, setBudget, setCampaignState, setCpcBid, setPrice, setSelected, setSelectedBid,
+  createCampaign, getIntraday, getProducts, getReport, lastFullDay, setActionPrice, setBudget, setCampaignState, setCpcBid, setPrice, setSelected, setSelectedBid, ymd,
 } from '../services/ads';
+import { DEFAULT_LIMITS, DEFAULT_MODS, getBidder, runBidder, saveBidder } from '../services/bidder';
 
 const router = Router();
 router.use(authMiddleware);
@@ -78,13 +79,50 @@ router.post('/campaigns', h(async (req, res) => {
   const b = z.object({
     title: z.string().trim().min(1).max(120),
     placement: z.enum(['PLACEMENT_TOP_PROMOTION', 'PLACEMENT_SEARCH_AND_CATEGORY']),
+    strategy: z.enum(['NO_AUTO_STRATEGY', 'TARGET_BIDS', 'MAX_CLICKS']).optional(),
+    fromDate: z.string().regex(ISO).nullable().optional(),
+    toDate: z.string().regex(ISO).nullable().optional(),
     weeklyBudget: money.nullable().optional(),
     dailyBudget: money.nullable().optional(),
     skus: z.array(z.object({ sku: id, bid: money })).min(1).max(50),
     activate: z.boolean(),
+    bidder: z.object({ targetCpo: money }).nullable().optional(),
   }).parse(req.body);
-  res.json(await createCampaign(b, await actor(req)));
+  const a = await actor(req);
+  const r = await createCampaign(b, a);
+  if (b.bidder) await saveBidder(r.id, { enabled: true, goal: 'CART', targetCpo: b.bidder.targetCpo, targetDrr: 0.25, mods: {}, limits: {} }, a.email);
+  res.json(r);
 }));
+
+// Кампания по получасам/часам/3 часам за день (МСК) + вчера в то же время
+router.get('/campaigns/:id/intraday', h(async (req, res) => {
+  const day = typeof req.query.day === 'string' && ISO.test(req.query.day) ? req.query.day : ymd(new Date(Date.now() + 3 * 3600_000));
+  const step = Number(req.query.step) === 60 ? 60 : Number(req.query.step) === 180 ? 180 : 30;
+  res.json(await getIntraday(id.parse(req.params.id), day, step));
+}));
+
+// ───────────── Биддер ─────────────
+router.get('/bidder/:id', h(async (req, res) => { res.json(await getBidder(id.parse(req.params.id))); }));
+
+const modsSchema = z.object({ hours: z.boolean(), pace: z.boolean(), stock: z.boolean(), elastic: z.boolean(), organic: z.boolean(), budgetUp: z.boolean() }).partial();
+const limitsSchema = z.object({
+  minBid: z.number().min(1).max(1000), maxBid: z.number().min(1).max(5000), maxStepPct: z.number().min(1).max(50),
+  cooldownMin: z.number().min(30).max(1440), minClicks: z.number().min(0).max(5000), maxChangesPerDay: z.number().int().min(1).max(48),
+  stopLossRub: z.number().min(100).max(1_000_000), hourFrom: z.number().min(0).max(23), hourTo: z.number().min(1).max(24),
+}).partial();
+router.put('/bidder/:id', h(async (req, res) => {
+  const b = z.object({
+    enabled: z.boolean(), goal: z.enum(['CART', 'ORDER', 'DRR']), targetCpo: money, targetDrr: z.number().min(0.01).max(1),
+    mods: modsSchema, limits: limitsSchema,
+  }).parse(req.body);
+  const L = { ...DEFAULT_LIMITS, ...b.limits };
+  if (L.minBid >= L.maxBid) throw new StockError('Минимальная ставка должна быть меньше максимальной');
+  if (L.hourFrom >= L.hourTo) throw new StockError('Рабочие часы: начало должно быть раньше конца');
+  res.json(await saveBidder(id.parse(req.params.id), { ...b, mods: { ...DEFAULT_MODS, ...b.mods }, limits: L }, (await actor(req)).email));
+}));
+
+// Что биддер сделал бы сейчас — без изменений в Ozon
+router.post('/bidder/:id/preview', h(async (req, res) => { res.json(await runBidder(id.parse(req.params.id), { dry: true })); }));
 
 router.post('/selected/:sku', h(async (req, res) => {
   const b = z.object({ on: z.boolean() }).parse(req.body);

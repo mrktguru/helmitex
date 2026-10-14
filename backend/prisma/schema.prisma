@@ -520,6 +520,33 @@ model AdIntraday {
   @@index([campaignId, day])
 }
 
+// Биддер кампании: цель + модификаторы + ограничители. Решения — каждые 30 минут после снимка
+model AdBidder {
+  campaignId String   @id
+  enabled    Boolean  @default(false)
+  goal       String   @default("CART") // CART — цена корзины с поправкой на конверсию в заказ | ORDER | DRR
+  targetCpo  Float    @default(220) // целевая цена заказа, ₽
+  targetDrr  Float    @default(0.25)
+  mods       Json // { hours, pace, stock, elastic, organic, budgetUp }
+  limits     Json // { minBid, maxBid, maxStepPct, cooldownMin, minClicks, maxChangesPerDay, stopLossRub, hourFrom, hourTo }
+  state      Json? // базовая ставка, время последнего изменения, проверка отклика показов и т. п.
+  updatedBy  String?
+  updatedAt  DateTime @updatedAt
+}
+
+model AdBidderLog {
+  id         String   @id @default(uuid())
+  campaignId String
+  at         DateTime @default(now())
+  action     String // BID_UP | BID_DOWN | BUDGET_UP | HOLD | FREEZE | REVERT | STOCK | ERROR
+  fromValue  Float?
+  toValue    Float?
+  reason     String
+  metrics    Json?
+
+  @@index([campaignId, at])
+}
+
 // Журнал изменений: вручную и автоматически при действиях из сервиса
 model AdJournal {
   id         String   @id @default(uuid())
