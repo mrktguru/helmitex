@@ -23,12 +23,12 @@ export function dateRange(from: string, to: string): string[] {
   return out;
 }
 
-// Непрерывные отрезки из списка дат
-function spans(dates: string[]): [string, string][] {
+// Непрерывные отрезки из списка дат, не длиннее maxDays (статистика рекламы Ozon — не больше 62 дней за запрос)
+function spans(dates: string[], maxDays = 60): [string, string][] {
   const out: [string, string][] = [];
   for (const d of [...dates].sort()) {
     const last = out[out.length - 1];
-    if (last && dt(d).getTime() - dt(last[1]).getTime() === DAY) last[1] = d;
+    if (last && dt(d).getTime() - dt(last[1]).getTime() === DAY && (dt(d).getTime() - dt(last[0]).getTime()) / DAY < maxDays) last[1] = d;
     else out.push([d, d]);
   }
   return out;
