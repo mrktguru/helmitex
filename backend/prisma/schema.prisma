@@ -499,6 +499,27 @@ model AdSyncDay {
   @@id([kind, date])
 }
 
+// Снимок рекламы каждые 30 минут: накопленные за текущий день (МСК) показатели кампании.
+// Разница между соседними снимками даёт статистику по получасам — Ozon по часам её не отдаёт.
+model AdIntraday {
+  at          DateTime // момент снимка
+  day         DateTime @db.Date // день по Москве
+  campaignId  String
+  views       Int
+  clicks      Int
+  toCart      Int
+  orders      Int
+  ordersMoney Float
+  spend       Float
+  state       String
+  weeklyBudget Float   @default(0)
+  dailyBudget Float    @default(0)
+  bids        Json? // { sku: ставка ₽ }
+
+  @@id([at, campaignId])
+  @@index([campaignId, day])
+}
+
 // Журнал изменений: вручную и автоматически при действиях из сервиса
 model AdJournal {
   id         String   @id @default(uuid())

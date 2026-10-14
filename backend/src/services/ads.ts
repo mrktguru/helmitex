@@ -725,7 +725,36 @@ export async function setActionPrice(sku: string, actionId: number, actionPrice:
   await prices([ref.offerId], true).catch(() => {});
 }
 
-// Фоновая загрузка последних дней — раз в 3 часа
+// Снимок рекламы за текущий день: накопленные показатели каждой кампании + ставки и бюджет
+export async function snapshotIntraday(): Promise<number> {
+  if (!perfConfigured()) return 0;
+  const meta = await campaignMeta(true);
+  const day = ymd(new Date(Date.now() + 3 * 3600_000));
+  const today = Date.now() - DAY;
+  const ids = meta.cpcAll.filter((c) => c.state === 'CAMPAIGN_STATE_RUNNING' || (c.updatedAt && new Date(c.updatedAt).getTime() > today)).map((c) => c.id);
+  const at = new Date();
+  let saved = 0;
+  for (let i = 0; i < ids.length; i += 20) {
+    const q = ids.slice(i, i + 20).map((id) => `campaignIds=${id}`).join('&');
+    // Ozon берёт из from/to только дату (по UTC) и отдаёт итог за весь день — передаём полдень нужного дня
+    const r = await perf<{ rows: any[] }>('GET', `/api/client/statistics/campaign/product/json?${q}&from=${day}T12:00:00Z&to=${day}T12:00:00Z`);
+    const rows = (r.rows ?? []).map((x) => {
+      const c = meta.cpcAll.find((m) => m.id === String(x.id));
+      return {
+        at, day: dt(day), campaignId: String(x.id),
+        views: Math.round(num(x.views)), clicks: Math.round(num(x.clicks)), toCart: Math.round(num(x.toCart)),
+        orders: Math.round(num(x.orders)), ordersMoney: num(x.ordersMoney), spend: num(x.moneySpent),
+        state: c?.state ?? String(x.status ?? ''), weeklyBudget: c?.weeklyBudget ?? 0, dailyBudget: c?.dailyBudget ?? 0,
+        bids: Object.fromEntries((c?.products ?? []).map((p) => [p.sku, p.bid])),
+      };
+    });
+    if (rows.length) await prisma.adIntraday.createMany({ data: rows, skipDuplicates: true });
+    saved += rows.length;
+  }
+  return saved;
+}
+
+// Фоновая загрузка последних дней — раз в 3 часа; снимок рекламы — каждые 30 минут (:00 и :30)
 export function startAdsSync() {
   const run = () => {
     const to = lastFullDay();
@@ -734,4 +763,8 @@ export function startAdsSync() {
   };
   setTimeout(run, 60_000);
   setInterval(run, 3 * 3600_000);
+
+  const snap = () => snapshotIntraday().catch((e) => console.warn('[ads intraday]', e));
+  const toNext = 30 * 60_000 - (Date.now() % (30 * 60_000));
+  setTimeout(() => { snap(); setInterval(snap, 30 * 60_000); }, toNext);
 }
