@@ -178,8 +178,9 @@ export async function writeOffDay(day: string, numbers: string[] | undefined, us
 // ───────────── Сборка ─────────────
 
 /** «Собрано» в Ozon (одна коробка на отправление) и списание собранного со склада.
- *  batch — собрать квантом: собранным присваивается номер кванта дня и сразу формируются их этикетки. */
-export async function ship(numbers: string[], userId: string, batch = false) {
+ *  batch — собрать группой (квант 42 шт., заказы по 2+ шт., ручной выбор): собранным присваивается номер группы дня
+ *  и сразу формируются их этикетки одним PDF. */
+export async function ship(numbers: string[], userId: string, batch: 'quant' | 'multi' | 'manual' | null = null) {
   const rows = await prisma.ozonFbsPosting.findMany({ where: { postingNumber: { in: numbers } } });
   const todo = rows.filter((r) => r.status === 'awaiting_packaging');
   if (!todo.length) throw new StockError('Нет отправлений в статусе «Ждёт сборки»');
@@ -233,9 +234,12 @@ export async function ship(numbers: string[], userId: string, batch = false) {
     ok.sort((a, b) => order.get(a)! - order.get(b)!);
     const units = todo.filter((p) => ok.includes(p.postingNumber))
       .reduce((t, p) => t + (p.products as unknown as FbsProduct[]).reduce((s, x) => s + x.qty, 0), 0);
-    await prisma.ozonFbsBatch.create({ data: { day, no: batchNo, postings: ok.length, units } });
+    await prisma.ozonFbsBatch.create({ data: { day, no: batchNo, kind: batch, postings: ok.length, units } });
     await prisma.ozonFbsPosting.updateMany({ where: { postingNumber: { in: ok } }, data: { batchNo } });
-    try { await batchLabels(day, batchNo, 'small', ok); } catch (e) { labelError = (e as Error).message; }
+    // большую группу этикеток Ozon формирует минутами — её печатают общим PDF дня на шаге 3
+    if (ok.length <= 150) {
+      try { await batchLabels(day, batchNo, 'small', ok); } catch (e) { labelError = (e as Error).message; }
+    } else labelError = 'группа больше 150 отправлений — сформируйте этикетки на шаге 3';
   }
   return { shipped: ok.length, failed, doc: doc ? { id: doc.id, number: doc.number } : null, writeOffError, batchNo, labelError };
 }
@@ -290,12 +294,12 @@ export async function labels(day: string, size: 'small' | 'big') {
 /** Этикетки одного кванта сборки. numbers — порядок печати (по умолчанию по номеру отправления). */
 export async function batchLabels(day: string, no: number, size: 'small' | 'big', numbers?: string[]) {
   const b = await prisma.ozonFbsBatch.findUnique({ where: { day_no: { day, no } } });
-  if (!b) throw new StockError(`Квант №${no} не найден`);
+  if (!b) throw new StockError(`Группа №${no} не найдена`);
   if (!numbers) {
     const rows = await prisma.ozonFbsPosting.findMany({ where: { shipDay: day, batchNo: no, status: { not: 'cancelled' } }, orderBy: { postingNumber: 'asc' } });
     numbers = rows.map((r) => r.postingNumber);
   }
-  if (!numbers.length) throw new StockError(`В кванте №${no} нет отправлений`);
+  if (!numbers.length) throw new StockError(`В группе №${no} нет отправлений`);
   const key = `ozon-fbs/${day}/batch-${no}-${size}.pdf`;
   await uploadFile(key, await fetchLabels(numbers, size), 'application/pdf');
   return prisma.ozonFbsBatch.update({ where: { id: b.id }, data: { labelS3Key: key, labelType: size === 'small' ? 'small_label' : 'big_label', labelAt: new Date() } });

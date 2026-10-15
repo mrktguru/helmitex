@@ -670,6 +670,7 @@ model OzonFbsBatch {
   id         String    @id @default(uuid())
   day        String // YYYY-MM-DD
   no         Int
+  kind       String    @default("quant") // quant — по 42 шт. из одиночных; multi — заказы по 2+ шт.; manual — выбор вручную
   postings   Int
   units      Int
   labelS3Key String?

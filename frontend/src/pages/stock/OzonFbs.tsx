@@ -31,6 +31,7 @@ export default function OzonFbs() {
   const [data, setData] = useState<any>(null);
   const [step, setStep] = useState<number | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState<'all' | 'single' | 'multi'>('all');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
@@ -49,7 +50,8 @@ export default function OzonFbs() {
 
   function apply(d: any) {
     setData(d);
-    setSel(new Set(d.postings.filter((p: any) => p.status === 'awaiting_packaging').map((p: any) => p.postingNumber)));
+    // по умолчанию отмечены только заказы по 1 шт. — заказы по 2+ шт. собираются отдельно
+    setSel(new Set(d.postings.filter((p: any) => p.status === 'awaiting_packaging' && p.products.reduce((s: number, x: any) => s + x.qty, 0) === 1).map((p: any) => p.postingNumber)));
   }
 
   async function run(key: string, fn: () => Promise<any>, ok?: (r: any) => string) {
@@ -92,18 +94,28 @@ export default function OzonFbs() {
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [data, sel]);
 
-  // Следующий квант: отправления по порядку, пока не наберётся 42 шт. (крупные, что не влезают, — в следующий)
+  // Следующий квант: отправления по 1 шт. по порядку, пока не наберётся 42. Заказы по 2+ шт. собираются отдельно.
   const nextQuant = useMemo(() => {
     const out: any[] = [];
     let left = QUANT;
     for (const p of waiting) {
-      if (p.products.some((x: any) => !x.item)) continue;
-      const u = pUnits(p);
-      if (u <= left) { out.push(p); left -= u; }
-      if (left === 0) break;
+      if (p.products.some((x: any) => !x.item) || pUnits(p) !== 1) continue;
+      out.push(p);
+      if (--left === 0) break;
     }
     return { list: out, units: QUANT - left };
   }, [data]);
+  const multi = waiting.filter((p) => pUnits(p) > 1);
+  const multiBy = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const p of multi) m.set(pUnits(p), (m.get(pUnits(p)) ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => a[0] - b[0]);
+  }, [data]);
+  const shown = filter === 'single' ? waiting.filter((p) => pUnits(p) === 1) : filter === 'multi' ? multi : waiting;
+  const selList = waiting.filter((p) => sel.has(p.postingNumber));
+  const selMulti = selList.length > 0 && selList.every((p) => pUnits(p) > 1);
+  const showMulti = (n?: number) => { setFilter('multi'); setSel(new Set(multi.filter((p) => !n || pUnits(p) === n).map((p) => p.postingNumber))); };
+  const KIND: Record<string, string> = { quant: 'Квант', multi: 'Отдельно, 2+ шт.', manual: 'Вручную' };
   const batches: any[] = data?.batches ?? [];
   const nextNo = (batches[batches.length - 1]?.no ?? 0) + 1;
   const batchPdf = (no: number) => downloadFile(`/stock/ozon-fbs/days/${day}/batches/${no}.pdf`, `Этикетки Ozon FBS ${day} квант ${no}.pdf`).catch((e) => setError(e.message));
@@ -111,12 +123,12 @@ export default function OzonFbs() {
     <div className="space-y-1.5 text-sm">
       {[...batches].reverse().map((b) => (
         <div key={b.no} className="flex items-center gap-2">
-          <span className="font-medium">Квант №{b.no}</span>
+          <span className="font-medium">№{b.no} · {KIND[b.kind] ?? b.kind}</span>
           <span className="text-slate-500 tabular-nums">{b.postings} отпр. · {b.units} шт.</span>
           {b.labelS3Key
             ? <button className="ml-auto text-brand-700 hover:underline whitespace-nowrap" onClick={() => batchPdf(b.no)}>⇩ этикетки</button>
             : <button disabled={!!busy} className="ml-auto text-brand-700 hover:underline whitespace-nowrap"
-                onClick={() => run(`bl${b.no}`, () => api.ozonFbsBatchLabels(day!, b.no), (r) => { apply(r); batchPdf(b.no); return `Этикетки кванта №${b.no} готовы`; })}>
+                onClick={() => run(`bl${b.no}`, () => api.ozonFbsBatchLabels(day!, b.no), (r) => { apply(r); batchPdf(b.no); return `Этикетки группы №${b.no} готовы`; })}>
                 {busy === `bl${b.no}` ? 'Ozon формирует…' : 'сформировать этикетки'}</button>}
         </div>
       ))}
@@ -126,7 +138,7 @@ export default function OzonFbs() {
   const steps = [
     ['Новые', waiting.length ? `${waiting.length} отпр.` : 'нет новых'],
     ['Сборка', waiting.length ? `ждут ${waiting.length}` : 'всё собрано'],
-    ['Этикетки 58×40', info?.labelS3Key ? `${info.labelCount} шт. готовы` : packed.length ? `${packed.length} к печати` : '—'],
+    ['Этикетки 58×40', !packed.length ? '—' : info?.labelS3Key && info.labelCount === packed.length ? `${info.labelCount} шт. готовы` : `${packed.length} к печати`],
     ['Акт и отгрузка', info?.actS3Key ? 'акт готов' : shipAt ? `до ${hm(shipAt)}` : '—'],
     ['Передано', `${passed.length} отпр.`],
   ];
@@ -148,7 +160,7 @@ export default function OzonFbs() {
                 onChange={() => setSel((s) => { const x = new Set(s); x.has(p.postingNumber) ? x.delete(p.postingNumber) : x.add(p.postingNumber); return x; })} /></td>}
               <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{p.postingNumber}</td>
               <td className="px-3 py-2">{p.products.map((x: any) => (
-                <span key={x.offerId} className={clsx('inline-block mr-1 text-[11px] font-medium px-2 py-0.5 rounded-full', x.item ? 'bg-amber-50 text-amber-800' : 'bg-rose-100 text-rose-700')} title={x.name}>
+                <span key={x.offerId} className={clsx('inline-block mr-1 text-[11px] font-medium px-2 py-0.5 rounded-full', !x.item ? 'bg-rose-100 text-rose-700' : x.qty > 1 ? 'bg-amber-300 text-amber-950 font-bold' : 'bg-amber-50 text-amber-800')} title={x.name}>
                   {x.item ? short(x.item.name) : x.offerId} × {x.qty}</span>))}
                 {p.shipError && <div className="text-xs text-red-600 mt-0.5">{p.shipError}</div>}</td>
               <td className="px-3 py-2 text-slate-500 whitespace-nowrap hidden sm:table-cell">{dt(p.inProcessAt)}</td>
@@ -220,17 +232,23 @@ export default function OzonFbs() {
               <h2 className="font-semibold">Шаг 2. Соберите {waiting.length} отправлений</h2>
               <span className="text-xs text-slate-500">выбрано {sel.size}</span>
             </div>
-            {table(waiting, true)}
+            <div className="px-4 py-2 border-b flex flex-wrap gap-1.5">
+              {([['all', `Все ${waiting.length}`], ['single', `По 1 шт. — ${waiting.length - multi.length}`], ['multi', `По 2+ шт. — ${multi.length}`]] as const).map(([k, t]) => (
+                <button key={k} onClick={() => { setFilter(k); if (k === 'multi') showMulti(); else setSel(new Set((k === 'single' ? waiting.filter((p) => pUnits(p) === 1) : waiting).map((p) => p.postingNumber))); }}
+                  className={clsx('text-xs font-medium px-2.5 py-1 rounded-full border', filter === k ? 'bg-brand-600 border-brand-600 text-white' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50')}>{t}</button>
+              ))}
+            </div>
+            {table(shown, true)}
           </div>
           <div className="space-y-4 lg:sticky lg:top-4 order-first lg:order-none">
             <div className="bg-white rounded-xl border-2 border-brand-200 p-4 space-y-3">
               <h3 className="font-semibold">Сборка квантами по {QUANT} шт.</h3>
               {nextQuant.list.length > 0 ? (<>
-                <p className="text-sm text-slate-600">Квант №{nextNo}: <b>{nextQuant.list.length} отпр. · {nextQuant.units} шт.</b>{nextQuant.units < QUANT ? ' — последний, неполный' : ''}.
+                <p className="text-sm text-slate-600">Квант №{nextNo}: <b>{nextQuant.list.length} отпр. по 1 шт.</b>{nextQuant.units < QUANT ? ' — последний, неполный' : ''}.
                   Отметим «Собрано» в Ozon, спишем со склада и сразу сформируем {nextQuant.list.length} этикеток 58×40 одним PDF.</p>
                 <div className="flex gap-2">
                   <button disabled={!!busy} className={btnPrimary + ' flex-1'}
-                    onClick={() => run('quant', () => api.ozonFbsShip(day, nextQuant.list.map((p) => p.postingNumber), true), (r) => {
+                    onClick={() => run('quant', () => api.ozonFbsShip(day, nextQuant.list.map((p) => p.postingNumber), 'quant'), (r) => {
                       apply(r.state); loadDays(); setStep(2);
                       if (r.batchNo && !r.labelError) batchPdf(r.batchNo);
                       return `Квант №${r.batchNo ?? '—'}: собрано ${r.shipped}${r.failed.length ? `, ошибок ${r.failed.length}` : ''}${r.doc ? ` · списано ${r.doc.number}` : ''}${r.writeOffError ? ` · НЕ списано: ${r.writeOffError}` : ''}${r.labelError ? ` · этикетки не сформированы: ${r.labelError}` : ' · этикетки скачиваются'}`;
@@ -242,6 +260,18 @@ export default function OzonFbs() {
               </>) : <p className="text-sm text-slate-500">Нечего собирать.</p>}
               {batchList && <div className="border-t pt-3">{batchList}</div>}
             </div>
+            {multi.length > 0 && (
+              <div className="bg-amber-50 rounded-xl border-2 border-amber-300 p-4 space-y-3">
+                <h3 className="font-semibold text-amber-900">Заказы по 2+ шт. — собрать отдельно</h3>
+                <p className="text-sm text-amber-900">{multi.length} отпр. · {units(multi)} шт. В кванты по {QUANT} не попадают. Выберите и соберите отдельной группой со своими этикетками.</p>
+                <div className="flex flex-wrap gap-1.5">
+                  <button onClick={() => showMulti()} className="text-xs font-medium px-2.5 py-1 rounded-full bg-amber-200 text-amber-900 hover:bg-amber-300">все {multi.length}</button>
+                  {multiBy.map(([n, c]) => (
+                    <button key={n} onClick={() => showMulti(n)} className="text-xs font-medium px-2.5 py-1 rounded-full bg-white border border-amber-300 text-amber-900 hover:bg-amber-100">×{n} — {c} отпр.</button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="bg-white rounded-xl border border-slate-200 p-4">
               <h3 className="font-semibold mb-3">Лист подбора</h3>
               <div className="space-y-1.5 text-sm">
@@ -265,13 +295,14 @@ export default function OzonFbs() {
               </div>
             </div>
             <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-              <p className="text-sm text-slate-600">Отправим в Ozon «Собрано» (одна коробка на отправление) и спишем {units(waiting.filter((p) => sel.has(p.postingNumber)))} шт. со склада документом «Отгрузка Ozon FBS» — сначала «с ЧЗ», по сроку годности.</p>
+              <p className="text-sm text-slate-600">Отправим в Ozon «Собрано» (одна коробка на отправление) и спишем {units(waiting.filter((p) => sel.has(p.postingNumber)))} шт. со склада документом «Отгрузка Ozon FBS» — сначала «с ЧЗ», по сроку годности. Этикетки выбранных — отдельным PDF группы.</p>
               <button disabled={!!busy || sel.size === 0} className={btnPrimary + ' w-full'}
-                onClick={() => run('ship', () => api.ozonFbsShip(day, [...sel]), (r) => {
-                  apply(r.state); loadDays();
-                  return `Собрано ${r.shipped}${r.failed.length ? `, ошибок ${r.failed.length}` : ''}${r.doc ? ` · списано документом ${r.doc.number}` : ''}${r.writeOffError ? ` · НЕ списано: ${r.writeOffError}` : ''}`;
+                onClick={() => run('ship', () => api.ozonFbsShip(day, [...sel], selMulti ? 'multi' : 'manual'), (r) => {
+                  apply(r.state); loadDays(); setStep(2); setFilter('all');
+                  if (r.batchNo && !r.labelError) batchPdf(r.batchNo);
+                  return `${r.batchNo ? `Группа №${r.batchNo}: с` : 'С'}обрано ${r.shipped}${r.failed.length ? `, ошибок ${r.failed.length}` : ''}${r.doc ? ` · списано документом ${r.doc.number}` : ''}${r.writeOffError ? ` · НЕ списано: ${r.writeOffError}` : ''}${r.labelError ? ` · этикетки не сформированы: ${r.labelError}` : r.batchNo ? ' · этикетки скачиваются' : ''}`;
                 })}>
-                {busy === 'ship' ? `Собираю ${sel.size}… (около ${Math.ceil(sel.size / 4 / 3 / 60) || 1} мин)` : `Собрать ${sel.size} отправлений →`}
+                {busy === 'ship' ? `Собираю ${sel.size}… (около ${Math.ceil(sel.size / 4 / 3 / 60) || 1} мин)` : selMulti ? `Собрать отдельно ${sel.size} отпр. (${units(selList)} шт.) →` : `Собрать ${sel.size} отправлений →`}
               </button>
             </div>
           </div>
@@ -290,7 +321,7 @@ export default function OzonFbs() {
               ⇩ PDF ({info.labelCount} шт., {info.labelType === 'small_label' ? '58×40' : '75×120'})</button>}
           </div>
           {info?.labelAt && <p className="text-xs text-slate-500">Сформированы {dt(info.labelAt)}. Если собрали ещё отправления — сформируйте заново.</p>}
-          {batchList && <div className="border-t pt-3"><h3 className="font-semibold mb-2 text-sm">Этикетки по квантам ({QUANT} шт.)</h3>{batchList}</div>}
+          {batchList && <div className="border-t pt-3"><h3 className="font-semibold mb-2 text-sm">Этикетки по группам сборки</h3>{batchList}</div>}
           {error.includes('58 × 40') && (
             <button disabled={!!busy} className="text-sm text-brand-700 hover:underline"
               onClick={() => run('labels', () => api.ozonFbsLabels(day, 'big'), (r) => { apply(r); return 'Готово: этикетки 75×120'; })}>Пока напечатать старые 75×120</button>

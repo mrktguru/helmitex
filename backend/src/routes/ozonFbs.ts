@@ -20,7 +20,7 @@ const h = (fn: Handler) => async (req: AuthRequest, res: Response, next: (e: unk
 };
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const day = (req: AuthRequest) => { if (!DAY.test(req.params.day)) throw new StockError('Неверная дата'); return req.params.day; };
-const numbers = z.object({ postingNumbers: z.array(z.string().max(40)).max(2000).optional(), batch: z.boolean().optional() });
+const numbers = z.object({ postingNumbers: z.array(z.string().max(40)).max(2000).optional(), batch: z.enum(['quant', 'multi', 'manual']).nullish() });
 const size = z.object({ size: z.enum(['small', 'big']).default('small') });
 
 router.get('/ozon-fbs/days', h(async (_req, res) => { res.json(await days()); }));
@@ -48,9 +48,9 @@ router.post('/ozon-fbs/days/:day/batches/:no/labels', h(async (req, res) => {
 }));
 router.get('/ozon-fbs/days/:day/batches/:no.pdf', h(async (req, res) => {
   const b = await prisma.ozonFbsBatch.findUnique({ where: { day_no: { day: day(req), no: Number(req.params.no) || 0 } } });
-  if (!b?.labelS3Key) throw new StockError('Этикетки кванта ещё не сформированы');
+  if (!b?.labelS3Key) throw new StockError('Этикетки группы ещё не сформированы');
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(`Этикетки Ozon FBS ${b.day} квант ${b.no}.pdf`)}`);
+  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(`Этикетки Ozon FBS ${b.day} группа ${b.no}.pdf`)}`);
   res.end(await downloadFile(b.labelS3Key));
 }));
 router.post('/ozon-fbs/days/:day/act', h(async (req, res) => { await act(day(req)); res.json(await dayState(day(req))); }));
