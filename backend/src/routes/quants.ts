@@ -7,6 +7,7 @@ import { PdfJob, StockError, consume, nextDocNumber } from '../services/stock';
 import { availableCodes, postQuant, replaceCode } from '../services/quants';
 import { mergePdfs, renderQuantLabels } from '../services/quantLabel';
 import { downloadFile } from '../services/s3';
+import { qtyLines, setShareText } from '../services/share';
 import { pdfQueue } from '../workers/pdfQueue';
 
 const router = Router();
@@ -170,12 +171,13 @@ router.get('/quant-docs/:id', async (req: AuthRequest, res: Response): Promise<v
 // GET /api/stock/quant-docs/:id/cz.pdf — этикетки ЧЗ всех квантов документа одним файлом, по порядку квантов
 router.get('/quant-docs/:id/cz.pdf', async (req: AuthRequest, res: Response): Promise<void> => {
   const quants = await prisma.quant.findMany({
-    where: { docId: req.params.id }, orderBy: { number: 'asc' }, include: { outputBatch: true },
+    where: { docId: req.params.id }, orderBy: { number: 'asc' }, include: { outputBatch: true, quantType: { include: { productItem: true } } },
   });
   const batches = quants.map((q) => q.outputBatch).filter((b): b is NonNullable<typeof b> => !!b);
   if (batches.length === 0) { res.status(404).json({ error: 'В этих квантах нет этикеток ЧЗ' }); return; }
   if (batches.some((b) => b.jobStatus !== 'done' || !b.s3Key)) { res.status(409).json({ error: 'Этикетки ещё генерируются' }); return; }
   const doc = await prisma.stockDoc.findUnique({ where: { id: req.params.id } });
+  setShareText(res, [`Этикетки ЧЗ · ${doc?.number ?? ''}`, ...qtyLines(quants.map((q) => ({ name: q.quantType.productItem.name, qty: q.units }))), `${quants.length} квантов · ${batches.reduce((t, b) => t + b.count, 0)} этикеток`]);
   sendPdf(res, await mergePdfs(batches.map((b) => b.s3Key)), `ЧЗ ${doc?.number ?? ''}.pdf`);
 });
 
@@ -193,6 +195,11 @@ router.get('/quant-labels.pdf', async (req: AuthRequest, res: Response): Promise
     number: q.number, productName: q.quantType.productItem.name, units: q.units,
     lotNumber: q.lot.number, expiresAt: q.lot.expiresAt, createdAt: q.createdAt,
   })), t.labelWidthMm, t.labelHeightMm);
+  setShareText(res, [
+    `Этикетки квантов ${t.labelWidthMm}×${t.labelHeightMm}`,
+    ...[...new Set(quants.map((q) => q.quantType.productItem.name))].map((n) => { const qs = quants.filter((q) => q.quantType.productItem.name === n); return `${n} — ${qs.length} кв. × ${qs[0].units} шт = ${qs.reduce((s, q) => s + q.units, 0)} шт`; }),
+    quants.length === 1 ? quants[0].number : `${quants[0].number} … ${quants[quants.length - 1].number}`,
+  ]);
   sendPdf(res, pdf, quants.length === 1 ? `${quants[0].number}.pdf` : `Кванты ${quants[0].number}…${quants[quants.length - 1].number}.pdf`);
 });
 
@@ -201,6 +208,9 @@ router.get('/batches/:id/pdf', async (req: AuthRequest, res: Response): Promise<
   const batch = await prisma.outputBatch.findUnique({ where: { id: req.params.id } });
   if (!batch) { res.status(404).json({ error: 'Not found' }); return; }
   if (batch.jobStatus !== 'done' || !batch.s3Key) { res.status(409).json({ error: batch.jobStatus === 'error' ? 'Ошибка генерации' : 'Этикетка ещё генерируется' }); return; }
+  const lot = batch.lotId ? await prisma.lot.findUnique({ where: { id: batch.lotId }, include: { item: true } }) : null;
+  const project = lot ? null : await prisma.project.findUnique({ where: { id: batch.projectId } });
+  setShareText(res, [`Этикетки ЧЗ`, `${lot?.item.name ?? project?.name ?? ''} — ${batch.count} шт`, lot && `Партия ${lot.number}`]);
   sendPdf(res, await downloadFile(batch.s3Key), `ЧЗ-${batch.id.slice(0, 8)}.pdf`);
 });
 

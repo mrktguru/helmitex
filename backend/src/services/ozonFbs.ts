@@ -124,6 +124,14 @@ export async function dayState(day: string) {
   };
 }
 
+/** Товары и штуки по отправлениям — для текста «Поделиться» */
+export async function postingItems(numbers: string[]) {
+  const rows = await prisma.ozonFbsPosting.findMany({ where: { postingNumber: { in: numbers } } });
+  const products = rows.flatMap((p) => p.products as unknown as FbsProduct[]);
+  const items = await itemsByOffer([...new Set(products.map((x) => x.offerId))]);
+  return products.map((x) => ({ name: items.get(x.offerId)?.name ?? x.name, qty: x.qty }));
+}
+
 // ───────────── Списание со склада ─────────────
 
 /** Списывает единицы отправлений: сначала «с ЧЗ», затем «без ЧЗ», по FEFO. Один документ «Отгрузка Ozon FBS». */

@@ -10,6 +10,7 @@ import {
   addOrders, applyPickList, assignCodes, resendRejected, refreshMeta, supplyKi, uploadStickers, pdfToText, createSupply, deliver, detachCode, newOrders, resetMetaErrors, scanCode, sendMeta,
   supplyState, syncSupply, writeOff,
 } from '../services/wbSupply';
+import { qtyLines, setShareText } from '../services/share';
 import { comboPdf, czXlsx, kiXlsx, supplyQrPdf, trbxPdf, wbStickersPdf } from '../services/wbPdf';
 
 // Отправки WB FBS: мастер сборки поставки
@@ -205,6 +206,13 @@ router.get('/wb/supplies/:id/pdf/:kind', h(async (req, res) => {
     qr: [() => supplyQrPdf(id), `QR поставки ${id}.pdf`],
   };
   if (!make[kind]) throw new StockError('Неизвестный тип печати');
+  const orders = await prisma.wbOrder.findMany({ where: { supplyId: id, canceled: false }, select: { article: true, itemId: true } });
+  const names = new Map((await prisma.item.findMany({ where: { id: { in: orders.map((o) => o.itemId).filter((x): x is string => !!x) } }, select: { id: true, name: true } })).map((i) => [i.id, i.name]));
+  setShareText(res, [
+    `WB FBS · ${make[kind][1].replace(/\.pdf$/, '')}`,
+    ...(kind === 'qr' || kind === 'trbx' ? [] : qtyLines(orders.map((o) => ({ name: (o.itemId && names.get(o.itemId)) || o.article, qty: 1 })))),
+    `${orders.length} заданий`,
+  ]);
   sendFile(res, await make[kind][0](), make[kind][1]);
 }));
 
