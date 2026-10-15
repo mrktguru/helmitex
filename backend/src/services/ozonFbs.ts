@@ -251,38 +251,51 @@ const SIZE_ERROR = {
   big: 'Ozon не сформировал этикетку 75×120',
 };
 
+// Одно задание Ozon на этикетки: файл и отправления, которые Ozon не напечатал
+async function labelTask(numbers: string[], size: 'small' | 'big') {
+  const want = size === 'small' ? 'small_label' : 'big_label';
+  const c = await ozon('/v2/posting/fbs/package-label/create', { posting_number: numbers });
+  const tasks: { task_id: number; task_type: string }[] = c.result?.tasks ?? (c.result?.task_id ? [{ task_id: c.result.task_id, task_type: 'big_label' }] : []);
+  const task = tasks.find((t) => t.task_type === want);
+  if (!task) throw new StockError(SIZE_ERROR[size]);
+  for (let k = 0; k < 30; k++) {
+    await sleep(2000);
+    const g = await ozon('/v1/posting/fbs/package-label/get', { task_id: task.task_id });
+    const st = g.result?.status;
+    if (st === 'error') throw new StockError(`Ozon: ошибка формирования этикеток — ${g.result?.error ?? ''}`);
+    if (st === 'completed' && g.result?.file_url) {
+      const missed: string[] = (g.result.unprinted_postings ?? []).map((x: any) => x.posting_number ?? x);
+      return { pdf: await PDFDocument.load(await ozonGetFile(g.result.file_url)), missed };
+    }
+  }
+  throw new StockError('Ozon долго формирует этикетки — повторите через минуту');
+}
+
 /** Этикетки отправлений одним PDF в заданном порядке. small — 58×40 (новый образец), big — 75×120. */
 async function fetchLabels(numbers: string[], size: 'small' | 'big'): Promise<Buffer> {
-  const want = size === 'small' ? 'small_label' : 'big_label';
   const out = await PDFDocument.create();
   for (let i = 0; i < numbers.length; i += 50) {
     const chunk = numbers.slice(i, i + 50);
-    // Сразу после «Собрано» Ozon печатает не все отправления (unprinted_postings, подстатус «передаётся в доставку»
-    // бывает дольше минуты) — повторяем пачку целиком до ~2,5 мин, пока не напечатает все, чтобы сохранить порядок
-    let file: Buffer | null = null;
-    for (let attempt = 0; attempt < 10 && !file; attempt++) {
-      if (attempt) await sleep(15_000);
-      const c = await ozon('/v2/posting/fbs/package-label/create', { posting_number: chunk });
-      const tasks: { task_id: number; task_type: string }[] = c.result?.tasks ?? (c.result?.task_id ? [{ task_id: c.result.task_id, task_type: 'big_label' }] : []);
-      const task = tasks.find((t) => t.task_type === want);
-      if (!task) throw new StockError(SIZE_ERROR[size]);
-      let res: any = null;
-      for (let k = 0; k < 30 && !res; k++) {
-        await sleep(2000);
-        const g = await ozon('/v1/posting/fbs/package-label/get', { task_id: task.task_id });
-        const st = g.result?.status;
-        if (st === 'completed' && g.result?.file_url) res = g.result;
-        else if (st === 'error') throw new StockError(`Ozon: ошибка формирования этикеток — ${g.result?.error ?? ''}`);
+    const { pdf, missed } = await labelTask(chunk, size);
+    // страница на отправление, в порядке запроса без ненапечатанных
+    const printed = chunk.filter((n) => !missed.includes(n));
+    if (pdf.getPageCount() !== printed.length) throw new StockError(`Ozon вернул ${pdf.getPageCount()} этикеток вместо ${printed.length} — повторите`);
+    const pages = new Map<string, { doc: PDFDocument; idx: number }>(printed.map((n, idx) => [n, { doc: pdf, idx }]));
+    // Ненапечатанные (сразу после «Собрано» бывает «not valid»): Ozon кэширует задание на тот же набор,
+    // поэтому добираем их по одному, с паузами до ~2,5 мин
+    for (const n of missed) {
+      for (let attempt = 0; attempt < 10 && !pages.has(n); attempt++) {
+        if (attempt) await sleep(15_000);
+        const one = await labelTask([n], size);
+        if (!one.missed.length && one.pdf.getPageCount() === 1) pages.set(n, { doc: one.pdf, idx: 0 });
       }
-      if (!res) throw new StockError('Ozon долго формирует этикетки — повторите через минуту');
-      const missed: string[] = (res.unprinted_postings ?? []).map((x: any) => x.posting_number ?? x);
-      if (!res.unprinted_postings_count && !missed.length) file = await ozonGetFile(res.file_url);
-      else if (attempt === 9) {
-        throw new StockError(`Ozon не напечатал ${res.unprinted_postings_count || missed.length} из ${chunk.length} этикеток${missed.length ? ` (${missed.slice(0, 5).join(', ')}${missed.length > 5 ? '…' : ''})` : ''} — повторите через минуту`);
-      }
+      if (!pages.has(n)) throw new StockError(`Ozon не напечатал этикетку ${n} — повторите через минуту`);
     }
-    const part = await PDFDocument.load(file!);
-    for (const page of await out.copyPages(part, part.getPageIndices())) out.addPage(page);
+    for (const n of chunk) {
+      const p = pages.get(n)!;
+      const [page] = await out.copyPages(p.doc, [p.idx]);
+      out.addPage(page);
+    }
   }
   return Buffer.from(await out.save());
 }
