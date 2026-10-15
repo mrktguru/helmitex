@@ -138,6 +138,7 @@ export async function fbsState() {
       labels: !!b.labelS3Key, labelAt: b.labelAt, carriageId: b.carriageId, carriageStatus: b.carriageStatus, createdAt: b.createdAt,
     })),
     notWritten,
+    lastNo: (await prisma.ozonFbsBatch.findFirst({ orderBy: { no: 'desc' }, select: { no: true } }))?.no ?? 0,
   };
 }
 
@@ -312,13 +313,23 @@ export async function ship(numbers: string[], userId: string, opts: ShipOpts) {
   ok.sort((a, b) => order.get(a)! - order.get(b)!);
   if (!ok.length) return { shipped: 0, failed, doc: null, writeOffError: null, batch: null, labelError: null, carriageError: null };
 
-  // Группа дня (по дню сборки, МСК)
+  // Номер группы — сквозной по всем товарам и дням; day — день сборки (МСК)
   const day = todayMsk();
   const units = todo.filter((p) => ok.includes(p.postingNumber)).reduce((t, p) => t + (p.products as unknown as FbsProduct[]).reduce((s, x) => s + x.qty, 0), 0);
-  const last = await prisma.ozonFbsBatch.findFirst({ where: { day }, orderBy: { no: 'desc' } });
-  const batch = await prisma.ozonFbsBatch.create({
-    data: { day, no: (last?.no ?? 0) + 1, kind: opts.kind, quantTypeId: qt?.id ?? null, limit: opts.limit ?? null, postings: ok.length, units },
-  });
+  let batch;
+  for (let k = 0; ; k++) {
+    const last = await prisma.ozonFbsBatch.findFirst({ orderBy: { no: 'desc' } });
+    try {
+      batch = await prisma.ozonFbsBatch.create({
+        data: { day, no: (last?.no ?? 0) + 1, kind: opts.kind, quantTypeId: qt?.id ?? null, limit: opts.limit ?? null, postings: ok.length, units },
+      });
+      break;
+    } catch (e) {
+      // две сборки одновременно взяли один номер — берём следующий
+      if (k < 3 && (e as { code?: string }).code === 'P2002') continue;
+      throw e;
+    }
+  }
   await prisma.ozonFbsPosting.updateMany({ where: { postingNumber: { in: ok } }, data: { batchId: batch.id, batchNo: batch.no } });
 
   let doc = null, writeOffError: string | null = null;

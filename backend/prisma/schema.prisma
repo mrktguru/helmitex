@@ -672,7 +672,7 @@ model OzonFbsPosting {
 model OzonFbsBatch {
   id             String     @id @default(uuid())
   day            String // YYYY-MM-DD
-  no             Int
+  no             Int        @unique // сквозной номер группы по всем товарам и дням
   kind           String     @default("quant") // quant — заказы по 1 шт.; multi — по 2+ шт.; manual — выбор вручную; bag — в пакеты
   quantTypeId    String? // тип кванта: товар, штук, короб (короб списывается один на группу)
   quantType      QuantType? @relation(fields: [quantTypeId], references: [id])
@@ -686,8 +686,6 @@ model OzonFbsBatch {
   carriageStatus String?
   carriageAt     DateTime?
   createdAt      DateTime   @default(now())
-
-  @@unique([day, no])
 }
 
 // День отгрузки FBS: этикетки и акт

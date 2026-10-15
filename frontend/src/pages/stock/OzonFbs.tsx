@@ -107,7 +107,7 @@ export default function OzonFbs() {
   }, [data, mode, limit, qty, sel, prod, ship]);
   const planUnits = plan.reduce((t, p) => t + units(p), 0);
   const planSet = new Set(plan.map((p) => p.postingNumber));
-  const nextNo = (batches.filter((b) => b.day === new Date(now + 3 * 3600_000).toISOString().slice(0, 10)).reduce((m, b) => Math.max(m, b.no), 0)) + 1;
+  const nextNo = (data?.lastNo ?? batches.reduce((m, b) => Math.max(m, b.no), 0)) + 1; // сквозной номер
   const singles = waiting.filter((p) => ofProd(p) && units(p) === 1).length;
 
   const item = (data?.items ?? []).find((i: any) => i.id === prod);
