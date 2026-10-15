@@ -185,6 +185,37 @@ export async function writeOffDay(day: string, numbers: string[] | undefined, us
 
 // ───────────── Сборка ─────────────
 
+/** Данные экземпляров, которые Ozon требует перед «Собрано». Товар российский: ГТД и РНПТ — «отсутствует».
+ *  Коды ЧЗ, если Ozon их потребует, сами не заполняются — ошибка с понятным текстом. */
+export async function fillExemplars(postingNumber: string) {
+  const e = await ozon('/v6/fbs/posting/product/exemplar/create-or-get', { posting_number: postingNumber });
+  const products = e.products ?? [];
+  const mark = products.find((p: any) => p.is_mandatory_mark_needed && (p.exemplars ?? []).some((x: any) => !(x.marks ?? []).length));
+  if (mark) throw new StockError('Ozon требует коды ЧЗ экземпляров для этого отправления — заполните их в кабинете Ozon');
+  await ozon('/v6/fbs/posting/product/exemplar/set', {
+    posting_number: postingNumber,
+    multi_box_qty: e.multi_box_qty ?? 1,
+    products: products.map((p: any) => ({
+      product_id: p.product_id, quantity: p.quantity,
+      exemplars: (p.exemplars ?? []).map((x: any) => ({
+        exemplar_id: x.exemplar_id, marks: x.marks ?? [], weight: x.weight ?? 0,
+        gtd: x.gtd ?? '', is_gtd_absent: p.is_gtd_needed && !x.gtd ? true : !!x.is_gtd_absent,
+        rnpt: x.rnpt ?? '', is_rnpt_absent: p.is_rnpt_needed && !x.rnpt ? true : !!x.is_rnpt_absent,
+      })),
+    })),
+  });
+  // Ozon проверяет данные асинхронно — ждём, пока сборка станет доступна
+  for (let k = 0; k < 10; k++) {
+    await sleep(1500);
+    const st = await ozon('/v5/fbs/posting/product/exemplar/status', { posting_number: postingNumber });
+    if (st.status === 'ship_available') return;
+    if (st.status === 'ship_not_available' && k >= 4) {
+      const errs = (st.products ?? []).flatMap((p: any) => (p.exemplars ?? []).flatMap((x: any) => [...(x.gtd_error_codes ?? []), ...(x.rnpt_error_codes ?? []), ...(x.weight_error_codes ?? [])]));
+      throw new StockError(`Ozon не принял данные экземпляров${errs.length ? `: ${errs.join(', ')}` : ''}`);
+    }
+  }
+}
+
 /** «Собрано» в Ozon (одна коробка на отправление) и списание собранного со склада.
  *  batch — собрать группой (квант 42 шт., заказы по 2+ шт., ручной выбор): собранным присваивается номер группы дня
  *  и сразу формируются их этикетки одним PDF. */
@@ -215,11 +246,17 @@ export async function ship(numbers: string[], userId: string, batch: 'quant' | '
   await Promise.all(Array.from({ length: 4 }, async () => {
     for (let p = queue.shift(); p; p = queue.shift()) {
       try {
-        await ozon('/v4/posting/fbs/ship', {
+        const body = {
           posting_number: p.postingNumber,
           packages: [{ products: (p.products as unknown as FbsProduct[]).map((x) => ({ product_id: Number(x.sku), quantity: x.qty })) }],
           with: { additional_data: false },
-        });
+        };
+        try { await ozon('/v4/posting/fbs/ship', body); } catch (e) {
+          // Ozon требует ГТД/РНПТ экземпляров — заполняем «отсутствует» и собираем повторно
+          if (!/EXEMPLAR_INFO_NOT_FILLED/.test((e as Error).message)) throw e;
+          await fillExemplars(p.postingNumber);
+          await ozon('/v4/posting/fbs/ship', body);
+        }
         await prisma.ozonFbsPosting.update({ where: { postingNumber: p.postingNumber }, data: { status: 'awaiting_deliver', shipError: null } });
         ok.push(p.postingNumber);
       } catch (e) {
