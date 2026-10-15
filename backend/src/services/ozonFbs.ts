@@ -299,7 +299,14 @@ const SIZE_ERROR = {
 // Одно задание Ozon на этикетки: файл и отправления, которые Ozon не напечатал
 async function labelTask(numbers: string[], size: 'small' | 'big') {
   const want = size === 'small' ? 'small_label' : 'big_label';
-  const c = await ozon('/v2/posting/fbs/package-label/create', { posting_number: numbers });
+  // сразу после «Собрано» Ozon может ещё не видеть отправления — NO_POSTINGS_FOR_BATCH_DOWNLOAD, ждём
+  let c: any;
+  for (let k = 0; ; k++) {
+    try { c = await ozon('/v2/posting/fbs/package-label/create', { posting_number: numbers }); break; } catch (e) {
+      if (k >= 8 || !/NO_POSTINGS_FOR_BATCH_DOWNLOAD/.test((e as Error).message)) throw e;
+      await sleep(10_000);
+    }
+  }
   const tasks: { task_id: number; task_type: string }[] = c.result?.tasks ?? (c.result?.task_id ? [{ task_id: c.result.task_id, task_type: 'big_label' }] : []);
   const task = tasks.find((t) => t.task_type === want);
   if (!task) throw new StockError(SIZE_ERROR[size]);
