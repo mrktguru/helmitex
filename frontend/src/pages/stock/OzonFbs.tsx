@@ -265,6 +265,43 @@ export default function OzonFbs() {
         </div>
       </section>
 
+      {/* Группы и поставки */}
+      <section className="bg-white rounded-xl border border-slate-200">
+        <div className="px-3 sm:px-4 py-3 border-b flex flex-wrap items-center gap-2">
+          <h2 className="font-bold">Группы и поставки</h2><span className="text-xs text-slate-500">{open.length} без поставки</span>
+          <button disabled={!!busy || !(carSel.size || open.length)} className={btnPrimary + ' ml-auto !py-1.5'}
+            onClick={() => run('car', () => api.ozonFbsCarriage(carSel.size ? [...carSel] : open.map((b) => b.id)), (r) => { setData(r.state); setCarSel(new Set()); return `Поставка ${r.carriageId} сформирована в Ozon`; })}>
+            {busy === 'car' ? 'Формирую…' : carSel.size ? `Поставка на выбранные ${carSel.size}` : `Поставка на все ${open.length}`}</button>
+        </div>
+        <div className="divide-y text-sm">
+          {batches.slice(0, 30).map((b) => {
+            const canCar = !b.carriageId && open.some((o) => o.id === b.id);
+            return (
+              <div key={b.id} className="px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                {canCar ? <input type="checkbox" className="w-4 h-4" checked={carSel.has(b.id)} onChange={() => setCarSel((s) => { const x = new Set(s); x.has(b.id) ? x.delete(b.id) : x.add(b.id); return x; })} /> : <span className="w-4" />}
+                <b className="w-10">№{b.no}</b><span className="text-xs text-slate-500 w-10">{dd(b.day)}</span>
+                <span className={clsx('text-[11px] font-medium px-2 py-0.5 rounded-full', b.kind === 'quant' ? 'bg-brand-50 text-brand-700' : 'bg-amber-50 text-amber-800')}>{b.quantTypeName ?? KIND[b.kind] ?? b.kind}</span>
+                <span className="w-28">
+                  {b.limit && <span className="block h-1.5 rounded bg-slate-200 overflow-hidden"><span className="block h-full bg-brand-500" style={{ width: `${Math.min(100, b.units / b.limit * 100)}%` }} /></span>}
+                  <span className="text-xs text-slate-500">{b.postings} отпр · {b.units}{b.limit ? `/${b.limit}` : ''} шт</span>
+                </span>
+                <span className="basis-full sm:basis-auto sm:ml-auto flex flex-wrap items-center gap-3 text-xs pl-7 sm:pl-0">
+                  {b.carriageId
+                    ? <><span className="text-indigo-700">поставка {b.carriageId}{b.carriageStatus === 'formed' ? ' · сформирована' : b.carriageStatus ? ` · ${b.carriageStatus}` : ''}</span><button className="text-brand-700 hover:underline" onClick={() => actPdf(b)}>⇩ акт</button></>
+                    : canCar && <button disabled={!!busy} className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 font-medium hover:bg-blue-100"
+                        onClick={() => run(`car${b.id}`, () => api.ozonFbsCarriage([b.id]), (r) => { setData(r.state); return `Поставка ${r.carriageId} сформирована в Ozon: группа №${b.no}`; })}>{busy === `car${b.id}` ? 'Формирую…' : 'Сформировать поставку'}</button>}
+                  {b.labels && <button className="text-brand-700 hover:underline font-medium" onClick={() => labelsPdf(b)}>⇩ этикетки ({b.postings})</button>}
+                  <button disabled={!!busy} className={b.labels ? 'text-slate-500 hover:underline' : 'text-brand-700 hover:underline'}
+                    onClick={() => run(`bl${b.id}`, () => api.ozonFbsBatchLabels(b.id), (r) => { setData(r); labelsPdf(b); return `Этикетки группы №${b.no} готовы`; })}>
+                    {busy === `bl${b.id}` ? 'Ozon формирует…' : b.labels ? 'заново' : 'сформировать этикетки'}</button>
+                </span>
+              </div>
+            );
+          })}
+          {batches.length === 0 && <div className="px-4 py-6 text-sm text-slate-500">Групп ещё нет — соберите первую выше.</div>}
+        </div>
+      </section>
+
       {/* Заказы */}
       <section className="bg-white rounded-xl border border-slate-200">
         <div className="px-3 sm:px-4 py-3 border-b flex gap-1.5 overflow-x-auto">
@@ -334,43 +371,6 @@ export default function OzonFbs() {
         </div>
         {filtered.length === 0 && <div className="px-4 py-6 text-sm text-slate-500">Нет заказов.</div>}
         {filtered.length > shown && <button onClick={() => setShown((n) => n + 200)} className="w-full px-4 py-2.5 text-sm text-brand-700 border-t hover:bg-slate-50">Показать ещё · всего {filtered.length}</button>}
-      </section>
-
-      {/* Группы и поставки */}
-      <section className="bg-white rounded-xl border border-slate-200">
-        <div className="px-3 sm:px-4 py-3 border-b flex flex-wrap items-center gap-2">
-          <h2 className="font-bold">Группы и поставки</h2><span className="text-xs text-slate-500">{open.length} без поставки</span>
-          <button disabled={!!busy || !(carSel.size || open.length)} className={btnPrimary + ' ml-auto !py-1.5'}
-            onClick={() => run('car', () => api.ozonFbsCarriage(carSel.size ? [...carSel] : open.map((b) => b.id)), (r) => { setData(r.state); setCarSel(new Set()); return `Поставка ${r.carriageId} сформирована в Ozon`; })}>
-            {busy === 'car' ? 'Формирую…' : carSel.size ? `Поставка на выбранные ${carSel.size}` : `Поставка на все ${open.length}`}</button>
-        </div>
-        <div className="divide-y text-sm">
-          {batches.slice(0, 30).map((b) => {
-            const canCar = !b.carriageId && open.some((o) => o.id === b.id);
-            return (
-              <div key={b.id} className="px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                {canCar ? <input type="checkbox" className="w-4 h-4" checked={carSel.has(b.id)} onChange={() => setCarSel((s) => { const x = new Set(s); x.has(b.id) ? x.delete(b.id) : x.add(b.id); return x; })} /> : <span className="w-4" />}
-                <b className="w-10">№{b.no}</b><span className="text-xs text-slate-500 w-10">{dd(b.day)}</span>
-                <span className={clsx('text-[11px] font-medium px-2 py-0.5 rounded-full', b.kind === 'quant' ? 'bg-brand-50 text-brand-700' : 'bg-amber-50 text-amber-800')}>{b.quantTypeName ?? KIND[b.kind] ?? b.kind}</span>
-                <span className="w-28">
-                  {b.limit && <span className="block h-1.5 rounded bg-slate-200 overflow-hidden"><span className="block h-full bg-brand-500" style={{ width: `${Math.min(100, b.units / b.limit * 100)}%` }} /></span>}
-                  <span className="text-xs text-slate-500">{b.postings} отпр · {b.units}{b.limit ? `/${b.limit}` : ''} шт</span>
-                </span>
-                <span className="basis-full sm:basis-auto sm:ml-auto flex flex-wrap items-center gap-3 text-xs pl-7 sm:pl-0">
-                  {b.carriageId
-                    ? <><span className="text-indigo-700">поставка {b.carriageId}{b.carriageStatus === 'formed' ? ' · сформирована' : b.carriageStatus ? ` · ${b.carriageStatus}` : ''}</span><button className="text-brand-700 hover:underline" onClick={() => actPdf(b)}>⇩ акт</button></>
-                    : canCar && <button disabled={!!busy} className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 font-medium hover:bg-blue-100"
-                        onClick={() => run(`car${b.id}`, () => api.ozonFbsCarriage([b.id]), (r) => { setData(r.state); return `Поставка ${r.carriageId} сформирована в Ozon: группа №${b.no}`; })}>{busy === `car${b.id}` ? 'Формирую…' : 'Сформировать поставку'}</button>}
-                  {b.labels && <button className="text-brand-700 hover:underline font-medium" onClick={() => labelsPdf(b)}>⇩ этикетки ({b.postings})</button>}
-                  <button disabled={!!busy} className={b.labels ? 'text-slate-500 hover:underline' : 'text-brand-700 hover:underline'}
-                    onClick={() => run(`bl${b.id}`, () => api.ozonFbsBatchLabels(b.id), (r) => { setData(r); labelsPdf(b); return `Этикетки группы №${b.no} готовы`; })}>
-                    {busy === `bl${b.id}` ? 'Ozon формирует…' : b.labels ? 'заново' : 'сформировать этикетки'}</button>
-                </span>
-              </div>
-            );
-          })}
-          {batches.length === 0 && <div className="px-4 py-6 text-sm text-slate-500">Групп ещё нет — соберите первую выше.</div>}
-        </div>
       </section>
 
       {/* Телефон/планшет: итог и кнопка всегда под рукой */}
