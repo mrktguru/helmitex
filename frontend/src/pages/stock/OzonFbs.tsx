@@ -21,6 +21,8 @@ const PASSED = ['delivering', 'driver_pickup', 'delivered', 'not_accepted'];
 const dayLabel = (d: string) => d.split('-').reverse().slice(0, 2).join('.');
 const hm = (iso: string) => new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
 const dt = (iso: string | null) => iso ? new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' }) : '—';
+// Сборка квантами: короб на 42 тубы — столько единиц добавляем на отгрузку и печатаем этикеток за раз
+const QUANT = 42;
 const short = (name: string) => name.replace(/^Шпатлёвка |^Краска Helmitex /, '');
 
 export default function OzonFbs() {
@@ -66,6 +68,7 @@ export default function OzonFbs() {
   const cur = step ?? auto;
   const shipAt = P[0]?.shipmentDate;
 
+  const pUnits = (p: any) => p.products.reduce((s: number, x: any) => s + x.qty, 0);
   const units = (list: any[]) => list.reduce((t, p) => t + p.products.reduce((s: number, x: any) => s + x.qty, 0), 0);
   const sum = (list: any[]) => list.reduce((t, p) => t + p.products.reduce((s: number, x: any) => s + x.qty * x.price, 0), 0);
 
@@ -88,6 +91,37 @@ export default function OzonFbs() {
     }
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [data, sel]);
+
+  // Следующий квант: отправления по порядку, пока не наберётся 42 шт. (крупные, что не влезают, — в следующий)
+  const nextQuant = useMemo(() => {
+    const out: any[] = [];
+    let left = QUANT;
+    for (const p of waiting) {
+      if (p.products.some((x: any) => !x.item)) continue;
+      const u = pUnits(p);
+      if (u <= left) { out.push(p); left -= u; }
+      if (left === 0) break;
+    }
+    return { list: out, units: QUANT - left };
+  }, [data]);
+  const batches: any[] = data?.batches ?? [];
+  const nextNo = (batches[batches.length - 1]?.no ?? 0) + 1;
+  const batchPdf = (no: number) => downloadFile(`/stock/ozon-fbs/days/${day}/batches/${no}.pdf`, `Этикетки Ozon FBS ${day} квант ${no}.pdf`).catch((e) => setError(e.message));
+  const batchList = batches.length > 0 && (
+    <div className="space-y-1.5 text-sm">
+      {[...batches].reverse().map((b) => (
+        <div key={b.no} className="flex items-center gap-2">
+          <span className="font-medium">Квант №{b.no}</span>
+          <span className="text-slate-500 tabular-nums">{b.postings} отпр. · {b.units} шт.</span>
+          {b.labelS3Key
+            ? <button className="ml-auto text-brand-700 hover:underline whitespace-nowrap" onClick={() => batchPdf(b.no)}>⇩ этикетки</button>
+            : <button disabled={!!busy} className="ml-auto text-brand-700 hover:underline whitespace-nowrap"
+                onClick={() => run(`bl${b.no}`, () => api.ozonFbsBatchLabels(day!, b.no), (r) => { apply(r); batchPdf(b.no); return `Этикетки кванта №${b.no} готовы`; })}>
+                {busy === `bl${b.no}` ? 'Ozon формирует…' : 'сформировать этикетки'}</button>}
+        </div>
+      ))}
+    </div>
+  );
 
   const steps = [
     ['Новые', waiting.length ? `${waiting.length} отпр.` : 'нет новых'],
@@ -189,6 +223,25 @@ export default function OzonFbs() {
             {table(waiting, true)}
           </div>
           <div className="space-y-4 lg:sticky lg:top-4 order-first lg:order-none">
+            <div className="bg-white rounded-xl border-2 border-brand-200 p-4 space-y-3">
+              <h3 className="font-semibold">Сборка квантами по {QUANT} шт.</h3>
+              {nextQuant.list.length > 0 ? (<>
+                <p className="text-sm text-slate-600">Квант №{nextNo}: <b>{nextQuant.list.length} отпр. · {nextQuant.units} шт.</b>{nextQuant.units < QUANT ? ' — последний, неполный' : ''}.
+                  Отметим «Собрано» в Ozon, спишем со склада и сразу сформируем {nextQuant.list.length} этикеток 58×40 одним PDF.</p>
+                <div className="flex gap-2">
+                  <button disabled={!!busy} className={btnPrimary + ' flex-1'}
+                    onClick={() => run('quant', () => api.ozonFbsShip(day, nextQuant.list.map((p) => p.postingNumber), true), (r) => {
+                      apply(r.state); loadDays(); setStep(2);
+                      if (r.batchNo && !r.labelError) batchPdf(r.batchNo);
+                      return `Квант №${r.batchNo ?? '—'}: собрано ${r.shipped}${r.failed.length ? `, ошибок ${r.failed.length}` : ''}${r.doc ? ` · списано ${r.doc.number}` : ''}${r.writeOffError ? ` · НЕ списано: ${r.writeOffError}` : ''}${r.labelError ? ` · этикетки не сформированы: ${r.labelError}` : ' · этикетки скачиваются'}`;
+                    })}>
+                    {busy === 'quant' ? `Собираю квант №${nextNo}…` : `Собрать квант №${nextNo} (${nextQuant.units} шт.) →`}</button>
+                  <button disabled={!!busy} className={btnSecondary} title="Отметить отправления кванта в таблице"
+                    onClick={() => setSel(new Set(nextQuant.list.map((p) => p.postingNumber)))}>Отметить</button>
+                </div>
+              </>) : <p className="text-sm text-slate-500">Нечего собирать.</p>}
+              {batchList && <div className="border-t pt-3">{batchList}</div>}
+            </div>
             <div className="bg-white rounded-xl border border-slate-200 p-4">
               <h3 className="font-semibold mb-3">Лист подбора</h3>
               <div className="space-y-1.5 text-sm">
@@ -237,6 +290,7 @@ export default function OzonFbs() {
               ⇩ PDF ({info.labelCount} шт., {info.labelType === 'small_label' ? '58×40' : '75×120'})</button>}
           </div>
           {info?.labelAt && <p className="text-xs text-slate-500">Сформированы {dt(info.labelAt)}. Если собрали ещё отправления — сформируйте заново.</p>}
+          {batchList && <div className="border-t pt-3"><h3 className="font-semibold mb-2 text-sm">Этикетки по квантам ({QUANT} шт.)</h3>{batchList}</div>}
           {error.includes('58 × 40') && (
             <button disabled={!!busy} className="text-sm text-brand-700 hover:underline"
               onClick={() => run('labels', () => api.ozonFbsLabels(day, 'big'), (r) => { apply(r); return 'Готово: этикетки 75×120'; })}>Пока напечатать старые 75×120</button>

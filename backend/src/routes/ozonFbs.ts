@@ -4,7 +4,7 @@ import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { StockError } from '../services/stock';
 import { downloadFile } from '../services/s3';
-import { act, days, dayState, labels, ship, syncFbs, writeOffDay } from '../services/ozonFbs';
+import { act, batchLabels, days, dayState, labels, ship, syncFbs, writeOffDay } from '../services/ozonFbs';
 
 // Отправки Ozon FBS: мастер сборки отгрузки дня
 const router = Router();
@@ -20,16 +20,17 @@ const h = (fn: Handler) => async (req: AuthRequest, res: Response, next: (e: unk
 };
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const day = (req: AuthRequest) => { if (!DAY.test(req.params.day)) throw new StockError('Неверная дата'); return req.params.day; };
-const numbers = z.object({ postingNumbers: z.array(z.string().max(40)).max(2000).optional() });
+const numbers = z.object({ postingNumbers: z.array(z.string().max(40)).max(2000).optional(), batch: z.boolean().optional() });
+const size = z.object({ size: z.enum(['small', 'big']).default('small') });
 
 router.get('/ozon-fbs/days', h(async (_req, res) => { res.json(await days()); }));
 router.post('/ozon-fbs/sync', h(async (req, res) => { await syncFbs(req.user!.id); res.json(await days()); }));
 router.get('/ozon-fbs/days/:day', h(async (req, res) => { res.json(await dayState(day(req))); }));
 
 router.post('/ozon-fbs/days/:day/ship', h(async (req, res) => {
-  const { postingNumbers } = numbers.parse(req.body);
+  const { postingNumbers, batch } = numbers.parse(req.body);
   if (!postingNumbers?.length) throw new StockError('Не выбраны отправления');
-  const r = await ship(postingNumbers, req.user!.id);
+  const r = await ship(postingNumbers, req.user!.id, batch);
   res.json({ ...r, state: await dayState(day(req)) });
 }));
 router.post('/ozon-fbs/days/:day/write-off', h(async (req, res) => {
@@ -38,9 +39,19 @@ router.post('/ozon-fbs/days/:day/write-off', h(async (req, res) => {
   res.json({ doc: doc ? { id: doc.id, number: doc.number } : null, state: await dayState(day(req)) });
 }));
 router.post('/ozon-fbs/days/:day/labels', h(async (req, res) => {
-  const { size } = z.object({ size: z.enum(['small', 'big']).default('small') }).parse(req.body ?? {});
-  await labels(day(req), size);
+  await labels(day(req), size.parse(req.body ?? {}).size);
   res.json(await dayState(day(req)));
+}));
+router.post('/ozon-fbs/days/:day/batches/:no/labels', h(async (req, res) => {
+  await batchLabels(day(req), Number(req.params.no), size.parse(req.body ?? {}).size);
+  res.json(await dayState(day(req)));
+}));
+router.get('/ozon-fbs/days/:day/batches/:no.pdf', h(async (req, res) => {
+  const b = await prisma.ozonFbsBatch.findUnique({ where: { day_no: { day: day(req), no: Number(req.params.no) || 0 } } });
+  if (!b?.labelS3Key) throw new StockError('Этикетки кванта ещё не сформированы');
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(`Этикетки Ozon FBS ${b.day} квант ${b.no}.pdf`)}`);
+  res.end(await downloadFile(b.labelS3Key));
 }));
 router.post('/ozon-fbs/days/:day/act', h(async (req, res) => { await act(day(req)); res.json(await dayState(day(req))); }));
 

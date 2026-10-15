@@ -659,9 +659,25 @@ model OzonFbsPosting {
   products         Json // [{ offerId, sku, name, qty, price }]
   shipError        String? // ошибка «Собрать» в Ozon
   stockDocId       String? // списание со склада при сборке
+  batchNo          Int? // номер кванта сборки дня (по 42 шт.)
   syncedAt         DateTime  @updatedAt
 
   @@index([shipDay])
+}
+
+// Квант сборки FBS: отправления на 42 шт., собранные вместе, и их этикетки одним PDF
+model OzonFbsBatch {
+  id         String    @id @default(uuid())
+  day        String // YYYY-MM-DD
+  no         Int
+  postings   Int
+  units      Int
+  labelS3Key String?
+  labelType  String?
+  labelAt    DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@unique([day, no])
 }
 
 // День отгрузки FBS: этикетки и акт

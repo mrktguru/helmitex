@@ -183,8 +183,10 @@ export const api = {
   ozonFbsDays: () => request<any[]>('/stock/ozon-fbs/days'),
   ozonFbsSync: () => request<any[]>('/stock/ozon-fbs/sync', { method: 'POST' }),
   ozonFbsDay: (day: string) => request<any>(`/stock/ozon-fbs/days/${day}`),
-  ozonFbsShip: (day: string, postingNumbers: string[]) =>
-    request<any>(`/stock/ozon-fbs/days/${day}/ship`, { method: 'POST', body: JSON.stringify({ postingNumbers }) }),
+  ozonFbsShip: (day: string, postingNumbers: string[], batch = false) =>
+    request<any>(`/stock/ozon-fbs/days/${day}/ship`, { method: 'POST', body: JSON.stringify({ postingNumbers, batch }) }),
+  ozonFbsBatchLabels: (day: string, no: number, size: 'small' | 'big' = 'small') =>
+    request<any>(`/stock/ozon-fbs/days/${day}/batches/${no}/labels`, { method: 'POST', body: JSON.stringify({ size }) }),
   ozonFbsWriteOff: (day: string, postingNumbers?: string[]) =>
     request<any>(`/stock/ozon-fbs/days/${day}/write-off`, { method: 'POST', body: JSON.stringify({ postingNumbers }) }),
   ozonFbsLabels: (day: string, size: 'small' | 'big') =>

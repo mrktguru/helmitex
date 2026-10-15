@@ -109,9 +109,11 @@ export async function dayState(day: string) {
   const stock = await stockOf([...items.values()].map((i) => i.id));
   const docs = await prisma.stockDoc.findMany({ where: { id: { in: postings.map((p) => p.stockDocId).filter((x): x is string => !!x) } }, select: { id: true, number: true } });
   const dayRow = await prisma.ozonFbsDay.findUnique({ where: { day } });
+  const batches = await prisma.ozonFbsBatch.findMany({ where: { day }, orderBy: { no: 'asc' } });
   return {
     day,
     info: dayRow,
+    batches,
     postings: postings.map((p) => ({
       ...p,
       products: (p.products as unknown as FbsProduct[]).map((x) => ({ ...x, item: items.get(x.offerId) ?? null })),
@@ -175,8 +177,9 @@ export async function writeOffDay(day: string, numbers: string[] | undefined, us
 
 // ───────────── Сборка ─────────────
 
-/** «Собрано» в Ozon (одна коробка на отправление) и списание собранного со склада. */
-export async function ship(numbers: string[], userId: string) {
+/** «Собрано» в Ozon (одна коробка на отправление) и списание собранного со склада.
+ *  batch — собрать квантом: собранным присваивается номер кванта дня и сразу формируются их этикетки. */
+export async function ship(numbers: string[], userId: string, batch = false) {
   const rows = await prisma.ozonFbsPosting.findMany({ where: { postingNumber: { in: numbers } } });
   const todo = rows.filter((r) => r.status === 'awaiting_packaging');
   if (!todo.length) throw new StockError('Нет отправлений в статусе «Ждёт сборки»');
@@ -219,27 +222,41 @@ export async function ship(numbers: string[], userId: string) {
   }));
   let doc = null, writeOffError: string | null = null;
   try { doc = await writeOff(ok, userId); } catch (e) { writeOffError = (e as Error).message; }
-  return { shipped: ok.length, failed, doc: doc ? { id: doc.id, number: doc.number } : null, writeOffError };
+
+  let batchNo: number | null = null, labelError: string | null = null;
+  if (batch && ok.length) {
+    const day = todo[0].shipDay;
+    const last = await prisma.ozonFbsBatch.findFirst({ where: { day }, orderBy: { no: 'desc' } });
+    batchNo = (last?.no ?? 0) + 1;
+    // порядок этикеток — как отправления шли в выборке
+    const order = new Map(numbers.map((n, i) => [n, i]));
+    ok.sort((a, b) => order.get(a)! - order.get(b)!);
+    const units = todo.filter((p) => ok.includes(p.postingNumber))
+      .reduce((t, p) => t + (p.products as unknown as FbsProduct[]).reduce((s, x) => s + x.qty, 0), 0);
+    await prisma.ozonFbsBatch.create({ data: { day, no: batchNo, postings: ok.length, units } });
+    await prisma.ozonFbsPosting.updateMany({ where: { postingNumber: { in: ok } }, data: { batchNo } });
+    try { await batchLabels(day, batchNo, 'small', ok); } catch (e) { labelError = (e as Error).message; }
+  }
+  return { shipped: ok.length, failed, doc: doc ? { id: doc.id, number: doc.number } : null, writeOffError, batchNo, labelError };
 }
 
 // ───────────── Этикетки ─────────────
 
-/** Этикетки собранных отправлений дня одним PDF. small — 58×40 (новый образец), big — 75×120. */
-export async function labels(day: string, size: 'small' | 'big') {
-  const rows = await prisma.ozonFbsPosting.findMany({ where: { shipDay: day, status: 'awaiting_deliver' }, orderBy: { postingNumber: 'asc' } });
-  if (!rows.length) throw new StockError('Нет собранных отправлений, ожидающих отгрузки — сначала соберите их');
+const SIZE_ERROR = {
+  small: 'Ozon не сформировал этикетку 58×40. В кабинете Ozon: FBS → Логистика → метод доставки «Рощино» → Дополнительные настройки → включите «Печатать этикетку 58 × 40».',
+  big: 'Ozon не сформировал этикетку 75×120',
+};
+
+/** Этикетки отправлений одним PDF в заданном порядке. small — 58×40 (новый образец), big — 75×120. */
+async function fetchLabels(numbers: string[], size: 'small' | 'big'): Promise<Buffer> {
   const want = size === 'small' ? 'small_label' : 'big_label';
   const out = await PDFDocument.create();
-  for (let i = 0; i < rows.length; i += 50) {
-    const chunk = rows.slice(i, i + 50).map((r) => r.postingNumber);
+  for (let i = 0; i < numbers.length; i += 50) {
+    const chunk = numbers.slice(i, i + 50);
     const c = await ozon('/v2/posting/fbs/package-label/create', { posting_number: chunk });
     const tasks: { task_id: number; task_type: string }[] = c.result?.tasks ?? (c.result?.task_id ? [{ task_id: c.result.task_id, task_type: 'big_label' }] : []);
     const task = tasks.find((t) => t.task_type === want);
-    if (!task) {
-      throw new StockError(size === 'small'
-        ? 'Ozon не сформировал этикетку 58×40. В кабинете Ozon: FBS → Логистика → метод доставки «Рощино» → Дополнительные настройки → включите «Печатать этикетку 58 × 40».'
-        : 'Ozon не сформировал этикетку 75×120');
-    }
+    if (!task) throw new StockError(SIZE_ERROR[size]);
     let url: string | null = null;
     for (let k = 0; k < 30 && !url; k++) {
       await sleep(2000);
@@ -252,14 +269,36 @@ export async function labels(day: string, size: 'small' | 'big') {
     const part = await PDFDocument.load(await ozonGetFile(url));
     for (const page of await out.copyPages(part, part.getPageIndices())) out.addPage(page);
   }
+  return Buffer.from(await out.save());
+}
+
+/** Этикетки собранных отправлений дня одним PDF. */
+export async function labels(day: string, size: 'small' | 'big') {
+  const rows = await prisma.ozonFbsPosting.findMany({ where: { shipDay: day, status: 'awaiting_deliver' }, orderBy: [{ batchNo: 'asc' }, { postingNumber: 'asc' }] });
+  if (!rows.length) throw new StockError('Нет собранных отправлений, ожидающих отгрузки — сначала соберите их');
+  const want = size === 'small' ? 'small_label' : 'big_label';
   const key = `ozon-fbs/${day}/labels-${size}.pdf`;
-  await uploadFile(key, Buffer.from(await out.save()), 'application/pdf');
+  await uploadFile(key, await fetchLabels(rows.map((r) => r.postingNumber), size), 'application/pdf');
   await prisma.ozonFbsDay.upsert({
     where: { day },
     create: { day, labelS3Key: key, labelType: want, labelCount: rows.length, labelAt: new Date() },
     update: { labelS3Key: key, labelType: want, labelCount: rows.length, labelAt: new Date(), lastError: null },
   });
   return prisma.ozonFbsDay.findUnique({ where: { day } });
+}
+
+/** Этикетки одного кванта сборки. numbers — порядок печати (по умолчанию по номеру отправления). */
+export async function batchLabels(day: string, no: number, size: 'small' | 'big', numbers?: string[]) {
+  const b = await prisma.ozonFbsBatch.findUnique({ where: { day_no: { day, no } } });
+  if (!b) throw new StockError(`Квант №${no} не найден`);
+  if (!numbers) {
+    const rows = await prisma.ozonFbsPosting.findMany({ where: { shipDay: day, batchNo: no, status: { not: 'cancelled' } }, orderBy: { postingNumber: 'asc' } });
+    numbers = rows.map((r) => r.postingNumber);
+  }
+  if (!numbers.length) throw new StockError(`В кванте №${no} нет отправлений`);
+  const key = `ozon-fbs/${day}/batch-${no}-${size}.pdf`;
+  await uploadFile(key, await fetchLabels(numbers, size), 'application/pdf');
+  return prisma.ozonFbsBatch.update({ where: { id: b.id }, data: { labelS3Key: key, labelType: size === 'small' ? 'small_label' : 'big_label', labelAt: new Date() } });
 }
 
 // ───────────── Акт ─────────────
