@@ -17,6 +17,11 @@ export function lastFullDay(): string {
   return ymd(new Date(Date.now() + 3 * 3600_000 - DAY));
 }
 
+// Сегодня по Москве — день неполный, данные Ozon за него догружаются в течение дня
+export function todayMsk(): string {
+  return ymd(new Date(Date.now() + 3 * 3600_000));
+}
+
 export function dateRange(from: string, to: string): string[] {
   const out: string[] = [];
   for (let t = dt(from).getTime(); t <= dt(to).getTime(); t += DAY) out.push(ymd(new Date(t)));
@@ -40,14 +45,15 @@ type Kind = 'seller' | 'perf' | 'finance';
 
 // День нужно (пере)загрузить: не загружался; или загружен, пока данные ещё «дозревали» (< 3 дней после даты), и прошло > 2 ч
 async function staleDays(kind: Kind, dates: string[], force: boolean): Promise<string[]> {
-  const max = lastFullDay();
-  const want = dates.filter((d) => d <= max);
+  const today = todayMsk();
+  const want = dates.filter((d) => d <= today);
   if (force) return want;
   const rows = await prisma.adSyncDay.findMany({ where: { kind, date: { in: want.map(dt) } } });
   const got = new Map(rows.map((r) => [ymd(r.date), r.fetchedAt.getTime()]));
   return want.filter((d) => {
     const at = got.get(d);
     if (at == null) return true;
+    if (d === today) return Date.now() - at > 15 * 60_000;
     const settled = at - dt(d).getTime() > 3 * DAY;
     return !settled && Date.now() - at > 2 * 3600_000;
   });

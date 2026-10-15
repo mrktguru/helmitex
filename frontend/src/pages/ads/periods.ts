@@ -69,7 +69,11 @@ export function bucketKey(date: string, g: Gran): string {
 }
 
 export function bucketLabel(key: string, g: Gran, days: number): { a: string; b: string; weekend?: boolean } {
-  if (g === 'day') { const w = new Date(key + 'T00:00:00Z').toLocaleDateString('ru-RU', { weekday: 'short', timeZone: 'UTC' }); return { a: dd(key), b: w, weekend: ['сб', 'вс'].includes(w) }; }
+  if (g === 'day') {
+    const w = new Date(key + 'T00:00:00Z').toLocaleDateString('ru-RU', { weekday: 'short', timeZone: 'UTC' });
+    const today = new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
+    return { a: dd(key), b: key === today ? `${w} · сегодня` : w, weekend: ['сб', 'вс'].includes(w) };
+  }
   if (g === 'week') { const e = new Date(new Date(key + 'T00:00:00Z').getTime() + 6 * 86_400_000).toISOString().slice(0, 10); return { a: `${dd(key)}–${dd(e)}`, b: days < 7 ? `${days} из 7 дн.` : 'неделя' }; }
   const [y, m] = key.split('-'); const full = new Date(Date.UTC(+y, +m, 0)).getUTCDate();
   return { a: MON[+m - 1], b: days < full ? `${days} из ${full} дн.` : y };

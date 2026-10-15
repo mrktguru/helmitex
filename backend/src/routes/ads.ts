@@ -6,7 +6,7 @@ import { StockError } from '../services/stock';
 import { ozonConfigured } from '../services/ozon';
 import { perfConfigured } from '../services/perf';
 import {
-  createCampaign, getIntraday, getProducts, getReport, lastFullDay, setActionPrice, setBudget, setCampaignState, setCpcBid, setPrice, setSelected, setSelectedBid, ymd,
+  createCampaign, getIntraday, getProducts, getReport, todayMsk, setActionPrice, setBudget, setCampaignState, setCpcBid, setPrice, setSelected, setSelectedBid, ymd,
 } from '../services/ads';
 import { DEFAULT_LIMITS, DEFAULT_MODS, getBidder, runBidder, saveBidder } from '../services/bidder';
 
@@ -28,9 +28,9 @@ async function actor(req: AuthRequest) {
 }
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
-// Период: по умолчанию последние 14 полных дней; не дальше вчерашнего дня и не длиннее 92 дней
+// Период: по умолчанию последние 14 дней по сегодня (неполный) включительно; не дальше сегодняшнего дня и не длиннее 92 дней
 function period(q: any): { from: string; to: string; refresh: boolean } {
-  const max = lastFullDay();
+  const max = todayMsk();
   let to = typeof q.to === 'string' && ISO.test(q.to) ? q.to : max;
   if (to > max) to = max;
   let from = typeof q.from === 'string' && ISO.test(q.from) ? q.from : new Date(new Date(to + 'T00:00:00Z').getTime() - 13 * 86_400_000).toISOString().slice(0, 10);
@@ -41,7 +41,7 @@ function period(q: any): { from: string; to: string; refresh: boolean } {
 }
 
 router.get('/status', h(async (_req, res) => {
-  res.json({ seller: ozonConfigured(), perf: perfConfigured(), lastDay: lastFullDay() });
+  res.json({ seller: ozonConfigured(), perf: perfConfigured(), lastDay: todayMsk() });
 }));
 
 router.get('/products', h(async (req, res) => {
