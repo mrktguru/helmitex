@@ -184,20 +184,14 @@ export const api = {
   assignCzImport: (id: string, gtin: string, itemId: string) =>
     request<any>(`/stock/marking/imports/${id}/assign`, { method: 'POST', body: JSON.stringify({ gtin, itemId }) }),
   setGtin: (itemId: string, gtin: string) => request<any>(`/stock/marking/${itemId}/gtin`, { method: 'PUT', body: JSON.stringify({ gtin }) }),
-  ozonFbsDays: () => request<any[]>('/stock/ozon-fbs/days'),
-  ozonFbsSync: () => request<any[]>('/stock/ozon-fbs/sync', { method: 'POST' }),
-  ozonFbsDay: (day: string) => request<any>(`/stock/ozon-fbs/days/${day}`),
-  ozonFbsShip: (day: string, postingNumbers: string[], batch: 'quant' | 'multi' | 'manual' | null = null) =>
-    request<any>(`/stock/ozon-fbs/days/${day}/ship`, { method: 'POST', body: JSON.stringify({ postingNumbers, batch }) }),
-  ozonFbsCarriage: (day: string, no: number) =>
-    request<any>(`/stock/ozon-fbs/days/${day}/batches/${no}/carriage`, { method: 'POST' }),
-  ozonFbsBatchLabels: (day: string, no: number, size: 'small' | 'big' = 'small') =>
-    request<any>(`/stock/ozon-fbs/days/${day}/batches/${no}/labels`, { method: 'POST', body: JSON.stringify({ size }) }),
-  ozonFbsWriteOff: (day: string, postingNumbers?: string[]) =>
-    request<any>(`/stock/ozon-fbs/days/${day}/write-off`, { method: 'POST', body: JSON.stringify({ postingNumbers }) }),
-  ozonFbsLabels: (day: string, size: 'small' | 'big') =>
-    request<any>(`/stock/ozon-fbs/days/${day}/labels`, { method: 'POST', body: JSON.stringify({ size }) }),
-  ozonFbsAct: (day: string) => request<any>(`/stock/ozon-fbs/days/${day}/act`, { method: 'POST' }),
+  ozonFbsState: () => request<any>('/stock/ozon-fbs/state'),
+  ozonFbsSync: () => request<any>('/stock/ozon-fbs/sync', { method: 'POST' }),
+  ozonFbsShip: (body: { postingNumbers: string[]; kind: 'quant' | 'multi' | 'manual' | 'bag'; quantTypeId?: string | null; limit?: number | null; labels: boolean; carriage: boolean }) =>
+    request<any>('/stock/ozon-fbs/ship', { method: 'POST', body: JSON.stringify(body) }),
+  ozonFbsWriteOff: () => request<any>('/stock/ozon-fbs/write-off', { method: 'POST' }),
+  ozonFbsBatchLabels: (id: string, size: 'small' | 'big' = 'small') =>
+    request<any>(`/stock/ozon-fbs/batches/${id}/labels`, { method: 'POST', body: JSON.stringify({ size }) }),
+  ozonFbsCarriage: (batchIds: string[]) => request<any>('/stock/ozon-fbs/carriage', { method: 'POST', body: JSON.stringify({ batchIds }) }),
   wbStatus: () => request<{ configured: boolean }>('/stock/wb/status'),
   wbSupplies: () => request<any[]>('/stock/wb/supplies'),
   wbCreateSupply: (name: string) => request<{ id: string }>('/stock/wb/supplies', { method: 'POST', body: JSON.stringify({ name }) }),

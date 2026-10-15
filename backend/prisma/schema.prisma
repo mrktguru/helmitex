@@ -322,6 +322,7 @@ model QuantType {
   materials     QuantTypeMaterial[]
   quants        Quant[]
   docs          StockDoc[]
+  fbsBatches    OzonFbsBatch[]
 }
 
 model QuantTypeMaterial {
@@ -502,19 +503,19 @@ model AdSyncDay {
 // Снимок рекламы каждые 30 минут: накопленные за текущий день (МСК) показатели кампании.
 // Разница между соседними снимками даёт статистику по получасам — Ozon по часам её не отдаёт.
 model AdIntraday {
-  at          DateTime // момент снимка
-  day         DateTime @db.Date // день по Москве
-  campaignId  String
-  views       Int
-  clicks      Int
-  toCart      Int
-  orders      Int
-  ordersMoney Float
-  spend       Float
-  state       String
-  weeklyBudget Float   @default(0)
-  dailyBudget Float    @default(0)
-  bids        Json? // { sku: ставка ₽ }
+  at           DateTime // момент снимка
+  day          DateTime @db.Date // день по Москве
+  campaignId   String
+  views        Int
+  clicks       Int
+  toCart       Int
+  orders       Int
+  ordersMoney  Float
+  spend        Float
+  state        String
+  weeklyBudget Float    @default(0)
+  dailyBudget  Float    @default(0)
+  bids         Json? // { sku: ставка ₽ }
 
   @@id([at, campaignId])
   @@index([campaignId, day])
@@ -659,27 +660,32 @@ model OzonFbsPosting {
   products         Json // [{ offerId, sku, name, qty, price }]
   shipError        String? // ошибка «Собрать» в Ozon
   stockDocId       String? // списание со склада при сборке
-  batchNo          Int? // номер кванта сборки дня (по 42 шт.)
+  batchNo          Int? // номер группы сборки (для отображения)
+  batchId          String? // группа сборки (OzonFbsBatch)
   syncedAt         DateTime  @updatedAt
 
   @@index([shipDay])
+  @@index([batchId])
 }
 
 // Квант сборки FBS: отправления на 42 шт., собранные вместе, и их этикетки одним PDF
 model OzonFbsBatch {
-  id         String    @id @default(uuid())
-  day        String // YYYY-MM-DD
-  no         Int
-  kind       String    @default("quant") // quant — по 42 шт. из одиночных; multi — заказы по 2+ шт.; manual — выбор вручную
-  postings   Int
-  units      Int
-  labelS3Key String?
-  labelType  String?
-  labelAt    DateTime?
+  id             String     @id @default(uuid())
+  day            String // YYYY-MM-DD
+  no             Int
+  kind           String     @default("quant") // quant — заказы по 1 шт.; multi — по 2+ шт.; manual — выбор вручную; bag — в пакеты
+  quantTypeId    String? // тип кванта: товар, штук, короб (короб списывается один на группу)
+  quantType      QuantType? @relation(fields: [quantTypeId], references: [id])
+  limit          Int? // лимит штук, с которым собирали (null — без лимита)
+  postings       Int
+  units          Int
+  labelS3Key     String?
+  labelType      String?
+  labelAt        DateTime?
   carriageId     String? // отгрузка (поставка) в Ozon только из отправлений группы
   carriageStatus String?
   carriageAt     DateTime?
-  createdAt  DateTime  @default(now())
+  createdAt      DateTime   @default(now())
 
   @@unique([day, no])
 }

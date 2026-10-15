@@ -4,7 +4,7 @@ import { ozon, ozonCall, ozonPdf, ozonGetFile } from './ozon';
 import { allocateFefo, consume, nextDocNumber, StockError } from './stock';
 import { uploadFile } from './s3';
 
-// Отправки Ozon FBS: зеркало отправлений, сборка в Ozon со списанием со склада, этикетки 58×40, акт.
+// Отправки Ozon FBS: зеркало отправлений, сборка группами (кванты, пакеты) со списанием товара и упаковки, этикетки 58×40, поставки.
 
 export interface FbsProduct { offerId: string; sku: string; name: string; qty: number; price: number }
 
@@ -44,6 +44,7 @@ export async function syncFbs(userId?: string): Promise<number> {
     offset += postings.length;
   }
   await writeOffPassed(userId);
+  await refreshCarriages().catch((e) => console.warn('[ozon fbs carriages]', e));
   return n;
 }
 
@@ -76,51 +77,66 @@ async function itemsByOffer(offers: string[]) {
   return new Map(specs.map((s) => [s.ozonOfferId!, { id: s.itemId, name: s.item.name, requiresCz: s.requiresCz }]));
 }
 
-async function stockOf(itemIds: string[]) {
-  const g = await prisma.stockMove.groupBy({
-    by: ['lotId', 'state'], where: { lot: { itemId: { in: itemIds } }, state: { in: ['LABELED', 'UNLABELED'] } }, _sum: { qty: true },
-  });
-  const lots = await prisma.lot.findMany({ where: { id: { in: g.map((x) => x.lotId) } }, select: { id: true, number: true, itemId: true, expiresAt: true } });
-  const lotOf = new Map(lots.map((l) => [l.id, l]));
-  const out = new Map<string, { labeled: number; unlabeled: number; lots: { number: string; state: string; qty: number }[] }>();
+async function stockOf(itemIds: string[], states: ('LABELED' | 'UNLABELED' | 'NONE')[] = ['LABELED', 'UNLABELED']) {
+  const g = await prisma.stockMove.groupBy({ by: ['lotId', 'state'], where: { lot: { itemId: { in: itemIds } }, state: { in: states } }, _sum: { qty: true } });
+  const lots = await prisma.lot.findMany({ where: { id: { in: g.map((x) => x.lotId) } }, select: { id: true, itemId: true } });
+  const itemOf = new Map(lots.map((l) => [l.id, l.itemId]));
+  const out = new Map<string, { labeled: number; unlabeled: number; none: number }>();
   for (const x of g) {
     const qty = x._sum.qty ?? 0;
     if (qty <= 1e-9) continue;
-    const l = lotOf.get(x.lotId)!;
-    const s = out.get(l.itemId) ?? { labeled: 0, unlabeled: 0, lots: [] };
-    if (x.state === 'LABELED') s.labeled += qty; else s.unlabeled += qty;
-    s.lots.push({ number: l.number, state: x.state, qty });
-    out.set(l.itemId, s);
+    const id = itemOf.get(x.lotId)!;
+    const s = out.get(id) ?? { labeled: 0, unlabeled: 0, none: 0 };
+    if (x.state === 'LABELED') s.labeled += qty; else if (x.state === 'UNLABELED') s.unlabeled += qty; else s.none += qty;
+    out.set(id, s);
   }
   return out;
 }
 
-export async function days() {
-  const rows = await prisma.ozonFbsPosting.groupBy({ by: ['shipDay', 'status'], _count: true, orderBy: { shipDay: 'desc' } });
-  const m = new Map<string, Record<string, number>>();
-  for (const r of rows) { const d = m.get(r.shipDay) ?? {}; d[r.status] = r._count; m.set(r.shipDay, d); }
-  return [...m.entries()].map(([day, counts]) => ({ day, counts }));
-}
+export const todayMsk = () => mskDay(new Date().toISOString());
+// Пакет упаковочный — индивидуальная упаковка; если SKU заведён в «Упаковке», списывается по одному на отправление
+const bagItem = () => prisma.item.findFirst({ where: { type: 'PACKAGING', name: { contains: 'Пакет', mode: 'insensitive' } } });
 
-export async function dayState(day: string) {
-  const postings = await prisma.ozonFbsPosting.findMany({ where: { shipDay: day }, orderBy: [{ inProcessAt: 'asc' }, { postingNumber: 'asc' }] });
+/** Всё для страницы: текущие заказы всех дней, группы, типы квантов, остатки товара и коробов. */
+export async function fbsState() {
+  const recent = new Date(Date.now() - 4 * 86400_000);
+  const postings = await prisma.ozonFbsPosting.findMany({
+    where: { OR: [{ status: { in: ['awaiting_packaging', 'awaiting_deliver'] } }, { shipmentDate: { gte: recent } }] },
+    orderBy: [{ shipmentDate: 'asc' }, { inProcessAt: 'asc' }, { postingNumber: 'asc' }],
+  });
   const offers = [...new Set(postings.flatMap((p) => (p.products as unknown as FbsProduct[]).map((x) => x.offerId)))];
   const items = await itemsByOffer(offers);
+  const quantTypes = await prisma.quantType.findMany({ where: { archived: false }, include: { boxItem: true, productItem: true }, orderBy: { name: 'asc' } });
+  const bag = await bagItem();
+  const boxIds = [...new Set([...quantTypes.map((q) => q.boxItemId).filter((x): x is string => !!x), ...(bag ? [bag.id] : [])])];
   const stock = await stockOf([...items.values()].map((i) => i.id));
-  const docs = await prisma.stockDoc.findMany({ where: { id: { in: postings.map((p) => p.stockDocId).filter((x): x is string => !!x) } }, select: { id: true, number: true } });
-  const dayRow = await prisma.ozonFbsDay.findUnique({ where: { day } });
-  const batches = await prisma.ozonFbsBatch.findMany({ where: { day }, orderBy: { no: 'asc' } });
+  const packStock = await stockOf(boxIds, ['NONE']);
+  const batchIds = [...new Set(postings.map((p) => p.batchId).filter((x): x is string => !!x))];
+  const batches = await prisma.ozonFbsBatch.findMany({
+    where: { OR: [{ id: { in: batchIds } }, { createdAt: { gte: recent } }] },
+    include: { quantType: { include: { boxItem: true } } }, orderBy: [{ createdAt: 'desc' }],
+  });
+  const notWritten = postings.filter((p) => !p.stockDocId && p.shipDay >= WRITE_OFF_SINCE && (p.status === 'awaiting_deliver' || PASSED.includes(p.status))).length;
   return {
-    day,
-    info: dayRow,
-    batches,
+    now: new Date().toISOString(),
     postings: postings.map((p) => ({
-      ...p,
+      postingNumber: p.postingNumber, status: p.status, shipDay: p.shipDay, shipmentDate: p.shipmentDate, inProcessAt: p.inProcessAt,
+      batchId: p.batchId, stockDocId: p.stockDocId, shipError: p.shipError,
       products: (p.products as unknown as FbsProduct[]).map((x) => ({ ...x, item: items.get(x.offerId) ?? null })),
     })),
     unmapped: offers.filter((o) => !items.has(o)),
-    stock: [...items.values()].map((i) => ({ ...i, ...(stock.get(i.id) ?? { labeled: 0, unlabeled: 0, lots: [] }) })),
-    docs,
+    items: [...items.values()].map((i) => ({ ...i, ...(stock.get(i.id) ?? { labeled: 0, unlabeled: 0, none: 0 }) })),
+    quantTypes: quantTypes.map((q) => ({
+      id: q.id, name: q.name, productItemId: q.productItemId, productName: q.productItem.name, units: q.unitsPerQuant,
+      boxItemId: q.boxItemId, boxName: q.boxItem?.name ?? null, boxStock: q.boxItemId ? packStock.get(q.boxItemId)?.none ?? 0 : null,
+    })),
+    bag: bag ? { id: bag.id, name: bag.name, stock: packStock.get(bag.id)?.none ?? 0 } : null,
+    batches: batches.map((b) => ({
+      id: b.id, day: b.day, no: b.no, kind: b.kind, postings: b.postings, units: b.units, limit: b.limit,
+      quantTypeName: b.quantType?.name ?? null, boxName: b.quantType?.boxItem?.name ?? null,
+      labels: !!b.labelS3Key, labelAt: b.labelAt, carriageId: b.carriageId, carriageStatus: b.carriageStatus, createdAt: b.createdAt,
+    })),
+    notWritten,
   };
 }
 
@@ -134,8 +150,10 @@ export async function postingItems(numbers: string[]) {
 
 // ───────────── Списание со склада ─────────────
 
-/** Списывает единицы отправлений: сначала «с ЧЗ», затем «без ЧЗ», по FEFO. Один документ «Отгрузка Ozon FBS». */
-async function writeOff(numbers: string[], userId: string) {
+interface Extra { itemId: string; name: string; qty: number }
+
+/** Списывает единицы отправлений: сначала «с ЧЗ», затем «без ЧЗ», по FEFO; плюс упаковка (короб/пакеты). Один документ «Отгрузка Ozon FBS». */
+async function writeOff(numbers: string[], userId: string, extras: Extra[] = [], note = '') {
   if (!numbers.length) return null;
   const postings = await prisma.ozonFbsPosting.findMany({ where: { postingNumber: { in: numbers }, stockDocId: null } });
   if (!postings.length) return null;
@@ -148,12 +166,12 @@ async function writeOff(numbers: string[], userId: string) {
     n.qty += x.qty;
     need.set(it.id, n);
   }
-  const day = postings[0].shipDay;
+  const days = [...new Set(postings.map((p) => p.shipDay))].sort().map((d) => d.split('-').reverse().slice(0, 2).join('.'));
   return prisma.$transaction(async (tx) => {
     const doc = await tx.stockDoc.create({
       data: {
         type: 'SHIPMENT', status: 'POSTED', postedAt: new Date(), number: await nextDocNumber(tx, 'SHIPMENT'), userId,
-        comment: `Ozon FBS · отгрузка ${day.split('-').reverse().join('.')} · ${postings.length} отпр.`,
+        comment: `Ozon FBS · ${note ? note + ' · ' : ''}отгрузка ${days.join(', ')} · ${postings.length} отпр.`,
       },
     });
     let sort = 0;
@@ -170,15 +188,23 @@ async function writeOff(numbers: string[], userId: string) {
       }
       if (left > 1e-9) throw new StockError(`«${n.name}»: на складе не хватает ${Math.round(left)} шт. (нужно ${n.qty})`);
     }
+    for (const e of extras) {
+      const { allocations, shortage } = await allocateFefo(tx, e.itemId, e.qty, 'NONE');
+      if (shortage > 1e-9) throw new StockError(`«${e.name}»: на складе не хватает ${Math.round(shortage)} шт.`);
+      for (const a of allocations) {
+        await consume(tx, doc.id, a.lotId!, 'NONE', a.qty, e.name);
+        await tx.stockDocLine.create({ data: { docId: doc.id, itemId: e.itemId, lotId: a.lotId, qty: -a.qty, state: 'NONE', sort: sort++ } });
+      }
+    }
     await tx.ozonFbsPosting.updateMany({ where: { postingNumber: { in: postings.map((p) => p.postingNumber) } }, data: { stockDocId: doc.id } });
     return doc;
   }, { isolationLevel: 'Serializable', timeout: 60000 });
 }
 
 /** Списать отправления, которые уже собраны (в т. ч. в кабинете Ozon), но не списаны. */
-export async function writeOffDay(day: string, numbers: string[] | undefined, userId: string) {
+export async function writeOffPending(userId: string) {
   const rows = await prisma.ozonFbsPosting.findMany({
-    where: { shipDay: { equals: day, gte: WRITE_OFF_SINCE }, stockDocId: null, status: { notIn: ['awaiting_packaging', 'awaiting_registration', 'acceptance_in_progress', 'awaiting_approve', 'cancelled'] }, ...(numbers ? { postingNumber: { in: numbers } } : {}) },
+    where: { shipDay: { gte: WRITE_OFF_SINCE }, stockDocId: null, status: { in: ['awaiting_deliver', ...PASSED] } },
   });
   return writeOff(rows.map((r) => r.postingNumber), userId);
 }
@@ -216,15 +242,23 @@ export async function fillExemplars(postingNumber: string) {
   }
 }
 
-/** «Собрано» в Ozon (одна коробка на отправление) и списание собранного со склада.
- *  batch — собрать группой (квант 42 шт., заказы по 2+ шт., ручной выбор): собранным присваивается номер группы дня
- *  и сразу формируются их этикетки одним PDF. */
-export async function ship(numbers: string[], userId: string, batch: 'quant' | 'multi' | 'manual' | null = null) {
+export interface ShipOpts {
+  kind: 'quant' | 'multi' | 'manual' | 'bag';
+  quantTypeId?: string | null; // тип кванта: короб списывается один на группу
+  limit?: number | null; // лимит, с которым собирали (для истории)
+  labels?: boolean; // сразу этикетки 58×40 группы
+  carriage?: boolean; // сразу поставка в Ozon из отправлений группы
+}
+
+/** Собрать группу: «Собрано» в Ozon (одна коробка на отправление), списание товара и упаковки,
+ *  номер группы дня, этикетки одним PDF и (по желанию) поставка. */
+export async function ship(numbers: string[], userId: string, opts: ShipOpts) {
   const rows = await prisma.ozonFbsPosting.findMany({ where: { postingNumber: { in: numbers } } });
-  const todo = rows.filter((r) => r.status === 'awaiting_packaging');
+  const order = new Map(numbers.map((n, i) => [n, i]));
+  const todo = rows.filter((r) => r.status === 'awaiting_packaging').sort((a, b) => order.get(a.postingNumber)! - order.get(b.postingNumber)!);
   if (!todo.length) throw new StockError('Нет отправлений в статусе «Ждёт сборки»');
 
-  // Проверка до вызова Ozon: все артикулы привязаны и единиц хватает
+  // Проверка до вызова Ozon: артикулы привязаны, товара и упаковки хватает
   const items = await itemsByOffer([...new Set(todo.flatMap((p) => (p.products as unknown as FbsProduct[]).map((x) => x.offerId)))]);
   const need = new Map<string, { name: string; qty: number }>();
   for (const p of todo) for (const x of p.products as unknown as FbsProduct[]) {
@@ -239,18 +273,26 @@ export async function ship(numbers: string[], userId: string, batch: 'quant' | '
     const have = (stock.get(id)?.labeled ?? 0) + (stock.get(id)?.unlabeled ?? 0);
     if (have < n.qty) throw new StockError(`«${n.name}»: нужно ${n.qty} шт., на складе ${Math.floor(have)} — расфасуйте или соберите меньше`);
   }
+  const qt = opts.quantTypeId ? await prisma.quantType.findUnique({ where: { id: opts.quantTypeId }, include: { boxItem: true } }) : null;
+  if (opts.quantTypeId && !qt) throw new StockError('Тип кванта не найден');
+  const bag = opts.kind === 'bag' ? await bagItem() : null;
+  const pack: Extra | null = qt?.boxItem ? { itemId: qt.boxItem.id, name: qt.boxItem.name, qty: 1 } : bag ? { itemId: bag.id, name: bag.name, qty: todo.length } : null;
+  if (pack) {
+    const have = (await stockOf([pack.itemId], ['NONE'])).get(pack.itemId)?.none ?? 0;
+    if (have < pack.qty) throw new StockError(`«${pack.name}»: нужно ${pack.qty} шт., на складе ${Math.floor(have)}`);
+  }
 
   const ok: string[] = [];
   const failed: { postingNumber: string; error: string }[] = [];
   const queue = [...todo];
   await Promise.all(Array.from({ length: 4 }, async () => {
     for (let p = queue.shift(); p; p = queue.shift()) {
+      const body = {
+        posting_number: p.postingNumber,
+        packages: [{ products: (p.products as unknown as FbsProduct[]).map((x) => ({ product_id: Number(x.sku), quantity: x.qty })) }],
+        with: { additional_data: false },
+      };
       try {
-        const body = {
-          posting_number: p.postingNumber,
-          packages: [{ products: (p.products as unknown as FbsProduct[]).map((x) => ({ product_id: Number(x.sku), quantity: x.qty })) }],
-          with: { additional_data: false },
-        };
         try { await ozon('/v4/posting/fbs/ship', body); } catch (e) {
           // Ozon требует ГТД/РНПТ экземпляров — заполняем «отсутствует» и собираем повторно
           if (!/EXEMPLAR_INFO_NOT_FILLED/.test((e as Error).message)) throw e;
@@ -266,27 +308,36 @@ export async function ship(numbers: string[], userId: string, batch: 'quant' | '
       }
     }
   }));
-  let doc = null, writeOffError: string | null = null;
-  try { doc = await writeOff(ok, userId); } catch (e) { writeOffError = (e as Error).message; }
+  ok.sort((a, b) => order.get(a)! - order.get(b)!);
+  if (!ok.length) return { shipped: 0, failed, doc: null, writeOffError: null, batch: null, labelError: null, carriageError: null };
 
-  let batchNo: number | null = null, labelError: string | null = null;
-  if (batch && ok.length) {
-    const day = todo[0].shipDay;
-    const last = await prisma.ozonFbsBatch.findFirst({ where: { day }, orderBy: { no: 'desc' } });
-    batchNo = (last?.no ?? 0) + 1;
-    // порядок этикеток — как отправления шли в выборке
-    const order = new Map(numbers.map((n, i) => [n, i]));
-    ok.sort((a, b) => order.get(a)! - order.get(b)!);
-    const units = todo.filter((p) => ok.includes(p.postingNumber))
-      .reduce((t, p) => t + (p.products as unknown as FbsProduct[]).reduce((s, x) => s + x.qty, 0), 0);
-    await prisma.ozonFbsBatch.create({ data: { day, no: batchNo, kind: batch, postings: ok.length, units } });
-    await prisma.ozonFbsPosting.updateMany({ where: { postingNumber: { in: ok } }, data: { batchNo } });
-    // большую группу этикеток Ozon формирует минутами — её печатают общим PDF дня на шаге 3
+  // Группа дня (по дню сборки, МСК)
+  const day = todayMsk();
+  const units = todo.filter((p) => ok.includes(p.postingNumber)).reduce((t, p) => t + (p.products as unknown as FbsProduct[]).reduce((s, x) => s + x.qty, 0), 0);
+  const last = await prisma.ozonFbsBatch.findFirst({ where: { day }, orderBy: { no: 'desc' } });
+  const batch = await prisma.ozonFbsBatch.create({
+    data: { day, no: (last?.no ?? 0) + 1, kind: opts.kind, quantTypeId: qt?.id ?? null, limit: opts.limit ?? null, postings: ok.length, units },
+  });
+  await prisma.ozonFbsPosting.updateMany({ where: { postingNumber: { in: ok } }, data: { batchId: batch.id, batchNo: batch.no } });
+
+  let doc = null, writeOffError: string | null = null;
+  const note = `${qt ? `квант ${qt.name}` : opts.kind === 'bag' ? 'пакеты' : 'группа'} №${batch.no}`;
+  try {
+    // упаковку списываем только если собрано всё (короб — один на группу; пакеты — по числу собранных)
+    const extras = pack ? [{ ...pack, qty: bag ? ok.length : 1 }] : [];
+    doc = await writeOff(ok, userId, extras, note);
+  } catch (e) { writeOffError = (e as Error).message; }
+
+  let labelError: string | null = null, carriageError: string | null = null;
+  if (opts.labels !== false) {
     if (ok.length <= 150) {
-      try { await batchLabels(day, batchNo, 'small', ok); } catch (e) { labelError = (e as Error).message; }
-    } else labelError = 'группа больше 150 отправлений — сформируйте этикетки на шаге 3';
+      try { await batchLabels(batch.id, 'small', ok); } catch (e) { labelError = (e as Error).message; }
+    } else labelError = 'группа больше 150 отправлений — сформируйте этикетки кнопкой у группы';
   }
-  return { shipped: ok.length, failed, doc: doc ? { id: doc.id, number: doc.number } : null, writeOffError, batchNo, labelError };
+  if (opts.carriage) {
+    try { await formCarriage([batch.id]); } catch (e) { carriageError = (e as Error).message; }
+  }
+  return { shipped: ok.length, failed, doc: doc ? { id: doc.id, number: doc.number } : null, writeOffError, batch: { id: batch.id, no: batch.no }, labelError, carriageError };
 }
 
 // ───────────── Этикетки ─────────────
@@ -352,96 +403,61 @@ async function fetchLabels(numbers: string[], size: 'small' | 'big'): Promise<Bu
   return Buffer.from(await out.save());
 }
 
-/** Этикетки собранных отправлений дня одним PDF. */
-export async function labels(day: string, size: 'small' | 'big') {
-  const rows = await prisma.ozonFbsPosting.findMany({ where: { shipDay: day, status: 'awaiting_deliver' }, orderBy: [{ batchNo: 'asc' }, { postingNumber: 'asc' }] });
-  if (!rows.length) throw new StockError('Нет собранных отправлений, ожидающих отгрузки — сначала соберите их');
-  const want = size === 'small' ? 'small_label' : 'big_label';
-  const key = `ozon-fbs/${day}/labels-${size}.pdf`;
-  await uploadFile(key, await fetchLabels(rows.map((r) => r.postingNumber), size), 'application/pdf');
-  await prisma.ozonFbsDay.upsert({
-    where: { day },
-    create: { day, labelS3Key: key, labelType: want, labelCount: rows.length, labelAt: new Date() },
-    update: { labelS3Key: key, labelType: want, labelCount: rows.length, labelAt: new Date(), lastError: null },
-  });
-  return prisma.ozonFbsDay.findUnique({ where: { day } });
-}
 
-/** Этикетки одного кванта сборки. numbers — порядок печати (по умолчанию по номеру отправления). */
-export async function batchLabels(day: string, no: number, size: 'small' | 'big', numbers?: string[]) {
-  const b = await prisma.ozonFbsBatch.findUnique({ where: { day_no: { day, no } } });
-  if (!b) throw new StockError(`Группа №${no} не найдена`);
-  if (!numbers) {
-    const rows = await prisma.ozonFbsPosting.findMany({ where: { shipDay: day, batchNo: no, status: { not: 'cancelled' } }, orderBy: { postingNumber: 'asc' } });
-    numbers = rows.map((r) => r.postingNumber);
-  }
-  if (!numbers.length) throw new StockError(`В группе №${no} нет отправлений`);
-  const key = `ozon-fbs/${day}/batch-${no}-${size}.pdf`;
+const groupPostings = async (batchId: string, where: object = { status: { not: 'cancelled' } }) =>
+  (await prisma.ozonFbsPosting.findMany({ where: { batchId, ...where }, orderBy: { postingNumber: 'asc' }, select: { postingNumber: true } })).map((p) => p.postingNumber);
+
+/** Этикетки группы одним PDF. numbers — порядок печати (по умолчанию по номеру отправления). */
+export async function batchLabels(batchId: string, size: 'small' | 'big', numbers?: string[]) {
+  const b = await prisma.ozonFbsBatch.findUnique({ where: { id: batchId } });
+  if (!b) throw new StockError('Группа не найдена');
+  numbers ??= await groupPostings(b.id);
+  if (!numbers.length) throw new StockError(`В группе №${b.no} нет отправлений`);
+  const key = `ozon-fbs/${b.day}/batch-${b.no}-${size}.pdf`;
   await uploadFile(key, await fetchLabels(numbers, size), 'application/pdf');
   return prisma.ozonFbsBatch.update({ where: { id: b.id }, data: { labelS3Key: key, labelType: size === 'small' ? 'small_label' : 'big_label', labelAt: new Date() } });
 }
 
-// ───────────── Отгрузка (поставка) группы ─────────────
+// ───────────── Поставка (отгрузка в Ozon) ─────────────
 
-/** Отгрузка в Ozon только из отправлений группы: создаём (Ozon берёт все собранные без отгрузки),
- *  оставляем в ней отправления группы, при необходимости подтверждаем. */
-export async function formCarriage(day: string, no: number) {
-  const b = await prisma.ozonFbsBatch.findUnique({ where: { day_no: { day, no } } });
-  if (!b) throw new StockError(`Группа №${no} не найдена`);
-  if (b.carriageId) throw new StockError(`Поставка для группы №${no} уже сформирована: ${b.carriageId}`);
-  const rows = await prisma.ozonFbsPosting.findMany({ where: { shipDay: day, batchNo: no, status: 'awaiting_deliver' } });
-  if (!rows.length) throw new StockError(`В группе №${no} нет собранных отправлений, ожидающих отгрузки`);
+/** Поставка в Ozon из отправлений одной или нескольких групп: создаём (Ozon берёт все собранные без поставки),
+ *  оставляем в ней отправления групп, при необходимости подтверждаем. */
+export async function formCarriage(batchIds: string[]) {
+  const bs = await prisma.ozonFbsBatch.findMany({ where: { id: { in: batchIds } } });
+  if (!bs.length) throw new StockError('Группы не найдены');
+  const done = bs.find((b) => b.carriageId);
+  if (done) throw new StockError(`У группы №${done.no} уже есть поставка ${done.carriageId}`);
+  const rows = await prisma.ozonFbsPosting.findMany({ where: { batchId: { in: bs.map((b) => b.id) }, status: 'awaiting_deliver' } });
+  if (!rows.length) throw new StockError('В группах нет собранных отправлений, ожидающих отгрузки');
   const method = rows.find((r) => r.deliveryMethodId)?.deliveryMethodId;
   if (!method) throw new StockError('Не известен метод доставки отправлений');
-  // просроченные отправления Ozon переносит на сегодня — отгрузку создаём сегодняшним днём
-  const today = mskDay(new Date().toISOString());
-  const c = await ozon('/v1/carriage/create', { delivery_method_id: Number(method), departure_date: `${today}T00:00:00Z` });
+  // просроченные отправления Ozon переносит на сегодня — поставку создаём сегодняшним днём
+  const c = await ozon('/v1/carriage/create', { delivery_method_id: Number(method), departure_date: `${todayMsk()}T00:00:00Z` });
   const id = c.carriage_id ?? c.result?.carriage_id ?? c.id ?? c.result?.id;
-  if (!id) throw new StockError(`Ozon не вернул номер отгрузки: ${JSON.stringify(c).slice(0, 200)}`);
-  await prisma.ozonFbsBatch.update({ where: { id: b.id }, data: { carriageId: String(id), carriageStatus: 'created', carriageAt: new Date() } });
+  if (!id) throw new StockError(`Ozon не вернул номер поставки: ${JSON.stringify(c).slice(0, 200)}`);
+  await prisma.ozonFbsBatch.updateMany({ where: { id: { in: bs.map((b) => b.id) } }, data: { carriageId: String(id), carriageStatus: 'created', carriageAt: new Date() } });
   await ozon('/v1/carriage/set-postings', { carriage_id: Number(id), posting_numbers: rows.map((r) => r.postingNumber) });
   let g = await ozon('/v1/carriage/get', { carriage_id: Number(id) });
   if (g.status !== 'formed' && (g.available_actions ?? []).includes('approve')) {
     await ozon('/v1/carriage/approve', { carriage_id: Number(id), containers_count: 1 });
     g = await ozon('/v1/carriage/get', { carriage_id: Number(id) });
   }
-  return prisma.ozonFbsBatch.update({ where: { id: b.id }, data: { carriageStatus: g.status ?? null } });
+  await prisma.ozonFbsBatch.updateMany({ where: { carriageId: String(id) }, data: { carriageStatus: g.status ?? null } });
+  return String(id);
 }
 
-/** Акт приёма-передачи отгрузки группы (PDF от Ozon). */
-export async function carriageAct(day: string, no: number): Promise<Buffer> {
-  const b = await prisma.ozonFbsBatch.findUnique({ where: { day_no: { day, no } } });
+/** Статусы поставок из Ozon (сформирована, отгружена…) — для групп последних дней */
+async function refreshCarriages() {
+  const bs = await prisma.ozonFbsBatch.findMany({ where: { carriageId: { not: null }, createdAt: { gte: new Date(Date.now() - 5 * 86400_000) } }, select: { carriageId: true } });
+  for (const id of [...new Set(bs.map((b) => b.carriageId!))]) {
+    const g = await ozonCall<any>('POST', '/v1/carriage/get', { carriage_id: Number(id) }, undefined, false).catch(() => null);
+    if (g?.status) await prisma.ozonFbsBatch.updateMany({ where: { carriageId: id }, data: { carriageStatus: g.status } });
+  }
+}
+
+/** Акт приёма-передачи поставки группы (PDF от Ozon). */
+export async function carriageAct(batchId: string): Promise<Buffer> {
+  const b = await prisma.ozonFbsBatch.findUnique({ where: { id: batchId } });
   if (!b?.carriageId) throw new StockError('Поставка группы ещё не сформирована');
   return ozonPdf('/v2/posting/fbs/act/get-pdf', { id: Number(b.carriageId) });
-}
-
-// ───────────── Акт ─────────────
-
-/** Акт приёма-передачи на день: берём уже созданный Ozon, иначе создаём; PDF сохраняем. */
-export async function act(day: string) {
-  const p = await prisma.ozonFbsPosting.findFirst({ where: { shipDay: day, deliveryMethodId: { not: null } } });
-  if (!p) throw new StockError('Нет отправлений на этот день');
-  const list = await ozon('/v2/posting/fbs/act/list', { filter: { date_from: day, date_to: day }, limit: 50 });
-  let a = (list.result ?? []).find((x: any) => String(x.delivery_method_id) === p.deliveryMethodId && x.status !== 'closed');
-  let id: string | null = a ? String(a.id) : null;
-  if (!id) {
-    const c = await ozon('/v2/posting/fbs/act/create', { delivery_method_id: Number(p.deliveryMethodId), departure_date: `${day}T00:00:00Z`, containers_count: 1 });
-    id = String(c.result?.id ?? c.id);
-  }
-  let status: string | null = a?.status ?? null;
-  for (let k = 0; k < 20; k++) {
-    const s = await ozon('/v2/posting/fbs/digital/act/check-status', { id: Number(id) }).catch(() => null);
-    status = s?.status ?? status;
-    if (s && !['FORMING', 'formation', 'in_process'].includes(String(s.status))) break;
-    await sleep(2000);
-  }
-  const pdf = await ozonPdf('/v2/posting/fbs/act/get-pdf', { id: Number(id) });
-  const key = `ozon-fbs/${day}/act-${id}.pdf`;
-  await uploadFile(key, pdf, 'application/pdf');
-  await prisma.ozonFbsDay.upsert({
-    where: { day },
-    create: { day, actId: id, actStatus: status, actS3Key: key, actAt: new Date() },
-    update: { actId: id, actStatus: status, actS3Key: key, actAt: new Date(), lastError: null },
-  });
-  return prisma.ozonFbsDay.findUnique({ where: { day } });
 }
