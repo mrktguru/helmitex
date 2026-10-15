@@ -211,7 +211,7 @@ router.get('/wb/supplies/:id/pdf/:kind', h(async (req, res) => {
   setShareText(res, [
     `WB FBS · ${make[kind][1].replace(/\.pdf$/, '')}`,
     ...(kind === 'qr' || kind === 'trbx' ? [] : qtyLines(orders.map((o) => ({ name: (o.itemId && names.get(o.itemId)) || o.article, qty: 1 })))),
-    `${orders.length} заданий`,
+    `Заданий: ${orders.length}`,
   ]);
   sendFile(res, await make[kind][0](), make[kind][1]);
 }));

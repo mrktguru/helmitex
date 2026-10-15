@@ -177,7 +177,7 @@ router.get('/quant-docs/:id/cz.pdf', async (req: AuthRequest, res: Response): Pr
   if (batches.length === 0) { res.status(404).json({ error: 'В этих квантах нет этикеток ЧЗ' }); return; }
   if (batches.some((b) => b.jobStatus !== 'done' || !b.s3Key)) { res.status(409).json({ error: 'Этикетки ещё генерируются' }); return; }
   const doc = await prisma.stockDoc.findUnique({ where: { id: req.params.id } });
-  setShareText(res, [`Этикетки ЧЗ · ${doc?.number ?? ''}`, ...qtyLines(quants.map((q) => ({ name: q.quantType.productItem.name, qty: q.units }))), `${quants.length} квантов · ${batches.reduce((t, b) => t + b.count, 0)} этикеток`]);
+  setShareText(res, [`Этикетки ЧЗ · ${doc?.number ?? ''}`, ...qtyLines(quants.map((q) => ({ name: q.quantType.productItem.name, qty: q.units }))), `Квантов: ${quants.length} · этикеток: ${batches.reduce((t, b) => t + b.count, 0)}`]);
   sendPdf(res, await mergePdfs(batches.map((b) => b.s3Key)), `ЧЗ ${doc?.number ?? ''}.pdf`);
 });
 
