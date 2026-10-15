@@ -257,11 +257,11 @@ async function fetchLabels(numbers: string[], size: 'small' | 'big'): Promise<Bu
   const out = await PDFDocument.create();
   for (let i = 0; i < numbers.length; i += 50) {
     const chunk = numbers.slice(i, i + 50);
-    // Сразу после «Собрано» Ozon печатает не все отправления (unprinted_postings) — повторяем пачку целиком,
-    // пока не напечатает все, чтобы сохранить порядок этикеток
+    // Сразу после «Собрано» Ozon печатает не все отправления (unprinted_postings, подстатус «передаётся в доставку»
+    // бывает дольше минуты) — повторяем пачку целиком до ~2,5 мин, пока не напечатает все, чтобы сохранить порядок
     let file: Buffer | null = null;
-    for (let attempt = 0; attempt < 6 && !file; attempt++) {
-      if (attempt) await sleep(10_000);
+    for (let attempt = 0; attempt < 10 && !file; attempt++) {
+      if (attempt) await sleep(15_000);
       const c = await ozon('/v2/posting/fbs/package-label/create', { posting_number: chunk });
       const tasks: { task_id: number; task_type: string }[] = c.result?.tasks ?? (c.result?.task_id ? [{ task_id: c.result.task_id, task_type: 'big_label' }] : []);
       const task = tasks.find((t) => t.task_type === want);
@@ -277,7 +277,7 @@ async function fetchLabels(numbers: string[], size: 'small' | 'big'): Promise<Bu
       if (!res) throw new StockError('Ozon долго формирует этикетки — повторите через минуту');
       const missed: string[] = (res.unprinted_postings ?? []).map((x: any) => x.posting_number ?? x);
       if (!res.unprinted_postings_count && !missed.length) file = await ozonGetFile(res.file_url);
-      else if (attempt === 5) {
+      else if (attempt === 9) {
         throw new StockError(`Ozon не напечатал ${res.unprinted_postings_count || missed.length} из ${chunk.length} этикеток${missed.length ? ` (${missed.slice(0, 5).join(', ')}${missed.length > 5 ? '…' : ''})` : ''} — повторите через минуту`);
       }
     }
