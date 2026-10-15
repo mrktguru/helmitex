@@ -125,11 +125,10 @@ export default function OzonFbs() {
         <div key={b.no} className="flex items-center gap-2">
           <span className="font-medium">№{b.no} · {KIND[b.kind] ?? b.kind}</span>
           <span className="text-slate-500 tabular-nums">{b.postings} отпр. · {b.units} шт.</span>
-          {b.labelS3Key
-            ? <button className="ml-auto text-brand-700 hover:underline whitespace-nowrap" onClick={() => batchPdf(b.no)}>⇩ этикетки</button>
-            : <button disabled={!!busy} className="ml-auto text-brand-700 hover:underline whitespace-nowrap"
+          {b.labelS3Key && <button className="ml-auto text-brand-700 hover:underline whitespace-nowrap" onClick={() => batchPdf(b.no)}>⇩ этикетки ({b.postings})</button>}
+          <button disabled={!!busy} className={clsx('text-brand-700 hover:underline whitespace-nowrap', b.labelS3Key ? 'text-xs text-slate-500' : 'ml-auto')}
                 onClick={() => run(`bl${b.no}`, () => api.ozonFbsBatchLabels(day!, b.no), (r) => { apply(r); batchPdf(b.no); return `Этикетки группы №${b.no} готовы`; })}>
-                {busy === `bl${b.no}` ? 'Ozon формирует…' : 'сформировать этикетки'}</button>}
+                {busy === `bl${b.no}` ? 'Ozon формирует…' : b.labelS3Key ? 'заново' : 'сформировать этикетки'}</button>
         </div>
       ))}
     </div>
