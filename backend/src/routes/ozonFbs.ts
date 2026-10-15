@@ -5,9 +5,12 @@ import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { StockError } from '../services/stock';
 import { downloadFile } from '../services/s3';
 import { act, batchLabels, carriageAct, formCarriage, days, dayState, labels, postingItems, ship, syncFbs, writeOffDay } from '../services/ozonFbs';
-import { ddmm, qtyLines, setShareText } from '../services/share';
+import { ddmm, fileName, itemsToken, qtyLines, setShareText } from '../services/share';
 
 const KIND: Record<string, string> = { quant: 'квант', multi: 'заказы по 2+ шт.', manual: 'группа' };
+// метка группы в имени файла: KVANT3, 2PLUS12, GR12
+const groupTag = (b: { kind: string; no: number }) => `${b.kind === 'quant' ? 'KVANT' : b.kind === 'multi' ? '2PLUS' : 'GR'}${b.no}`;
+const dayTag = (day: string) => ddmm(day).replace('.', '');
 
 // Отправки Ozon FBS: мастер сборки отгрузки дня
 const router = Router();
@@ -58,21 +61,22 @@ router.get('/ozon-fbs/days/:day/batches/:no/act.pdf', h(async (req, res) => {
   const b = await prisma.ozonFbsBatch.findUnique({ where: { day_no: { day: day(req), no: Number(req.params.no) } } });
   if (b) setShareText(res, [`Акт Ozon FBS · поставка ${b.carriageId} · группа №${b.no}`, `Отправлений: ${b.postings} · ${b.units} шт`]);
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(`Акт Ozon FBS ${req.params.day} группа ${req.params.no}.pdf`)}`);
+  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(fileName(['OZON_FBS_ACT', b?.carriageId, b && groupTag(b)]))}`);
   res.end(buf);
 }));
 router.get('/ozon-fbs/days/:day/batches/:no.pdf', h(async (req, res) => {
   const b = await prisma.ozonFbsBatch.findUnique({ where: { day_no: { day: day(req), no: Number(req.params.no) || 0 } } });
   if (!b?.labelS3Key) throw new StockError('Этикетки группы ещё не сформированы');
   const nums = (await prisma.ozonFbsPosting.findMany({ where: { shipDay: b.day, batchNo: b.no, status: { not: 'cancelled' } }, select: { postingNumber: true } })).map((p) => p.postingNumber);
+  const items = await postingItems(nums);
   setShareText(res, [
     `Этикетки Ozon FBS 58×40 · ${KIND[b.kind] ?? 'группа'} №${b.no}`,
-    ...qtyLines(await postingItems(nums)),
+    ...qtyLines(items),
     `Этикеток: ${nums.length} (по одной на отправление) · отгрузка ${ddmm(b.day)}`,
     b.carriageId && `Поставка ${b.carriageId}`,
   ]);
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(`Этикетки Ozon FBS ${b.day} группа ${b.no}.pdf`)}`);
+  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(fileName(['OZON_FBS', b.carriageId ?? dayTag(b.day), itemsToken(items), groupTag(b)]))}`);
   res.end(await downloadFile(b.labelS3Key));
 }));
 router.post('/ozon-fbs/days/:day/act', h(async (req, res) => { await act(day(req)); res.json(await dayState(day(req))); }));
@@ -82,12 +86,15 @@ router.get('/ozon-fbs/days/:day/:kind.pdf', h(async (req, res) => {
   const key = req.params.kind === 'labels' ? d?.labelS3Key : req.params.kind === 'act' ? d?.actS3Key : null;
   if (!key) throw new StockError('Файл ещё не сформирован');
   const buf = await downloadFile(key);
-  const name = req.params.kind === 'labels' ? `Этикетки Ozon FBS ${req.params.day}.pdf` : `Акт Ozon FBS ${req.params.day}.pdf`;
   const nums = (await prisma.ozonFbsPosting.findMany({ where: { shipDay: day(req), status: 'awaiting_deliver' }, select: { postingNumber: true } })).map((p) => p.postingNumber);
+  const fresh = d?.labelCount === nums.length;
+  const name = req.params.kind === 'labels'
+    ? fileName(['OZON_FBS', dayTag(req.params.day), fresh ? itemsToken(await postingItems(nums)) : `${d?.labelCount ?? 0}QT`, 'ALL'])
+    : fileName(['OZON_FBS_ACT', d?.actId ?? dayTag(req.params.day)]);
   setShareText(res, req.params.kind === 'labels'
     // штуки — только если файл покрывает все текущие собранные отправления (иначе он устарел)
     ? [`Этикетки Ozon FBS ${d?.labelType === 'big_label' ? '75×120' : '58×40'} · отгрузка ${ddmm(req.params.day)}`,
-      ...(d?.labelCount === nums.length ? qtyLines(await postingItems(nums)) : []), `Этикеток: ${d?.labelCount ?? nums.length}`]
+      ...(fresh ? qtyLines(await postingItems(nums)) : []), `Этикеток: ${d?.labelCount ?? nums.length}`]
     : [`Акт Ozon FBS · отгрузка ${ddmm(req.params.day)}${d?.actId ? ` · № ${d.actId}` : ''}`, `Отправлений: ${nums.length}`]);
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(name)}`);

@@ -10,7 +10,7 @@ import {
   addOrders, applyPickList, assignCodes, resendRejected, refreshMeta, supplyKi, uploadStickers, pdfToText, createSupply, deliver, detachCode, newOrders, resetMetaErrors, scanCode, sendMeta,
   supplyState, syncSupply, writeOff,
 } from '../services/wbSupply';
-import { qtyLines, setShareText } from '../services/share';
+import { fileName, itemsToken, qtyLines, setShareText } from '../services/share';
 import { comboPdf, czXlsx, kiXlsx, supplyQrPdf, trbxPdf, wbStickersPdf } from '../services/wbPdf';
 
 // Отправки WB FBS: мастер сборки поставки
@@ -208,12 +208,14 @@ router.get('/wb/supplies/:id/pdf/:kind', h(async (req, res) => {
   if (!make[kind]) throw new StockError('Неизвестный тип печати');
   const orders = await prisma.wbOrder.findMany({ where: { supplyId: id, canceled: false }, select: { article: true, itemId: true } });
   const names = new Map((await prisma.item.findMany({ where: { id: { in: orders.map((o) => o.itemId).filter((x): x is string => !!x) } }, select: { id: true, name: true } })).map((i) => [i.id, i.name]));
+  const items = orders.map((o) => ({ name: (o.itemId && names.get(o.itemId)) || o.article, qty: 1 }));
   setShareText(res, [
     `WB FBS · ${make[kind][1].replace(/\.pdf$/, '')}`,
-    ...(kind === 'qr' || kind === 'trbx' ? [] : qtyLines(orders.map((o) => ({ name: (o.itemId && names.get(o.itemId)) || o.article, qty: 1 })))),
+    ...(kind === 'qr' || kind === 'trbx' ? [] : qtyLines(items)),
     `Заданий: ${orders.length}`,
   ]);
-  sendFile(res, await make[kind][0](), make[kind][1]);
+  const TAG: Record<string, string> = { stickers: 'STICKERS', combo: 'CZ', pairs: 'WB-CZ', trbx: 'TRBX', qr: 'QR' };
+  sendFile(res, await make[kind][0](), fileName(['WB_FBS', id, kind === 'qr' || kind === 'trbx' ? null : itemsToken(items), TAG[kind]]));
 }));
 
 // GET /api/stock/wb/cz.xlsx?supplies=WB-GI-1,WB-GI-2 — таблица использованных ЧЗ

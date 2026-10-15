@@ -7,7 +7,7 @@ import { PdfJob, StockError, consume, nextDocNumber } from '../services/stock';
 import { availableCodes, postQuant, replaceCode } from '../services/quants';
 import { mergePdfs, renderQuantLabels } from '../services/quantLabel';
 import { downloadFile } from '../services/s3';
-import { qtyLines, setShareText } from '../services/share';
+import { fileName, itemsToken, productCode, qtyLines, setShareText, translit } from '../services/share';
 import { pdfQueue } from '../workers/pdfQueue';
 
 const router = Router();
@@ -178,7 +178,7 @@ router.get('/quant-docs/:id/cz.pdf', async (req: AuthRequest, res: Response): Pr
   if (batches.some((b) => b.jobStatus !== 'done' || !b.s3Key)) { res.status(409).json({ error: 'Этикетки ещё генерируются' }); return; }
   const doc = await prisma.stockDoc.findUnique({ where: { id: req.params.id } });
   setShareText(res, [`Этикетки ЧЗ · ${doc?.number ?? ''}`, ...qtyLines(quants.map((q) => ({ name: q.quantType.productItem.name, qty: q.units }))), `Квантов: ${quants.length} · этикеток: ${batches.reduce((t, b) => t + b.count, 0)}`]);
-  sendPdf(res, await mergePdfs(batches.map((b) => b.s3Key)), `ЧЗ ${doc?.number ?? ''}.pdf`);
+  sendPdf(res, await mergePdfs(batches.map((b) => b.s3Key)), fileName(['CZ', itemsToken(quants.map((q) => ({ name: q.quantType.productItem.name, qty: q.units }))), doc && translit(doc.number)]));
 });
 
 // GET /api/stock/quant-labels.pdf?docId=… | ?ids=a,b — этикетки квантов
@@ -200,7 +200,13 @@ router.get('/quant-labels.pdf', async (req: AuthRequest, res: Response): Promise
     ...[...new Set(quants.map((q) => q.quantType.productItem.name))].map((n) => { const qs = quants.filter((q) => q.quantType.productItem.name === n); return `${n} — ${qs.length} кв. × ${qs[0].units} шт = ${qs.reduce((s, q) => s + q.units, 0)} шт`; }),
     quants.length === 1 ? quants[0].number : `${quants[0].number} … ${quants[quants.length - 1].number}`,
   ]);
-  sendPdf(res, pdf, quants.length === 1 ? `${quants[0].number}.pdf` : `Кванты ${quants[0].number}…${quants[quants.length - 1].number}.pdf`);
+  const codes = [...new Set(quants.map((q) => productCode(q.quantType.productItem.name)))];
+  const sizes = [...new Set(quants.map((q) => q.units))];
+  sendPdf(res, pdf, fileName([
+    'KVANT', codes.length === 1 ? codes[0] : 'MIX',
+    sizes.length === 1 ? `${quants.length}x${sizes[0]}QT` : `${quants.reduce((s, q) => s + q.units, 0)}QT`,
+    translit(quants[0].number) + (quants.length > 1 ? `-${translit(quants[quants.length - 1].number).split('-').pop()}` : ''),
+  ]));
 });
 
 // GET /api/stock/batches/:id/pdf — PDF одной выдачи (замена кода) без проверки владельца проекта
@@ -211,7 +217,7 @@ router.get('/batches/:id/pdf', async (req: AuthRequest, res: Response): Promise<
   const lot = batch.lotId ? await prisma.lot.findUnique({ where: { id: batch.lotId }, include: { item: true } }) : null;
   const project = lot ? null : await prisma.project.findUnique({ where: { id: batch.projectId } });
   setShareText(res, [`Этикетки ЧЗ`, `${lot?.item.name ?? project?.name ?? ''} — ${batch.count} шт`, lot && `Партия ${lot.number}`]);
-  sendPdf(res, await downloadFile(batch.s3Key), `ЧЗ-${batch.id.slice(0, 8)}.pdf`);
+  sendPdf(res, await downloadFile(batch.s3Key), fileName(['CZ', itemsToken([{ name: lot?.item.name ?? project?.name ?? 'ITEM', qty: batch.count }]), lot ? translit(lot.number) : batch.id.slice(0, 8)]));
 });
 
 // ───────────── Кванты ─────────────
