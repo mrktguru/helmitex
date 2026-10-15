@@ -122,7 +122,8 @@ export async function fbsState() {
     postings: postings.map((p) => ({
       postingNumber: p.postingNumber, status: p.status, shipDay: p.shipDay, shipmentDate: p.shipmentDate, inProcessAt: p.inProcessAt,
       batchId: p.batchId, stockDocId: p.stockDocId, shipError: p.shipError,
-      products: (p.products as unknown as FbsProduct[]).map((x) => ({ ...x, item: items.get(x.offerId) ?? null })),
+      // длинное название Ozon нужно только для непривязанных артикулов
+      products: (p.products as unknown as FbsProduct[]).map(({ name, ...x }) => ({ ...x, name: items.has(x.offerId) ? undefined : name, item: items.get(x.offerId) ?? null })),
     })),
     unmapped: offers.filter((o) => !items.has(o)),
     items: [...items.values()].map((i) => ({ ...i, ...(stock.get(i.id) ?? { labeled: 0, unlabeled: 0, none: 0 }) })),
