@@ -301,9 +301,10 @@ function Base() {
 
 function CzImport({ skus, onDone }: { skus: any[]; onDone: () => void }) {
   const [rows, setRows] = useState<any[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [drag, setDrag] = useState(false);
+  const [shown, setShown] = useState(5);
   const fileRef = useRef<HTMLInputElement>(null);
   const timer = useRef<number>();
 
@@ -318,10 +319,18 @@ function CzImport({ skus, onDone }: { skus: any[]; onDone: () => void }) {
   }
   useEffect(() => { load(); return () => window.clearTimeout(timer.current); }, []);
 
-  async function upload(f: File) {
-    setBusy(true); setError('');
-    try { await uploadForm('/stock/marking/import', f); await load(); } catch (e: any) { setError(e.message); }
-    setBusy(false);
+  // Несколько файлов — по очереди; ошибка одного не останавливает остальные
+  async function upload(list: FileList | File[] | null | undefined) {
+    const files = Array.from(list ?? []).filter((f) => /\.(pdf|csv|txt)$/i.test(f.name) || /pdf|csv|text\/plain/.test(f.type));
+    if (!files.length) { setError('Подходят только PDF, CSV или TXT'); return; }
+    setError(''); setShown((n) => Math.max(5, files.length));
+    const errors: string[] = [];
+    for (const [i, f] of files.entries()) {
+      setBusy(files.length > 1 ? `Загрузка ${i + 1} из ${files.length}: ${f.name}` : `Загрузка ${f.name}…`);
+      try { await uploadForm('/stock/marking/import', f); await load(); } catch (e: any) { errors.push(`${f.name}: ${e.message}`); }
+    }
+    if (errors.length) setError(errors.join('\n'));
+    setBusy('');
   }
 
   async function assign(id: string, gtin: string, itemId: string) {
@@ -329,20 +338,21 @@ function CzImport({ skus, onDone }: { skus: any[]; onDone: () => void }) {
     try { await api.assignCzImport(id, gtin, itemId); await load(); } catch (e: any) { setError(e.message); }
   }
 
-  const recent = rows.slice(0, 5);
+  const recent = rows.slice(0, shown);
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-4 mb-5">
       <div
-        onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
-        onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) upload(f); }}
+        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDrag(false); }}
+        onDrop={(e) => { e.preventDefault(); setDrag(false); if (!busy) upload(e.dataTransfer.files); }}
         onClick={() => !busy && fileRef.current?.click()}
         className={clsx('border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition', drag ? 'border-brand-500 bg-brand-50' : 'border-slate-300 hover:border-brand-400')}>
-        <div className="font-semibold">{busy ? 'Загрузка…' : 'Загрузить ЧЗ — коды разложатся по товарам сами'}</div>
-        <div className="text-xs text-slate-500 mt-1">PDF из Честного знака (по 500–1000 кодов) или CSV. Товар определяется по GTIN в коде; повторно загруженные коды пропускаются.</div>
-        <input ref={fileRef} type="file" accept="application/pdf,.pdf,text/csv,.csv,.txt" className="hidden"
-          onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) upload(f); }} />
+        <div className="font-semibold">{busy || (drag ? 'Отпустите — загрузим все файлы' : 'Загрузить ЧЗ — выберите или перетащите сюда файлы')}</div>
+        <div className="text-xs text-slate-500 mt-1">Можно сразу несколько: PDF из Честного знака (по 500–1000 кодов) или CSV. Коды разложатся по товарам сами по GTIN; повторно загруженные коды пропускаются.</div>
+        <input ref={fileRef} type="file" multiple accept="application/pdf,.pdf,text/csv,.csv,.txt" className="hidden"
+          onChange={(e) => { const files = Array.from(e.target.files ?? []); e.target.value = ''; upload(files); }} />
       </div>
-      {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
+      {error && <p className="text-sm text-red-600 mt-3 whitespace-pre-line">{error}</p>}
       {recent.length > 0 && (
         <div className="mt-4 divide-y divide-slate-100">
           {recent.map((r) => (
