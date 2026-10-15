@@ -676,6 +676,9 @@ model OzonFbsBatch {
   labelS3Key String?
   labelType  String?
   labelAt    DateTime?
+  carriageId     String? // отгрузка (поставка) в Ozon только из отправлений группы
+  carriageStatus String?
+  carriageAt     DateTime?
   createdAt  DateTime  @default(now())
 
   @@unique([day, no])

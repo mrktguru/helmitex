@@ -4,7 +4,7 @@ import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { StockError } from '../services/stock';
 import { downloadFile } from '../services/s3';
-import { act, batchLabels, days, dayState, labels, ship, syncFbs, writeOffDay } from '../services/ozonFbs';
+import { act, batchLabels, carriageAct, formCarriage, days, dayState, labels, ship, syncFbs, writeOffDay } from '../services/ozonFbs';
 
 // Отправки Ozon FBS: мастер сборки отгрузки дня
 const router = Router();
@@ -45,6 +45,16 @@ router.post('/ozon-fbs/days/:day/labels', h(async (req, res) => {
 router.post('/ozon-fbs/days/:day/batches/:no/labels', h(async (req, res) => {
   await batchLabels(day(req), Number(req.params.no), size.parse(req.body ?? {}).size);
   res.json(await dayState(day(req)));
+}));
+router.post('/ozon-fbs/days/:day/batches/:no/carriage', h(async (req, res) => {
+  await formCarriage(day(req), Number(req.params.no));
+  res.json(await dayState(day(req)));
+}));
+router.get('/ozon-fbs/days/:day/batches/:no/act.pdf', h(async (req, res) => {
+  const buf = await carriageAct(day(req), Number(req.params.no));
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(`Акт Ozon FBS ${req.params.day} группа ${req.params.no}.pdf`)}`);
+  res.end(buf);
 }));
 router.get('/ozon-fbs/days/:day/batches/:no.pdf', h(async (req, res) => {
   const b = await prisma.ozonFbsBatch.findUnique({ where: { day_no: { day: day(req), no: Number(req.params.no) || 0 } } });

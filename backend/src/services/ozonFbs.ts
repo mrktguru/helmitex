@@ -316,6 +316,40 @@ export async function batchLabels(day: string, no: number, size: 'small' | 'big'
   return prisma.ozonFbsBatch.update({ where: { id: b.id }, data: { labelS3Key: key, labelType: size === 'small' ? 'small_label' : 'big_label', labelAt: new Date() } });
 }
 
+// ───────────── Отгрузка (поставка) группы ─────────────
+
+/** Отгрузка в Ozon только из отправлений группы: создаём (Ozon берёт все собранные без отгрузки),
+ *  оставляем в ней отправления группы, при необходимости подтверждаем. */
+export async function formCarriage(day: string, no: number) {
+  const b = await prisma.ozonFbsBatch.findUnique({ where: { day_no: { day, no } } });
+  if (!b) throw new StockError(`Группа №${no} не найдена`);
+  if (b.carriageId) throw new StockError(`Поставка для группы №${no} уже сформирована: ${b.carriageId}`);
+  const rows = await prisma.ozonFbsPosting.findMany({ where: { shipDay: day, batchNo: no, status: 'awaiting_deliver' } });
+  if (!rows.length) throw new StockError(`В группе №${no} нет собранных отправлений, ожидающих отгрузки`);
+  const method = rows.find((r) => r.deliveryMethodId)?.deliveryMethodId;
+  if (!method) throw new StockError('Не известен метод доставки отправлений');
+  // просроченные отправления Ozon переносит на сегодня — отгрузку создаём сегодняшним днём
+  const today = mskDay(new Date().toISOString());
+  const c = await ozon('/v1/carriage/create', { delivery_method_id: Number(method), departure_date: `${today}T00:00:00Z` });
+  const id = c.carriage_id ?? c.result?.carriage_id ?? c.id ?? c.result?.id;
+  if (!id) throw new StockError(`Ozon не вернул номер отгрузки: ${JSON.stringify(c).slice(0, 200)}`);
+  await prisma.ozonFbsBatch.update({ where: { id: b.id }, data: { carriageId: String(id), carriageStatus: 'created', carriageAt: new Date() } });
+  await ozon('/v1/carriage/set-postings', { carriage_id: Number(id), posting_numbers: rows.map((r) => r.postingNumber) });
+  let g = await ozon('/v1/carriage/get', { carriage_id: Number(id) });
+  if (g.status !== 'formed' && (g.available_actions ?? []).includes('approve')) {
+    await ozon('/v1/carriage/approve', { carriage_id: Number(id), containers_count: 1 });
+    g = await ozon('/v1/carriage/get', { carriage_id: Number(id) });
+  }
+  return prisma.ozonFbsBatch.update({ where: { id: b.id }, data: { carriageStatus: g.status ?? null } });
+}
+
+/** Акт приёма-передачи отгрузки группы (PDF от Ozon). */
+export async function carriageAct(day: string, no: number): Promise<Buffer> {
+  const b = await prisma.ozonFbsBatch.findUnique({ where: { day_no: { day, no } } });
+  if (!b?.carriageId) throw new StockError('Поставка группы ещё не сформирована');
+  return ozonPdf('/v2/posting/fbs/act/get-pdf', { id: Number(b.carriageId) });
+}
+
 // ───────────── Акт ─────────────
 
 /** Акт приёма-передачи на день: берём уже созданный Ozon, иначе создаём; PDF сохраняем. */

@@ -120,15 +120,27 @@ export default function OzonFbs() {
   const nextNo = (batches[batches.length - 1]?.no ?? 0) + 1;
   const batchPdf = (no: number) => downloadFile(`/stock/ozon-fbs/days/${day}/batches/${no}.pdf`, `Этикетки Ozon FBS ${day} квант ${no}.pdf`).catch((e) => setError(e.message));
   const batchList = batches.length > 0 && (
-    <div className="space-y-1.5 text-sm">
+    <div className="space-y-2 text-sm">
       {[...batches].reverse().map((b) => (
-        <div key={b.no} className="flex items-center gap-2">
+        <div key={b.no} className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="font-medium">№{b.no} · {KIND[b.kind] ?? b.kind}</span>
           <span className="text-slate-500 tabular-nums">{b.postings} отпр. · {b.units} шт.</span>
           {b.labelS3Key && <button className="ml-auto text-brand-700 hover:underline whitespace-nowrap" onClick={() => batchPdf(b.no)}>⇩ этикетки ({b.postings})</button>}
           <button disabled={!!busy} className={clsx('text-brand-700 hover:underline whitespace-nowrap', b.labelS3Key ? 'text-xs text-slate-500' : 'ml-auto')}
                 onClick={() => run(`bl${b.no}`, () => api.ozonFbsBatchLabels(day!, b.no), (r) => { apply(r); batchPdf(b.no); return `Этикетки группы №${b.no} готовы`; })}>
                 {busy === `bl${b.no}` ? 'Ozon формирует…' : b.labelS3Key ? 'заново' : 'сформировать этикетки'}</button>
+          <div className="basis-full flex items-center gap-2 text-xs">
+            {b.carriageId ? (<>
+              <span className="text-emerald-700">Поставка {b.carriageId}{b.carriageStatus === 'formed' ? ' · сформирована' : b.carriageStatus ? ` · ${b.carriageStatus}` : ''}</span>
+              <button className="text-brand-700 hover:underline" onClick={() => downloadFile(`/stock/ozon-fbs/days/${day}/batches/${b.no}/act.pdf`, `Акт Ozon FBS ${day} группа ${b.no}.pdf`).catch((e) => setError(e.message))}>⇩ акт</button>
+            </>) : (
+              <button disabled={!!busy} className="px-2.5 py-1 rounded-lg bg-brand-50 text-brand-700 font-medium hover:bg-brand-100"
+                onClick={() => run(`car${b.no}`, () => api.ozonFbsCarriage(day!, b.no), (r) => {
+                  apply(r); const x = r.batches.find((y: any) => y.no === b.no);
+                  return `Поставка ${x?.carriageId ?? ''} сформирована в Ozon: ${b.postings} отпр.`;
+                })}>{busy === `car${b.no}` ? 'Формирую поставку…' : 'Сформировать поставку'}</button>
+            )}
+          </div>
         </div>
       ))}
     </div>
