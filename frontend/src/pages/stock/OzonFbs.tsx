@@ -86,13 +86,25 @@ export default function OzonFbs() {
     : t === 'carriage' ? isCarr(p) : t === 'gone' ? PASSED.includes(p.status) : p.status === 'cancelled';
 
   // товар по умолчанию — с наибольшим числом ждущих заказов
+  // артикулы всех текущих заказов (n — сколько ждут сборки); по умолчанию — с наибольшим числом ждущих
   const products = useMemo(() => {
-    const m = new Map<string, { id: string; name: string; n: number }>();
-    for (const p of waiting) for (const x of p.products) if (x.item) { const g = m.get(x.item.id) ?? { id: x.item.id, name: x.item.name, n: 0 }; g.n++; m.set(x.item.id, g); }
+    const m = new Map<string, { id: string; name: string; offerId: string; n: number }>();
+    for (const p of P) for (const x of p.products) if (x.item) {
+      const g = m.get(x.item.id) ?? { id: x.item.id, name: x.item.name, offerId: x.offerId, n: 0 };
+      if (p.status === 'awaiting_packaging') g.n++;
+      m.set(x.item.id, g);
+    }
     return [...m.values()].sort((a, b) => b.n - a.n);
   }, [data]);
+  const ALL = '*'; // «все артикулы» — только для просмотра списка, собирать квант можно по одному артикулу
   const prod = product || products[0]?.id || '';
-  const ofProd = (p: any) => !prod || p.products.some((x: any) => x.item?.id === prod);
+  const ofProd = (p: any) => !prod || prod === ALL || p.products.some((x: any) => x.item?.id === prod);
+  const prodSelect = (cls: string) => (
+    <select value={prod} onChange={(e) => setProduct(e.target.value)} className={cls}>
+      {products.map((x) => <option key={x.id} value={x.id}>{short(x.name)} · арт. {x.offerId} · ждут {x.n}</option>)}
+      <option value={ALL}>Все артикулы</option>
+    </select>
+  );
   const mapped = (p: any) => p.products.every((x: any) => x.item);
   const qtys = useMemo(() => {
     const m = new Map<number, number>();
@@ -224,11 +236,9 @@ export default function OzonFbs() {
       <section className="bg-white rounded-xl border border-slate-200 p-3 sm:p-5">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-3">
           <h2 className="font-bold text-lg mr-1">Собрать квант</h2>
-          {products.length > 1 && (
-            <select value={prod} onChange={(e) => setProduct(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white">
-              {products.map((x) => <option key={x.id} value={x.id}>{short(x.name)} · {x.n}</option>)}
-            </select>
-          )}
+          <label className="text-sm flex items-center gap-2 min-w-0">Артикул
+            {prodSelect('border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white min-w-0 max-w-[70vw] sm:max-w-sm')}
+          </label>
           <div className="flex gap-1.5 overflow-x-auto -mx-1 px-1 pb-1 sm:pb-0 w-full sm:w-auto">
             <span className="text-xs text-slate-500 self-center whitespace-nowrap">Штук в заказе:</span>
             {qtys.map(([n, c]) => (
@@ -276,7 +286,8 @@ export default function OzonFbs() {
         <div className="hidden lg:flex mt-3 items-center gap-3">
           <span className="text-sm">Будет: <b>группа №{nextNo} · {plan.length} отпр · {planUnits} шт</b> · спишем {planUnits} шт {item ? short(item.name) : ''} {packLine}</span>
           {tooMany && <span className="text-sm text-red-600">не больше {MAX_AT_ONCE} заказов за раз — поставьте лимит</span>}
-          <button disabled={!!busy || !plan.length || tooMany} onClick={doShip} className={btnPrimary + ' ml-auto'}>{busy === 'ship' ? `Собираю ${plan.length}…` : `Собрать ${planUnits} шт →`}</button>
+          {prod === ALL && <span className="text-sm text-amber-700">выберите артикул — квант собирается из одного товара</span>}
+          <button disabled={!!busy || !plan.length || tooMany || prod === ALL} onClick={doShip} className={btnPrimary + ' ml-auto'}>{busy === 'ship' ? `Собираю ${plan.length}…` : `Собрать ${planUnits} шт →`}</button>
         </div>
       </section>
 
@@ -344,6 +355,7 @@ export default function OzonFbs() {
           ))}
         </div>
         <div className="px-3 sm:px-4 py-2 border-b bg-slate-50 flex flex-wrap items-center gap-2 text-sm">
+          {prodSelect('border border-slate-300 rounded-lg px-2 py-1 bg-white max-w-[60vw] sm:max-w-xs')}
           <select value={ship} onChange={(e) => setShip(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1 bg-white">
             <option value="all">Отгрузка: все</option><option value="late">просроченные</option>
             {[...new Set(P.map((p) => p.shipDay))].sort().map((d) => <option key={d} value={d}>{dd(d)}</option>)}
@@ -415,7 +427,7 @@ export default function OzonFbs() {
             <div className="text-xs text-slate-500 truncate">{plan.length} отпр{type ? ` · ${type.boxName}` : pack === PACK_BAG ? ' · пакеты' : ''}{withLabels ? ' · этикетки' : ''}{withCarriage ? ' · поставка' : ''}</div>
             {tooMany && <div className="text-xs text-red-600">не больше {MAX_AT_ONCE} за раз</div>}
           </div>
-          <button disabled={!!busy || !plan.length || tooMany} onClick={doShip} className={btnPrimary + ' shrink-0'}>{busy === 'ship' ? 'Собираю…' : 'Собрать →'}</button>
+          <button disabled={!!busy || !plan.length || tooMany || prod === ALL} onClick={doShip} className={btnPrimary + ' shrink-0'}>{busy === 'ship' ? 'Собираю…' : 'Собрать →'}</button>
         </div>
       </div>
     </div>
