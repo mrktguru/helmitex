@@ -120,7 +120,7 @@ export async function fbsState() {
   return {
     now: new Date().toISOString(),
     postings: postings.map((p) => ({
-      postingNumber: p.postingNumber, status: p.status, shipDay: p.shipDay, shipmentDate: p.shipmentDate, inProcessAt: p.inProcessAt,
+      postingNumber: p.postingNumber, status: p.status, substatus: p.substatus, shipDay: p.shipDay, shipmentDate: p.shipmentDate, inProcessAt: p.inProcessAt,
       batchId: p.batchId, stockDocId: p.stockDocId, shipError: p.shipError,
       // длинное название Ozon нужно только для непривязанных артикулов
       products: (p.products as unknown as FbsProduct[]).map(({ name, ...x }) => ({ ...x, name: items.has(x.offerId) ? undefined : name, item: items.get(x.offerId) ?? null })),
@@ -432,15 +432,17 @@ export async function batchLabels(batchId: string, size: 'small' | 'big', number
 
 // ───────────── Поставка (отгрузка в Ozon) ─────────────
 
-/** Поставка в Ozon из отправлений одной или нескольких групп: создаём (Ozon берёт все собранные без поставки),
+// Отправление уже в сформированной отгрузке Ozon. Отгрузка — одна на день отгрузки: если её не сдали в свой день,
+// Ozon её закрывает, а отправления снова ждут новую отгрузку; при формировании с выбранным составом остальные исключаются.
+export const IN_CARRIAGE = 'posting_in_carriage';
+
+/** Поставка в Ozon из отправлений групп, которые ещё не в отгрузке: создаём (Ozon берёт все собранные без поставки),
  *  оставляем в ней отправления групп, при необходимости подтверждаем. */
 export async function formCarriage(batchIds: string[]) {
   const bs = await prisma.ozonFbsBatch.findMany({ where: { id: { in: batchIds } } });
   if (!bs.length) throw new StockError('Группы не найдены');
-  const done = bs.find((b) => b.carriageId);
-  if (done) throw new StockError(`У группы №${done.no} уже есть поставка ${done.carriageId}`);
-  const rows = await prisma.ozonFbsPosting.findMany({ where: { batchId: { in: bs.map((b) => b.id) }, status: 'awaiting_deliver' } });
-  if (!rows.length) throw new StockError('В группах нет собранных отправлений, ожидающих отгрузки');
+  const rows = await prisma.ozonFbsPosting.findMany({ where: { batchId: { in: bs.map((b) => b.id) }, status: 'awaiting_deliver', NOT: { substatus: IN_CARRIAGE } } });
+  if (!rows.length) throw new StockError('Все собранные отправления этих групп уже в отгрузке или переданы в Ozon');
   const method = rows.find((r) => r.deliveryMethodId)?.deliveryMethodId;
   if (!method) throw new StockError('Не известен метод доставки отправлений');
   // просроченные отправления Ozon переносит на сегодня — поставку создаём сегодняшним днём
@@ -449,6 +451,7 @@ export async function formCarriage(batchIds: string[]) {
   if (!id) throw new StockError(`Ozon не вернул номер поставки: ${JSON.stringify(c).slice(0, 200)}`);
   await prisma.ozonFbsBatch.updateMany({ where: { id: { in: bs.map((b) => b.id) } }, data: { carriageId: String(id), carriageStatus: 'created', carriageAt: new Date() } });
   await ozon('/v1/carriage/set-postings', { carriage_id: Number(id), posting_numbers: rows.map((r) => r.postingNumber) });
+  await prisma.ozonFbsPosting.updateMany({ where: { postingNumber: { in: rows.map((r) => r.postingNumber) } }, data: { substatus: IN_CARRIAGE } });
   let g = await ozon('/v1/carriage/get', { carriage_id: Number(id) });
   if (g.status !== 'formed' && (g.available_actions ?? []).includes('approve')) {
     await ozon('/v1/carriage/approve', { carriage_id: Number(id), containers_count: 1 });

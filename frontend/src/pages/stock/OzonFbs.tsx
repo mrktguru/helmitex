@@ -43,6 +43,7 @@ export default function OzonFbs() {
   const [qty, setQty] = useState<string>('1');
   const [ship, setShip] = useState<string>('all');
   const [q, setQ] = useState('');
+  const [grp, setGrp] = useState<string>(''); // фильтр по группе
   const [shown, setShown] = useState(100);
   // сборка
   const [mode, setMode] = useState<Mode>('single');
@@ -65,7 +66,20 @@ export default function OzonFbs() {
   const batchOf = useMemo(() => new Map(batches.map((b) => [b.id, b])), [data]);
   const now = data ? Date.parse(data.now) : Date.now();
   const waiting = P.filter((p) => p.status === 'awaiting_packaging');
-  const isCarr = (p: any) => p.status === 'awaiting_deliver' && !!batchOf.get(p.batchId)?.carriageId;
+  // в сформированной отгрузке Ozon — по подстатусу отправления (отгрузку, не сданную в свой день, Ozon закрывает)
+  const isCarr = (p: any) => p.status === 'awaiting_deliver' && p.substatus === 'posting_in_carriage';
+  // состояние группы по её отправлениям
+  const groupStat = useMemo(() => {
+    const m = new Map<string, { passed: number; inCar: number; notCar: number; canc: number; wait: number }>();
+    for (const p of P) {
+      if (!p.batchId) continue;
+      const g = m.get(p.batchId) ?? { passed: 0, inCar: 0, notCar: 0, canc: 0, wait: 0 };
+      if (PASSED.includes(p.status)) g.passed++; else if (p.status === 'cancelled') g.canc++;
+      else if (p.status === 'awaiting_deliver') { if (p.substatus === 'posting_in_carriage') g.inCar++; else g.notCar++; } else g.wait++;
+      m.set(p.batchId, g);
+    }
+    return m;
+  }, [data]);
   const inTab = (p: any, t: Tab) => t === 'wait' ? p.status === 'awaiting_packaging'
     : t === 'packed' ? p.status === 'awaiting_deliver' && !isCarr(p)
     : t === 'carriage' ? isCarr(p) : t === 'gone' ? PASSED.includes(p.status) : p.status === 'cancelled';
@@ -96,7 +110,7 @@ export default function OzonFbs() {
 
   const shipFilter = (p: any) => ship === 'all' ? true : ship === 'late' ? Date.parse(p.shipmentDate) < now : p.shipDay === ship;
   const filtered = P.filter((p) => inTab(p, tab) && ofProd(p) && (tab !== 'wait' || qty === 'all' || units(p) === +qty) && shipFilter(p)
-    && (!q || p.postingNumber.includes(q.trim())));
+    && (!q || p.postingNumber.includes(q.trim())) && (!grp || p.batchId === grp));
 
   // что соберём
   const plan: any[] = useMemo(() => {
@@ -114,7 +128,7 @@ export default function OzonFbs() {
   const have = item ? item.labeled + item.unlabeled : 0;
   const waitUnits = waiting.filter(ofProd).reduce((t, p) => t + units(p), 0);
   const late = waiting.filter((p) => Date.parse(p.shipmentDate) < now);
-  const open = batches.filter((b) => !b.carriageId && P.some((p) => p.batchId === b.id && p.status === 'awaiting_deliver'));
+  const open = batches.filter((b) => (groupStat.get(b.id)?.notCar ?? 0) > 0); // собраны, но не в отгрузке
 
   const packLine = type ? `+ 1 ${type.boxName}` : pack === PACK_BAG ? (data?.bag ? `+ ${plan.length} × ${data.bag.name}` : '· пакеты (SKU «Пакет» не заведён — без списания)') : '';
   const kind = mode === 'single' ? 'quant' : pack === PACK_BAG ? 'bag' : mode === 'multi' ? 'multi' : 'manual';
@@ -268,28 +282,38 @@ export default function OzonFbs() {
       {/* Группы и поставки */}
       <section className="bg-white rounded-xl border border-slate-200">
         <div className="px-3 sm:px-4 py-3 border-b flex flex-wrap items-center gap-2">
-          <h2 className="font-bold">Группы и поставки</h2><span className="text-xs text-slate-500">{open.length} без поставки</span>
+          <h2 className="font-bold">Группы и поставки</h2>
+          <span className={clsx('text-xs', open.length ? 'text-amber-700 font-medium' : 'text-slate-500')}>{open.length ? `${open.length} групп · ${open.reduce((t, b) => t + groupStat.get(b.id)!.notCar, 0)} отпр. собраны, но не в отгрузке` : 'все собранные — в отгрузке или переданы'}</span>
           <button disabled={!!busy || !(carSel.size || open.length)} className={btnPrimary + ' ml-auto !py-1.5'}
             onClick={() => run('car', () => api.ozonFbsCarriage(carSel.size ? [...carSel] : open.map((b) => b.id)), (r) => { setData(r.state); setCarSel(new Set()); return `Поставка ${r.carriageId} сформирована в Ozon`; })}>
-            {busy === 'car' ? 'Формирую…' : carSel.size ? `Поставка на выбранные ${carSel.size}` : `Поставка на все ${open.length}`}</button>
+            {busy === 'car' ? 'Формирую…' : carSel.size ? `Отгрузка на выбранные ${carSel.size}` : `Отгрузка на все ${open.length}`}</button>
         </div>
         <div className="divide-y text-sm">
-          {batches.slice(0, 30).map((b) => {
-            const canCar = !b.carriageId && open.some((o) => o.id === b.id);
+          {/* последние 30 + все, где есть несданное */}
+          {batches.filter((b, i) => i < 30 || (groupStat.get(b.id)?.notCar ?? 0) + (groupStat.get(b.id)?.inCar ?? 0) > 0).map((b) => {
+            const g = groupStat.get(b.id) ?? { passed: 0, inCar: 0, notCar: 0, canc: 0, wait: 0 };
+            const canCar = g.notCar > 0;
             return (
-              <div key={b.id} className="px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <div key={b.id} className={clsx('px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5', grp === b.id && 'bg-brand-50')}>
                 {canCar ? <input type="checkbox" className="w-4 h-4" checked={carSel.has(b.id)} onChange={() => setCarSel((s) => { const x = new Set(s); x.has(b.id) ? x.delete(b.id) : x.add(b.id); return x; })} /> : <span className="w-4" />}
-                <b className="w-10">№{b.no}</b><span className="text-xs text-slate-500 w-10">{dd(b.day)}</span>
+                <button className="w-10 text-left font-bold hover:underline" title="Показать заказы группы" onClick={() => { setGrp(grp === b.id ? '' : b.id); setTab(g.notCar ? 'packed' : g.inCar ? 'carriage' : 'gone'); setQty('all'); }}>№{b.no}</button>
+                <span className="text-xs text-slate-500 w-10">{dd(b.day)}</span>
                 <span className={clsx('text-[11px] font-medium px-2 py-0.5 rounded-full', b.kind === 'quant' ? 'bg-brand-50 text-brand-700' : 'bg-amber-50 text-amber-800')}>{b.quantTypeName ?? KIND[b.kind] ?? b.kind}</span>
                 <span className="w-28">
                   {b.limit && <span className="block h-1.5 rounded bg-slate-200 overflow-hidden"><span className="block h-full bg-brand-500" style={{ width: `${Math.min(100, b.units / b.limit * 100)}%` }} /></span>}
                   <span className="text-xs text-slate-500">{b.postings} отпр · {b.units}{b.limit ? `/${b.limit}` : ''} шт</span>
                 </span>
+                {/* где отправления группы сейчас — по данным Ozon */}
+                <span className="flex flex-wrap gap-1.5 text-[11px] font-medium">
+                  {g.passed > 0 && <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">✓ передано в Ozon {g.passed === b.postings - g.canc ? '' : g.passed}</span>}
+                  {g.inCar > 0 && <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">в отгрузке{b.carriageId && b.carriageStatus !== 'closed' ? ` ${b.carriageId}` : ''} — сдать {g.inCar}</span>}
+                  {g.notCar > 0 && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900">собрано, не в отгрузке {g.notCar}</span>}
+                  {g.canc > 0 && <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">отменено {g.canc}</span>}
+                </span>
                 <span className="basis-full sm:basis-auto sm:ml-auto flex flex-wrap items-center gap-3 text-xs pl-7 sm:pl-0">
-                  {b.carriageId
-                    ? <><span className="text-indigo-700">поставка {b.carriageId}{b.carriageStatus === 'formed' ? ' · сформирована' : b.carriageStatus ? ` · ${b.carriageStatus}` : ''}</span><button className="text-brand-700 hover:underline" onClick={() => actPdf(b)}>⇩ акт</button></>
-                    : canCar && <button disabled={!!busy} className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 font-medium hover:bg-blue-100"
-                        onClick={() => run(`car${b.id}`, () => api.ozonFbsCarriage([b.id]), (r) => { setData(r.state); return `Поставка ${r.carriageId} сформирована в Ozon: группа №${b.no}`; })}>{busy === `car${b.id}` ? 'Формирую…' : 'Сформировать поставку'}</button>}
+                  {canCar && <button disabled={!!busy} className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 font-medium hover:bg-blue-100"
+                    onClick={() => run(`car${b.id}`, () => api.ozonFbsCarriage([b.id]), (r) => { setData(r.state); return `Отгрузка ${r.carriageId} сформирована в Ozon: группа №${b.no}`; })}>{busy === `car${b.id}` ? 'Формирую…' : 'Сформировать отгрузку'}</button>}
+                  {g.inCar > 0 && b.carriageId && <button className="text-brand-700 hover:underline" onClick={() => actPdf(b)}>⇩ акт</button>}
                   {b.labels && <button className="text-brand-700 hover:underline font-medium" onClick={() => labelsPdf(b)}>⇩ этикетки ({b.postings})</button>}
                   <button disabled={!!busy} className={b.labels ? 'text-slate-500 hover:underline' : 'text-brand-700 hover:underline'}
                     onClick={() => run(`bl${b.id}`, () => api.ozonFbsBatchLabels(b.id), (r) => { setData(r); labelsPdf(b); return `Этикетки группы №${b.no} готовы`; })}>
@@ -315,6 +339,7 @@ export default function OzonFbs() {
             <option value="all">Отгрузка: все</option><option value="late">просроченные</option>
             {[...new Set(P.map((p) => p.shipDay))].sort().map((d) => <option key={d} value={d}>{dd(d)}</option>)}
           </select>
+          {grp && <button onClick={() => setGrp('')} className={clsx(chip, 'bg-brand-600 border-brand-600 text-white')}>группа №{batchOf.get(grp)?.no} ×</button>}
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="№ отправления" inputMode="numeric" className="border border-slate-300 rounded-lg px-2 py-1 bg-white w-40 flex-1 sm:flex-none" />
           {tab === 'wait' && mode === 'manual' && <span className="text-xs text-slate-500 ml-auto">отмечено {sel.size}</span>}
           {tab === 'wait' && mode !== 'manual' && <span className="text-xs text-slate-500 ml-auto">подсвечены заказы, которые войдут в группу №{nextNo}</span>}
