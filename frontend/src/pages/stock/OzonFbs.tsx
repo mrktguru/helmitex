@@ -316,7 +316,10 @@ export default function OzonFbs() {
                   {canCar && <button disabled={!!busy} className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 font-medium hover:bg-blue-100"
                     onClick={() => run(`car${b.id}`, () => api.ozonFbsCarriage([b.id]), (r) => { setData(r.state); return `Отгрузка ${r.carriageId} сформирована в Ozon: группа №${b.no}`; })}>{busy === `car${b.id}` ? 'Формирую…' : 'Сформировать отгрузку'}</button>}
                   {g.inCar > 0 && b.carriageId && <button className="text-brand-700 hover:underline" onClick={() => actPdf(b)}>⇩ акт</button>}
-                  {b.labels && <button className="text-brand-700 hover:underline font-medium" onClick={() => labelsPdf(b)}>⇩ этикетки ({b.postings})</button>}
+                  {g.passed > 0 && g.inCar + g.notCar > 0 && <button disabled={!!busy} className="text-brand-700 hover:underline font-semibold"
+                    onClick={() => run(`pl${b.id}`, () => downloadFile(`/stock/ozon-fbs/batches/${b.id}/pending-labels.pdf`, `OZON_FBS_${b.no}_REST.pdf`))}>
+                    {busy === `pl${b.id}` ? 'Ozon формирует…' : `⇩ этикетки несданных (${g.inCar + g.notCar})`}</button>}
+                  {b.labels && <button className={clsx('hover:underline', g.passed > 0 && g.inCar + g.notCar > 0 ? 'text-slate-500' : 'text-brand-700 font-medium')} onClick={() => labelsPdf(b)}>⇩ {g.passed > 0 && g.inCar + g.notCar > 0 ? 'все' : 'этикетки'} ({b.postings})</button>}
                   <button disabled={!!busy} className={b.labels ? 'text-slate-500 hover:underline' : 'text-brand-700 hover:underline'}
                     onClick={() => run(`bl${b.id}`, () => api.ozonFbsBatchLabels(b.id), (r) => { setData(r); labelsPdf(b); return `Этикетки группы №${b.no} готовы`; })}>
                     {busy === `bl${b.id}` ? 'Ozon формирует…' : b.labels ? 'заново' : 'сформировать этикетки'}</button>

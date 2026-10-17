@@ -4,7 +4,7 @@ import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { StockError } from '../services/stock';
 import { downloadFile } from '../services/s3';
-import { batchLabels, carriageAct, fbsState, formCarriage, postingItems, ship, syncFbs, writeOffPending } from '../services/ozonFbs';
+import { batchLabels, carriageAct, pendingLabels, fbsState, formCarriage, postingItems, ship, syncFbs, writeOffPending } from '../services/ozonFbs';
 import { ddmm, fileName, itemsToken, qtyLines, setShareText } from '../services/share';
 
 // Отправки Ozon FBS: все текущие заказы, сборка группами (кванты, пакеты), этикетки и поставки по группам
@@ -69,6 +69,18 @@ router.get('/ozon-fbs/batches/:id/act.pdf', h(async (req, res) => {
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(fileName(['OZON_FBS_ACT', b.carriageId, groupTag(b)]))}`);
   res.end(buf);
+}));
+router.get('/ozon-fbs/batches/:id/pending-labels.pdf', h(async (req, res) => {
+  const b = await group(req.params.id);
+  const { numbers, pdf } = await pendingLabels(b.id);
+  const items = await postingItems(numbers);
+  setShareText(res, [
+    `Этикетки Ozon FBS 58×40 · ${KIND[b.kind] ?? 'группа'} №${b.no} · только несданные`,
+    ...qtyLines(items), `Этикеток: ${numbers.length} из ${b.postings}`, b.carriageId && `Поставка ${b.carriageId}`,
+  ]);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(fileName(['OZON_FBS', b.carriageId ?? dayTag(b.day), itemsToken(items), groupTag(b), `REST${numbers.length}`]))}`);
+  res.end(pdf);
 }));
 router.get('/ozon-fbs/batches/:id/labels.pdf', h(async (req, res) => {
   const b = await group(req.params.id);

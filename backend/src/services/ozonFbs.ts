@@ -442,6 +442,13 @@ export async function batchLabels(batchId: string, size: 'small' | 'big', number
   return prisma.ozonFbsBatch.update({ where: { id: b.id }, data: { labelS3Key: key, labelType: size === 'small' ? 'small_label' : 'big_label', labelAt: new Date() } });
 }
 
+/** Этикетки только несданных отправлений группы (собраны, ещё не приняты Ozon) — PDF сразу, без сохранения */
+export async function pendingLabels(batchId: string) {
+  const numbers = await groupPostings(batchId, { status: 'awaiting_deliver' });
+  if (!numbers.length) throw new StockError('Все отправления группы уже приняты Ozon');
+  return { numbers, pdf: await fetchLabels(numbers, 'small') };
+}
+
 // ───────────── Поставка (отгрузка в Ozon) ─────────────
 
 // Отправление уже в сформированной отгрузке Ozon. Отгрузка — одна на день отгрузки: если её не сдали в свой день,
