@@ -685,6 +685,7 @@ model OzonFbsBatch {
   carriageId     String? // отгрузка (поставка) в Ozon только из отправлений группы
   carriageStatus String?
   carriageAt     DateTime?
+  shippedAt      DateTime? // все отправления переданы в Ozon (или отменены) — группа отправлена
   createdAt      DateTime   @default(now())
 }
 

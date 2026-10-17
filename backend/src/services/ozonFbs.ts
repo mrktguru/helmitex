@@ -44,6 +44,7 @@ export async function syncFbs(userId?: string): Promise<number> {
     offset += postings.length;
   }
   await writeOffPassed(userId);
+  await markShipped();
   await refreshCarriages().catch((e) => console.warn('[ozon fbs carriages]', e));
   return n;
 }
@@ -67,6 +68,17 @@ async function writeOffPassed(userId?: string) {
     } catch (e) {
       await prisma.ozonFbsDay.upsert({ where: { day }, create: { day, lastError: `Списание: ${(e as Error).message}` }, update: { lastError: `Списание: ${(e as Error).message}` } });
     }
+  }
+}
+
+/** Группа отправлена, когда все её отправления переданы в Ozon или отменены */
+async function markShipped() {
+  const open = await prisma.ozonFbsBatch.findMany({ where: { shippedAt: null }, select: { id: true } });
+  for (const b of open) {
+    const g = await prisma.ozonFbsPosting.groupBy({ by: ['status'], where: { batchId: b.id }, _count: true });
+    if (!g.length) continue;
+    const pending = g.filter((x) => !PASSED.includes(x.status) && x.status !== 'cancelled').reduce((t, x) => t + x._count, 0);
+    if (pending === 0) await prisma.ozonFbsBatch.update({ where: { id: b.id }, data: { shippedAt: new Date() } });
   }
 }
 
@@ -113,7 +125,7 @@ export async function fbsState() {
   const packStock = await stockOf(boxIds, ['NONE']);
   const batchIds = [...new Set(postings.map((p) => p.batchId).filter((x): x is string => !!x))];
   const batches = await prisma.ozonFbsBatch.findMany({
-    where: { OR: [{ id: { in: batchIds } }, { createdAt: { gte: recent } }] },
+    where: { OR: [{ id: { in: batchIds } }, { createdAt: { gte: recent } }, { shippedAt: null }] },
     include: { quantType: { include: { boxItem: true } } }, orderBy: [{ createdAt: 'desc' }],
   });
   const notWritten = postings.filter((p) => !p.stockDocId && p.shipDay >= WRITE_OFF_SINCE && (p.status === 'awaiting_deliver' || PASSED.includes(p.status))).length;
@@ -135,7 +147,7 @@ export async function fbsState() {
     batches: batches.map((b) => ({
       id: b.id, day: b.day, no: b.no, kind: b.kind, postings: b.postings, units: b.units, limit: b.limit,
       quantTypeName: b.quantType?.name ?? null, boxName: b.quantType?.boxItem?.name ?? null,
-      labels: !!b.labelS3Key, labelAt: b.labelAt, carriageId: b.carriageId, carriageStatus: b.carriageStatus, createdAt: b.createdAt,
+      labels: !!b.labelS3Key, labelAt: b.labelAt, carriageId: b.carriageId, carriageStatus: b.carriageStatus, createdAt: b.createdAt, shippedAt: b.shippedAt,
     })),
     notWritten,
     lastNo: (await prisma.ozonFbsBatch.findFirst({ orderBy: { no: 'desc' }, select: { no: true } }))?.no ?? 0,

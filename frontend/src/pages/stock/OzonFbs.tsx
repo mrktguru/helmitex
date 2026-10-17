@@ -53,6 +53,7 @@ export default function OzonFbs() {
   const [withLabels, setWithLabels] = useState(true);
   const [withCarriage, setWithCarriage] = useState(true);
   const [carSel, setCarSel] = useState<Set<string>>(new Set());
+  const [showShipped, setShowShipped] = useState(false);
 
   async function run(key: string, fn: () => Promise<any>, ok?: (r: any) => string) {
     setBusy(key); setError(''); setMsg('');
@@ -289,8 +290,8 @@ export default function OzonFbs() {
             {busy === 'car' ? 'Формирую…' : carSel.size ? `Отгрузка на выбранные ${carSel.size}` : `Отгрузка на все ${open.length}`}</button>
         </div>
         <div className="divide-y text-sm">
-          {/* последние 30 + все, где есть несданное */}
-          {batches.filter((b, i) => i < 30 || (groupStat.get(b.id)?.notCar ?? 0) + (groupStat.get(b.id)?.inCar ?? 0) > 0).map((b) => {
+          {/* к отправке — группы, где что-то ещё не передано в Ozon; отправленные — свёрнуты ниже */}
+          {batches.filter((b) => showShipped ? !!b.shippedAt : !b.shippedAt).map((b) => {
             const g = groupStat.get(b.id) ?? { passed: 0, inCar: 0, notCar: 0, canc: 0, wait: 0 };
             const canCar = g.notCar > 0;
             return (
@@ -298,6 +299,7 @@ export default function OzonFbs() {
                 {canCar ? <input type="checkbox" className="w-4 h-4" checked={carSel.has(b.id)} onChange={() => setCarSel((s) => { const x = new Set(s); x.has(b.id) ? x.delete(b.id) : x.add(b.id); return x; })} /> : <span className="w-4" />}
                 <button className="w-10 text-left font-bold hover:underline" title="Показать заказы группы" onClick={() => { setGrp(grp === b.id ? '' : b.id); setTab(g.notCar ? 'packed' : g.inCar ? 'carriage' : 'gone'); setQty('all'); }}>№{b.no}</button>
                 <span className="text-xs text-slate-500 w-10">{dd(b.day)}</span>
+                {b.shippedAt && <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-600 text-white">✓ отправлено {dt(b.shippedAt)}</span>}
                 <span className={clsx('text-[11px] font-medium px-2 py-0.5 rounded-full', b.kind === 'quant' ? 'bg-brand-50 text-brand-700' : 'bg-amber-50 text-amber-800')}>{b.quantTypeName ?? KIND[b.kind] ?? b.kind}</span>
                 <span className="w-28">
                   {b.limit && <span className="block h-1.5 rounded bg-slate-200 overflow-hidden"><span className="block h-full bg-brand-500" style={{ width: `${Math.min(100, b.units / b.limit * 100)}%` }} /></span>}
@@ -322,7 +324,11 @@ export default function OzonFbs() {
               </div>
             );
           })}
-          {batches.length === 0 && <div className="px-4 py-6 text-sm text-slate-500">Групп ещё нет — соберите первую выше.</div>}
+          {!showShipped && !batches.some((b) => !b.shippedAt) && <div className="px-4 py-6 text-sm text-slate-500">Всё отправлено — групп к отправке нет.</div>}
+          {batches.some((b) => b.shippedAt) && (
+            <button onClick={() => setShowShipped((v) => !v)} className="w-full px-4 py-2.5 text-sm text-slate-500 hover:bg-slate-50 text-left">
+              {showShipped ? '← к отправке' : `✓ Отправленные (${batches.filter((b) => b.shippedAt).length}) ▸`}</button>
+          )}
         </div>
       </section>
 
