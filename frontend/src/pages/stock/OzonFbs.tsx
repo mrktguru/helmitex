@@ -295,7 +295,7 @@ export default function OzonFbs() {
       <section className="bg-white rounded-xl border border-slate-200">
         <div className="px-3 sm:px-4 py-3 border-b flex flex-wrap items-center gap-2">
           <h2 className="font-bold">Группы и поставки</h2>
-          <span className={clsx('text-xs', open.length ? 'text-amber-700 font-medium' : 'text-slate-500')}>{open.length ? `${open.length} групп · ${open.reduce((t, b) => t + groupStat.get(b.id)!.notCar, 0)} отпр. собраны, но не в отгрузке` : 'все собранные — в отгрузке или переданы'}</span>
+          <span className={clsx('text-xs', open.length ? 'text-amber-700 font-medium' : 'text-slate-500')}>{open.length ? `к отправке ${open.reduce((t, b) => t + groupStat.get(b.id)!.notCar, 0)} отпр. из ${open.length} групп — собраны, но не в отгрузке` : 'все собранные — в отгрузке или переданы'}</span>
           <button disabled={!!busy || !(carSel.size || open.length)} className={btnPrimary + ' ml-auto !py-1.5'}
             onClick={() => run('car', () => api.ozonFbsCarriage(carSel.size ? [...carSel] : open.map((b) => b.id)), (r) => { setData(r.state); setCarSel(new Set()); return `Поставка ${r.carriageId} сформирована в Ozon`; })}>
             {busy === 'car' ? 'Формирую…' : carSel.size ? `Отгрузка на выбранные ${carSel.size}` : `Отгрузка на все ${open.length}`}</button>
@@ -317,7 +317,8 @@ export default function OzonFbs() {
                   <span className="text-xs text-slate-500">{b.postings} отпр · {b.units}{b.limit ? `/${b.limit}` : ''} шт</span>
                 </span>
                 {/* где отправления группы сейчас — по данным Ozon */}
-                <span className="flex flex-wrap gap-1.5 text-[11px] font-medium">
+                <span className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium">
+                  {!b.shippedAt && g.inCar + g.notCar > 0 && <span className="text-sm font-bold text-slate-800 mr-1">к отправке {g.inCar + g.notCar}<span className="font-normal text-slate-500"> из {b.postings}</span></span>}
                   {g.passed > 0 && <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">✓ передано в Ozon {g.passed === b.postings - g.canc ? '' : g.passed}</span>}
                   {g.inCar > 0 && <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">в отгрузке{b.carriageId && b.carriageStatus !== 'closed' ? ` ${b.carriageId}` : ''} — сдать {g.inCar}</span>}
                   {g.notCar > 0 && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900">собрано, не в отгрузке {g.notCar}</span>}

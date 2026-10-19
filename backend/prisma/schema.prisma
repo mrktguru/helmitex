@@ -648,7 +648,7 @@ model CzImport {
 
 // Отправление Ozon FBS (зеркало /v3/posting/fbs/list) + что сделали у себя
 model OzonFbsPosting {
-  postingNumber    String    @id // 0186255407-0004-1
+  postingNumber    String        @id // 0186255407-0004-1
   orderNumber      String?
   status           String // awaiting_packaging | awaiting_deliver | delivering | delivered | cancelled …
   substatus        String?
@@ -662,7 +662,8 @@ model OzonFbsPosting {
   stockDocId       String? // списание со склада при сборке
   batchNo          Int? // номер группы сборки (для отображения)
   batchId          String? // группа сборки (OzonFbsBatch)
-  syncedAt         DateTime  @updatedAt
+  batch            OzonFbsBatch? @relation(fields: [batchId], references: [id])
+  syncedAt         DateTime      @updatedAt
 
   @@index([shipDay])
   @@index([batchId])
@@ -670,12 +671,12 @@ model OzonFbsPosting {
 
 // Квант сборки FBS: отправления на 42 шт., собранные вместе, и их этикетки одним PDF
 model OzonFbsBatch {
-  id             String     @id @default(uuid())
+  id             String           @id @default(uuid())
   day            String // YYYY-MM-DD
-  no             Int        @unique // сквозной номер группы по всем товарам и дням
-  kind           String     @default("quant") // quant — заказы по 1 шт.; multi — по 2+ шт.; manual — выбор вручную; bag — в пакеты
+  no             Int              @unique // сквозной номер группы по всем товарам и дням
+  kind           String           @default("quant") // quant — заказы по 1 шт.; multi — по 2+ шт.; manual — выбор вручную; bag — в пакеты
   quantTypeId    String? // тип кванта: товар, штук, короб (короб списывается один на группу)
-  quantType      QuantType? @relation(fields: [quantTypeId], references: [id])
+  quantType      QuantType?       @relation(fields: [quantTypeId], references: [id])
   limit          Int? // лимит штук, с которым собирали (null — без лимита)
   postings       Int
   units          Int
@@ -686,7 +687,8 @@ model OzonFbsBatch {
   carriageStatus String?
   carriageAt     DateTime?
   shippedAt      DateTime? // все отправления переданы в Ozon (или отменены) — группа отправлена
-  createdAt      DateTime   @default(now())
+  createdAt      DateTime         @default(now())
+  fbsPostings    OzonFbsPosting[]
 }
 
 // День отгрузки FBS: этикетки и акт

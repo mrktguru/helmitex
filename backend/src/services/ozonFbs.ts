@@ -113,7 +113,8 @@ const bagItem = () => prisma.item.findFirst({ where: { type: 'PACKAGING', name: 
 export async function fbsState() {
   const recent = new Date(Date.now() - 4 * 86400_000);
   const postings = await prisma.ozonFbsPosting.findMany({
-    where: { OR: [{ status: { in: ['awaiting_packaging', 'awaiting_deliver'] } }, { shipmentDate: { gte: recent } }] },
+    // + все отправления неотправленных групп, даже старые — чтобы счётчики группы сходились
+    where: { OR: [{ status: { in: ['awaiting_packaging', 'awaiting_deliver'] } }, { shipmentDate: { gte: recent } }, { batch: { shippedAt: null } }] },
     orderBy: [{ shipmentDate: 'asc' }, { inProcessAt: 'asc' }, { postingNumber: 'asc' }],
   });
   const offers = [...new Set(postings.flatMap((p) => (p.products as unknown as FbsProduct[]).map((x) => x.offerId)))];
