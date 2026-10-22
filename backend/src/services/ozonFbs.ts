@@ -523,9 +523,7 @@ export async function formCarriage(batchIds: string[]) {
   const method = rows.find((r) => r.deliveryMethodId)?.deliveryMethodId;
   if (!method) throw new StockError('Не известен метод доставки отправлений');
   // просроченные отправления Ozon переносит на сегодня — поставку создаём сегодняшним днём
-  const c = await ozon('/v1/carriage/create', { delivery_method_id: Number(method), departure_date: `${todayMsk()}T00:00:00Z` });
-  const id = c.carriage_id ?? c.result?.carriage_id ?? c.id ?? c.result?.id;
-  if (!id) throw new StockError(`Ozon не вернул номер поставки: ${JSON.stringify(c).slice(0, 200)}`);
+  const id = await openCarriage(method);
   await prisma.ozonFbsBatch.updateMany({ where: { id: { in: bs.map((b) => b.id) } }, data: { carriageId: String(id), carriageStatus: 'created', carriageAt: new Date() } });
   await ozon('/v1/carriage/set-postings', { carriage_id: Number(id), posting_numbers: rows.map((r) => r.postingNumber) });
   await prisma.ozonFbsPosting.updateMany({ where: { postingNumber: { in: rows.map((r) => r.postingNumber) } }, data: { substatus: IN_CARRIAGE } });
@@ -536,6 +534,29 @@ export async function formCarriage(batchIds: string[]) {
   }
   await prisma.ozonFbsBatch.updateMany({ where: { carriageId: String(id) }, data: { carriageStatus: g.status ?? null } });
   return String(id);
+}
+
+/** Новая отгрузка на сегодня. Ozon держит одну несформированную на метод доставки (THERE_IS_AN_UNFORMED_CARRIAGE):
+ *  если она на сегодня или позже — берём её (состав всё равно задаём сами); если зависла со старой датой — отменяем
+ *  (отправления остаются собранными) и создаём новую. */
+async function openCarriage(method: string): Promise<string> {
+  const today = todayMsk();
+  const create = async () => {
+    const c = await ozon('/v1/carriage/create', { delivery_method_id: Number(method), departure_date: `${today}T00:00:00Z` });
+    const id = c.carriage_id ?? c.result?.carriage_id ?? c.id ?? c.result?.id;
+    if (!id) throw new StockError(`Ozon не вернул номер поставки: ${JSON.stringify(c).slice(0, 200)}`);
+    return String(id);
+  };
+  try { return await create(); } catch (e) {
+    if (!/THERE_IS_AN_UNFORMED_CARRIAGE/.test((e as Error).message)) throw e;
+  }
+  const shift = (d: number) => new Date(Date.parse(today) + d * 86400_000).toISOString().slice(0, 10);
+  const list = await ozon('/v2/posting/fbs/act/list', { filter: { date_from: shift(-14), date_to: shift(7) }, limit: 50 });
+  const un = (list.result ?? []).find((x: any) => String(x.delivery_method_id) === method && x.status === 'new');
+  if (!un) throw new StockError('В Ozon есть несформированная отгрузка, но найти её не удалось — сформируйте или отмените её в кабинете Ozon');
+  if (String(un.departure_date).slice(0, 10) >= today) return String(un.id);
+  await ozon('/v1/carriage/cancel', { carriage_id: Number(un.id) });
+  return create();
 }
 
 /** Статусы поставок из Ozon (сформирована, отгружена…) — для групп последних дней */
