@@ -17,13 +17,14 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function syncFbs(userId?: string): Promise<number> {
   const since = new Date(Date.now() - 14 * 86400_000).toISOString();
   const to = new Date(Date.now() + 86400_000).toISOString();
-  let offset = 0, n = 0;
-  for (;;) {
-    // объёмный ответ — в журнал API только ошибки
-    const r: any = await ozonCall('POST', '/v3/posting/fbs/list', {
-      dir: 'ASC', filter: { since, to }, limit: 1000, offset, with: { analytics_data: false, financial_data: false },
+  let cursor: string | null = null, n = 0;
+  for (let page = 0; page < 500; page++) {
+    // v3 Ozon отключил («obsolete method»); v4 — до 100 за запрос, страницы по cursor, ответ без обёртки result.
+    // Объёмный ответ — в журнал API только ошибки
+    const r: any = await ozonCall('POST', '/v4/posting/fbs/list', {
+      dir: 'ASC', filter: { since, to }, limit: 100, ...(cursor ? { cursor } : {}), with: { analytics_data: false, financial_data: false },
     }, undefined, false);
-    const postings: any[] = r.result?.postings ?? [];
+    const postings: any[] = r.postings ?? r.result?.postings ?? [];
     for (const p of postings) {
       const products: FbsProduct[] = (p.products ?? []).map((x: any) => ({
         offerId: x.offer_id, sku: String(x.sku), name: x.name, qty: x.quantity, price: Math.round(Number(x.price) * 100) / 100,
@@ -40,8 +41,8 @@ export async function syncFbs(userId?: string): Promise<number> {
       await prisma.ozonFbsPosting.upsert({ where: { postingNumber: p.posting_number }, create: { postingNumber: p.posting_number, ...data }, update: data });
       n++;
     }
-    if (!r.result?.has_next || postings.length === 0) break;
-    offset += postings.length;
+    cursor = (r.has_next ?? r.result?.has_next) ? (r.cursor ?? null) : null;
+    if (!cursor || postings.length === 0) break;
   }
   await writeOffPassed(userId);
   await markShipped();
@@ -263,13 +264,14 @@ export interface ShipOpts {
   limit?: number | null; // лимит, с которым собирали (для истории)
   labels?: boolean; // сразу этикетки 58×40 группы
   carriage?: boolean; // сразу поставка в Ozon из отправлений группы
+  reserve?: string[]; // запасные заказы (тот же товар и штук) — взамен отменённых покупателем, чтобы собрать ровно столько, сколько выбрано
 }
 
 /** Собрать группу: «Собрано» в Ozon (одна коробка на отправление), списание товара и упаковки,
  *  номер группы дня, этикетки одним PDF и (по желанию) поставка. */
 export async function ship(numbers: string[], userId: string, opts: ShipOpts) {
   const rows = await prisma.ozonFbsPosting.findMany({ where: { postingNumber: { in: numbers } } });
-  const order = new Map(numbers.map((n, i) => [n, i]));
+  const order = new Map([...numbers, ...(opts.reserve ?? [])].map((n, i) => [n, i]));
   const todo = rows.filter((r) => r.status === 'awaiting_packaging').sort((a, b) => order.get(a.postingNumber)! - order.get(b.postingNumber)!);
   if (!todo.length) throw new StockError('Нет отправлений в статусе «Ждёт сборки»');
 
@@ -297,38 +299,67 @@ export async function ship(numbers: string[], userId: string, opts: ShipOpts) {
     if (have < pack.qty) throw new StockError(`«${pack.name}»: нужно ${pack.qty} шт., на складе ${Math.floor(have)}`);
   }
 
+  const unitsOf = (p: { products: unknown }) => (p.products as FbsProduct[]).reduce((t, x) => t + x.qty, 0);
+  // запасные — только ждущие сборки и с уже проверенными артикулами
+  const spare = (opts.reserve?.length ? await prisma.ozonFbsPosting.findMany({ where: { postingNumber: { in: opts.reserve }, status: 'awaiting_packaging' } }) : [])
+    .filter((r) => (r.products as unknown as FbsProduct[]).every((x) => items.has(x.offerId)))
+    .sort((a, b) => order.get(a.postingNumber)! - order.get(b.postingNumber)!);
+
   const ok: string[] = [];
+  const shipped: typeof todo = [];
   const failed: { postingNumber: string; error: string }[] = [];
-  const queue = [...todo];
-  await Promise.all(Array.from({ length: 4 }, async () => {
-    for (let p = queue.shift(); p; p = queue.shift()) {
-      const body = {
-        posting_number: p.postingNumber,
-        packages: [{ products: (p.products as unknown as FbsProduct[]).map((x) => ({ product_id: Number(x.sku), quantity: x.qty })) }],
-        with: { additional_data: false },
-      };
-      try {
-        try { await ozon('/v4/posting/fbs/ship', body); } catch (e) {
-          // Ozon требует ГТД/РНПТ экземпляров — заполняем «отсутствует» и собираем повторно
-          if (!/EXEMPLAR_INFO_NOT_FILLED/.test((e as Error).message)) throw e;
-          await fillExemplars(p.postingNumber);
-          await ozon('/v4/posting/fbs/ship', body);
+  const cancelled: string[] = [];
+  let queue = [...todo];
+  // Волнами: отменённые покупателем (POSTING_ALREADY_CANCELLED) заменяем следующими запасными на те же штуки
+  while (queue.length) {
+    const wave = queue;
+    queue = [];
+    let lost = 0;
+    await Promise.all(Array.from({ length: 4 }, async () => {
+      for (let p = wave.shift(); p; p = wave.shift()) {
+        const body = {
+          posting_number: p.postingNumber,
+          packages: [{ products: (p.products as unknown as FbsProduct[]).map((x) => ({ product_id: Number(x.sku), quantity: x.qty })) }],
+          with: { additional_data: false },
+        };
+        try {
+          try { await ozon('/v4/posting/fbs/ship', body); } catch (e) {
+            // Ozon требует ГТД/РНПТ экземпляров — заполняем «отсутствует» и собираем повторно
+            if (!/EXEMPLAR_INFO_NOT_FILLED/.test((e as Error).message)) throw e;
+            await fillExemplars(p.postingNumber);
+            await ozon('/v4/posting/fbs/ship', body);
+          }
+          await prisma.ozonFbsPosting.update({ where: { postingNumber: p.postingNumber }, data: { status: 'awaiting_deliver', shipError: null } });
+          ok.push(p.postingNumber);
+          shipped.push(p);
+        } catch (e) {
+          const error = (e as Error).message;
+          if (/POSTING_ALREADY_CANCELLED/.test(error)) {
+            // покупатель отказался — это не ошибка сборки; статус догонит синхронизация, отмечаем сразу
+            await prisma.ozonFbsPosting.update({ where: { postingNumber: p.postingNumber }, data: { status: 'cancelled', shipError: null } });
+            cancelled.push(p.postingNumber);
+            lost += unitsOf(p);
+          } else {
+            await prisma.ozonFbsPosting.update({ where: { postingNumber: p.postingNumber }, data: { shipError: error } });
+            failed.push({ postingNumber: p.postingNumber, error });
+          }
         }
-        await prisma.ozonFbsPosting.update({ where: { postingNumber: p.postingNumber }, data: { status: 'awaiting_deliver', shipError: null } });
-        ok.push(p.postingNumber);
-      } catch (e) {
-        const error = (e as Error).message;
-        await prisma.ozonFbsPosting.update({ where: { postingNumber: p.postingNumber }, data: { shipError: error } });
-        failed.push({ postingNumber: p.postingNumber, error });
       }
+    }));
+    while (lost > 0 && spare.length) {
+      const i = spare.findIndex((r) => unitsOf(r) <= lost);
+      if (i < 0) break;
+      const [r] = spare.splice(i, 1);
+      queue.push(r);
+      lost -= unitsOf(r);
     }
-  }));
+  }
   ok.sort((a, b) => order.get(a)! - order.get(b)!);
-  if (!ok.length) return { shipped: 0, failed, doc: null, writeOffError: null, batch: null, labelError: null, carriageError: null };
+  if (!ok.length) return { shipped: 0, failed, cancelled, doc: null, writeOffError: null, batch: null, labelError: null, carriageError: null };
 
   // Номер группы — сквозной по всем товарам и дням; day — день сборки (МСК)
   const day = todayMsk();
-  const units = todo.filter((p) => ok.includes(p.postingNumber)).reduce((t, p) => t + (p.products as unknown as FbsProduct[]).reduce((s, x) => s + x.qty, 0), 0);
+  const units = shipped.reduce((t, p) => t + unitsOf(p), 0);
   let batch;
   for (let k = 0; ; k++) {
     const last = await prisma.ozonFbsBatch.findFirst({ orderBy: { no: 'desc' } });
@@ -362,7 +393,7 @@ export async function ship(numbers: string[], userId: string, opts: ShipOpts) {
   if (opts.carriage) {
     try { await formCarriage([batch.id]); } catch (e) { carriageError = (e as Error).message; }
   }
-  return { shipped: ok.length, failed, doc: doc ? { id: doc.id, number: doc.number } : null, writeOffError, batch: { id: batch.id, no: batch.no }, labelError, carriageError };
+  return { shipped: ok.length, failed, cancelled, doc: doc ? { id: doc.id, number: doc.number } : null, writeOffError, batch: { id: batch.id, no: batch.no }, labelError, carriageError };
 }
 
 // ───────────── Этикетки ─────────────

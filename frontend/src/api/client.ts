@@ -186,7 +186,7 @@ export const api = {
   setGtin: (itemId: string, gtin: string) => request<any>(`/stock/marking/${itemId}/gtin`, { method: 'PUT', body: JSON.stringify({ gtin }) }),
   ozonFbsState: () => request<any>('/stock/ozon-fbs/state'),
   ozonFbsSync: () => request<any>('/stock/ozon-fbs/sync', { method: 'POST' }),
-  ozonFbsShip: (body: { postingNumbers: string[]; kind: 'quant' | 'multi' | 'manual' | 'bag'; quantTypeId?: string | null; limit?: number | null; labels: boolean; carriage: boolean }) =>
+  ozonFbsShip: (body: { postingNumbers: string[]; kind: 'quant' | 'multi' | 'manual' | 'bag'; quantTypeId?: string | null; limit?: number | null; labels: boolean; carriage: boolean; reserve?: string[] }) =>
     request<any>('/stock/ozon-fbs/ship', { method: 'POST', body: JSON.stringify(body) }),
   ozonFbsWriteOff: () => request<any>('/stock/ozon-fbs/write-off', { method: 'POST' }),
   ozonFbsBatchLabels: (id: string, size: 'small' | 'big' = 'small') =>

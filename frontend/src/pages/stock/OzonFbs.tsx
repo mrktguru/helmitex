@@ -71,12 +71,12 @@ export default function OzonFbs() {
   const isCarr = (p: any) => p.status === 'awaiting_deliver' && p.substatus === 'posting_in_carriage';
   // состояние группы по её отправлениям
   const groupStat = useMemo(() => {
-    const m = new Map<string, { passed: number; inCar: number; notCar: number; canc: number; wait: number }>();
+    const m = new Map<string, { passed: number; inCar: number; notCar: number; canc: number; wait: number; leftU: number }>();
     for (const p of P) {
       if (!p.batchId) continue;
-      const g = m.get(p.batchId) ?? { passed: 0, inCar: 0, notCar: 0, canc: 0, wait: 0 };
+      const g = m.get(p.batchId) ?? { passed: 0, inCar: 0, notCar: 0, canc: 0, wait: 0, leftU: 0 };
       if (PASSED.includes(p.status)) g.passed++; else if (p.status === 'cancelled') g.canc++;
-      else if (p.status === 'awaiting_deliver') { if (p.substatus === 'posting_in_carriage') g.inCar++; else g.notCar++; } else g.wait++;
+      else if (p.status === 'awaiting_deliver') { if (p.substatus === 'posting_in_carriage') g.inCar++; else g.notCar++; g.leftU += units(p); } else g.wait++;
       m.set(p.batchId, g);
     }
     return m;
@@ -133,6 +133,9 @@ export default function OzonFbs() {
     return waiting.filter((p) => sel.has(p.postingNumber));
   }, [data, mode, limit, qty, sel, prod, ship]);
   const planUnits = plan.reduce((t, p) => t + units(p), 0);
+  // запас на случай отказов покупателей: следующие заказы по 1 шт того же товара — группа всё равно соберётся ровно на лимит
+  const reserve: any[] = useMemo(() => mode !== 'single' || !limit ? [] : waiting
+    .filter((p) => ofProd(p) && mapped(p) && shipFilter(p) && units(p) === 1 && !plan.some((x) => x.postingNumber === p.postingNumber)).slice(0, 20), [plan]);
   const planSet = new Set(plan.map((p) => p.postingNumber));
   const nextNo = (data?.lastNo ?? batches.reduce((m, b) => Math.max(m, b.no), 0)) + 1; // сквозной номер
   const singles = waiting.filter((p) => ofProd(p) && units(p) === 1).length;
@@ -141,6 +144,7 @@ export default function OzonFbs() {
   const have = item ? item.labeled + item.unlabeled : 0;
   const waitUnits = waiting.filter(ofProd).reduce((t, p) => t + units(p), 0);
   const late = waiting.filter((p) => Date.parse(p.shipmentDate) < now);
+  const packed = P.filter((p) => p.status === 'awaiting_deliver' && ofProd(p)); // собрано, Ozon ещё не принял
   const open = batches.filter((b) => (groupStat.get(b.id)?.notCar ?? 0) > 0); // собраны, но не в отгрузке
 
   const packLine = type ? `+ 1 ${type.boxName}` : pack === PACK_BAG ? (data?.bag ? `+ ${plan.length} × ${data.bag.name}` : '· пакеты (SKU «Пакет» не заведён — без списания)') : '';
@@ -154,11 +158,13 @@ export default function OzonFbs() {
     return run('ship', () => api.ozonFbsShip({
       postingNumbers: plan.map((p) => p.postingNumber), kind,
       quantTypeId: type?.id ?? null, limit: mode === 'single' ? limit : null, labels: withLabels, carriage: withCarriage,
+      reserve: reserve.map((p) => p.postingNumber),
     }), (r) => {
       setData(r.state); setSel(new Set());
       if (r.batch && withLabels && !r.labelError) labelsPdf({ id: r.batch.id, no: r.batch.no });
       return [
         r.batch ? `Группа №${r.batch.no}: собрано ${r.shipped}` : `Собрано ${r.shipped}`,
+        r.cancelled?.length && `${r.cancelled.length} отменены покупателем — заменены следующими`,
         r.failed.length && `ошибок ${r.failed.length} (${r.failed[0].error})`,
         r.doc && `списано ${r.doc.number}`, r.writeOffError && `НЕ списано: ${r.writeOffError}`,
         withLabels && (r.labelError ? `этикетки не сформированы: ${r.labelError}` : r.batch && 'этикетки скачиваются'),
@@ -204,9 +210,9 @@ export default function OzonFbs() {
           <div className="text-xs text-slate-500">{fmtQty(waiting.reduce((t, p) => t + units(p), 0), 0)} шт</div>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
-          <div className="text-xs text-slate-500">Собрано, без поставки</div>
-          <div className="text-2xl sm:text-3xl font-extrabold tabular-nums">{P.filter((p) => inTab(p, 'packed')).length}</div>
-          <div className="text-xs text-slate-500">{open.length} групп</div>
+          <div className="text-xs text-slate-500">Собрано, ждёт отгрузки</div>
+          <div className="text-2xl sm:text-3xl font-extrabold tabular-nums">{fmtQty(packed.reduce((t, p) => t + units(p), 0), 0)} <span className="text-base font-semibold text-slate-500">шт</span></div>
+          <div className="text-xs text-slate-500">{packed.length} отпр · не в отгрузке {packed.filter((p) => !isCarr(p)).length}</div>
         </div>
         <div className={clsx('rounded-xl border p-3 sm:p-4', have < waitUnits ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200')}>
           <div className="text-xs text-slate-500 truncate">{item ? short(item.name) : 'Товар'} на складе</div>
@@ -295,7 +301,7 @@ export default function OzonFbs() {
       <section className="bg-white rounded-xl border border-slate-200">
         <div className="px-3 sm:px-4 py-3 border-b flex flex-wrap items-center gap-2">
           <h2 className="font-bold">Группы и поставки</h2>
-          <span className={clsx('text-xs', open.length ? 'text-amber-700 font-medium' : 'text-slate-500')}>{open.length ? `к отправке ${open.reduce((t, b) => t + groupStat.get(b.id)!.notCar, 0)} отпр. из ${open.length} групп — собраны, но не в отгрузке` : 'все собранные — в отгрузке или переданы'}</span>
+          <span className={clsx('text-xs', open.length ? 'text-amber-700 font-medium' : 'text-slate-500')}>{`ждёт отгрузки ${packed.length} отпр · ${packed.reduce((t, p) => t + units(p), 0)} шт`}{open.length ? ` · из них не в отгрузке ${open.reduce((t, b) => t + groupStat.get(b.id)!.notCar, 0)} отпр (${open.length} групп)` : ''}</span>
           <button disabled={!!busy || !(carSel.size || open.length)} className={btnPrimary + ' ml-auto !py-1.5'}
             onClick={() => run('car', () => api.ozonFbsCarriage(carSel.size ? [...carSel] : open.map((b) => b.id)), (r) => { setData(r.state); setCarSel(new Set()); return `Поставка ${r.carriageId} сформирована в Ozon`; })}>
             {busy === 'car' ? 'Формирую…' : carSel.size ? `Отгрузка на выбранные ${carSel.size}` : `Отгрузка на все ${open.length}`}</button>
@@ -303,7 +309,7 @@ export default function OzonFbs() {
         <div className="divide-y text-sm">
           {/* к отправке — группы, где что-то ещё не передано в Ozon; отправленные — свёрнуты ниже */}
           {batches.filter((b) => showShipped ? !!b.shippedAt : !b.shippedAt).map((b) => {
-            const g = groupStat.get(b.id) ?? { passed: 0, inCar: 0, notCar: 0, canc: 0, wait: 0 };
+            const g = groupStat.get(b.id) ?? { passed: 0, inCar: 0, notCar: 0, canc: 0, wait: 0, leftU: 0 };
             const canCar = g.notCar > 0;
             return (
               <div key={b.id} className={clsx('px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5', grp === b.id && 'bg-brand-50')}>
@@ -318,7 +324,7 @@ export default function OzonFbs() {
                 </span>
                 {/* где отправления группы сейчас — по данным Ozon */}
                 <span className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium">
-                  {!b.shippedAt && g.inCar + g.notCar > 0 && <span className="text-sm font-bold text-slate-800 mr-1">к отправке {g.inCar + g.notCar}<span className="font-normal text-slate-500"> из {b.postings}</span></span>}
+                  {!b.shippedAt && g.inCar + g.notCar > 0 && <span className="text-sm font-bold text-slate-800 mr-1">к отправке {g.inCar + g.notCar} отпр · {g.leftU} шт<span className="font-normal text-slate-500"> из {b.postings}</span></span>}
                   {g.passed > 0 && <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">✓ передано в Ozon {g.passed === b.postings - g.canc ? '' : g.passed}</span>}
                   {g.inCar > 0 && <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">в отгрузке{b.carriageId && b.carriageStatus !== 'closed' ? ` ${b.carriageId}` : ''} — сдать {g.inCar}</span>}
                   {g.notCar > 0 && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900">собрано, не в отгрузке {g.notCar}</span>}

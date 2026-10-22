@@ -40,6 +40,7 @@ const shipBody = z.object({
   limit: z.number().int().positive().nullish(),
   labels: z.boolean().default(true),
   carriage: z.boolean().default(false),
+  reserve: z.array(z.string().max(40)).max(200).optional(),
 });
 router.post('/ozon-fbs/ship', h(async (req, res) => {
   const { postingNumbers, ...opts } = shipBody.parse(req.body);
