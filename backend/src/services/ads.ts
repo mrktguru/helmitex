@@ -212,7 +212,8 @@ export async function ensureDataBg(from: string, to: string, force = false): Pro
   const kinds: Kind[] = [...(ozonConfigured() ? (['seller', 'finance'] as Kind[]) : []), ...(perfConfigured() ? (['perf'] as Kind[]) : [])];
   const dates = dateRange(from, to).filter((d) => d <= todayMsk());
   const have = await prisma.adSyncDay.findMany({ where: { kind: { in: kinds }, date: { in: dates.map(dt) } }, select: { kind: true, date: true } });
-  if (have.length < kinds.length * dates.length) await ensureData(from, to);
+  // ждём, только если за период в базе нет ничего — иначе показываем что есть, остальное дозагрузится
+  if (have.length === 0) await track('ads-data', () => ensureData(from, to));
   else kick('ads-data', () => ensureData(from, to));
 }
 
@@ -436,10 +437,17 @@ async function prices(offerIds: string[], silent = false, fresh = false): Promis
   const unknown = offerIds.filter((o) => !extraOffers.has(o));
   unknown.forEach((o) => extraOffers.add(o));
   if (fresh) priceSilent = silent;
-  let by = await priceStore.get(fresh);
-  // товара ещё нет в сохранённых ценах — подтянуть сразу
-  if (!fresh && unknown.length && offerIds.some((o) => !by.has(o))) by = await priceStore.get(true);
-  return by;
+  try {
+    let by = await priceStore.get(fresh);
+    // товара ещё нет в сохранённых ценах — подтянуть сразу
+    if (!fresh && unknown.length && offerIds.some((o) => !by.has(o))) by = await priceStore.get(true);
+    return by;
+  } catch (e) {
+    // Ozon не отдал цены (лимит, сбой) — страница работает с последними известными, ошибка видна в статусе
+    if (fresh) throw e;
+    console.warn('[ads prices]', (e as Error).message);
+    return priceStore.peek() ?? new Map();
+  }
 }
 
 const actions = () => actionStore.get();
