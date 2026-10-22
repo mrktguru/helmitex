@@ -11,6 +11,7 @@ import Journal, { entryDay } from './Journal';
 import NewCampaignModal from './NewCampaignModal';
 import { Gran, PRODUCT_METRICS, productBuckets } from './periods';
 import { addDays } from './util';
+import SyncBar, { useSyncPoll } from '../stock/SyncBar';
 import { Icon } from './icons';
 
 type Tab = 'table' | 'camps' | 'bidder' | 'price' | 'journal';
@@ -44,16 +45,21 @@ export default function AdsAnalytics() {
   };
 
   useEffect(() => { api.adsStatus().then(setStatus).catch((e) => setError(e.message)); }, []);
-  async function loadList(refresh = false) {
+  // Данные из базы портала — сразу; устаревшее Ozon догружает в фоне, после чего таблица тихо обновляется
+  const [syncInit, setSyncInit] = useState<any[] | null>(null);
+  const { sync } = useSyncPoll(syncInit, api.adsSyncStatus, () => { loadList(false, true); loadReport(true); });
+  async function loadList(refresh = false, silent = false) {
     if (!from || !to) return;
-    setLoading('list'); setError('');
-    try { setProducts((await api.adsProducts(from, to, refresh)).products); } catch (e: any) { setError(e.message); }
-    setLoading(null);
+    if (!silent) setLoading('list');
+    setError('');
+    try { const r = await api.adsProducts(from, to, refresh); setProducts(r.products); setSyncInit(r.sync); } catch (e: any) { setError(e.message); }
+    if (!silent) setLoading(null);
   }
-  async function loadReport() {
+  async function loadReport(silent = false) {
     if (!sku || !from || !to) return;
     const id = ++reqId.current;
-    setLoading('report'); setError('');
+    if (!silent) setLoading('report');
+    setError('');
     try { const r = await api.adsReport(sku, from, to); if (id === reqId.current) setReport(r); } catch (e: any) { if (id === reqId.current) setError(e.message); }
     if (id === reqId.current) setLoading(null);
   }
@@ -72,6 +78,7 @@ export default function AdsAnalytics() {
   return (
     <div className="space-y-4">
       <PageHeader title="Аналитика рекламы" hint="Все данные товара по периодам, кампании с настройками и биддером, цена и журнал изменений. Изменения отсюда сразу уходят в Ozon и пишутся в журнал." />
+      <div className="-mt-3"><SyncBar sync={sync} busy={loading === 'list'} onRefresh={() => loadList(true, true)} /></div>
 
       {status && (!status.seller || !status.perf) && (
         <p className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl px-4 py-3 text-sm">
@@ -94,8 +101,7 @@ export default function AdsAnalytics() {
           <input type="date" value={to} min={from} max={last} onChange={(e) => e.target.value && setParam({ to: e.target.value })} className="border border-slate-300 rounded-lg h-9 px-2 text-sm bg-white" />
         </label>
         <div className="flex-1" />
-        {loading && <span className="text-xs text-slate-500">{loading === 'list' ? 'Загружаю данные Ozon…' : 'Строю отчёт…'}</span>}
-        <button disabled={!!loading} onClick={async () => { await loadList(true); await loadReport(); }} className="border border-slate-300 bg-white hover:bg-slate-50 active:scale-[0.97] transition-transform disabled:opacity-50 text-slate-700 px-3 h-9 rounded-lg text-sm font-medium flex items-center gap-1.5"><Icon name="refresh" />Обновить</button>
+        {loading && <span className="text-xs text-slate-500">{loading === 'list' ? 'Загружаю…' : 'Строю отчёт…'}</span>}
         <button disabled={!report} onClick={() => setNewCampaign(true)} className="bg-brand-600 hover:bg-brand-700 active:scale-[0.97] transition-transform disabled:opacity-50 text-white px-4 h-9 rounded-lg text-sm font-medium flex items-center gap-1.5"><Icon name="plus" />Новая кампания</button>
       </div>
 

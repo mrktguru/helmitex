@@ -6,8 +6,9 @@ import { StockError } from '../services/stock';
 import { ozonConfigured } from '../services/ozon';
 import { perfConfigured } from '../services/perf';
 import {
-  createCampaign, getIntraday, getProducts, getReport, todayMsk, setActionPrice, setBudget, setCampaignState, setCpcBid, setPrice, setSelected, setSelectedBid, ymd,
+  createCampaign, getIntraday, refreshAdsMeta, getProducts, getReport, todayMsk, setActionPrice, setBudget, setCampaignState, setCpcBid, setPrice, setSelected, setSelectedBid, ymd,
 } from '../services/ads';
+import { syncStatus } from '../services/syncStatus';
 import { DEFAULT_LIMITS, DEFAULT_MODS, getBidder, runBidder, saveBidder } from '../services/bidder';
 
 const router = Router();
@@ -44,10 +45,14 @@ router.get('/status', h(async (_req, res) => {
   res.json({ seller: ozonConfigured(), perf: perfConfigured(), lastDay: todayMsk() });
 }));
 
+const ADS_SOURCES = ['ads-data', 'ads-meta', 'ads-prices', 'ads-intraday'];
 router.get('/products', h(async (req, res) => {
   const p = period(req.query);
-  res.json({ ...p, products: await getProducts(p.from, p.to, p.refresh) });
+  if (p.refresh) refreshAdsMeta();
+  // данные из базы сразу; устаревшее дозагружается в фоне — статус в sync
+  res.json({ ...p, products: await getProducts(p.from, p.to, p.refresh), sync: await syncStatus(ADS_SOURCES) });
 }));
+router.get('/sync-status', h(async (_req, res) => { res.json(await syncStatus(ADS_SOURCES)); }));
 
 router.get('/report/:sku', h(async (req, res) => {
   const p = period(req.query);

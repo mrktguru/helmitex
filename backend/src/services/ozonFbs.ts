@@ -3,6 +3,7 @@ import prisma from '../prisma/client';
 import { ozon, ozonCall, ozonPdf, ozonGetFile } from './ozon';
 import { allocateFefo, consume, nextDocNumber, StockError } from './stock';
 import { uploadFile } from './s3';
+import { syncStatus, track } from './syncStatus';
 
 // Отправки Ozon FBS: зеркало отправлений, сборка группами (кванты, пакеты) со списанием товара и упаковки, этикетки 58×40, поставки.
 
@@ -14,7 +15,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ───────────── Синхронизация ─────────────
 
-export async function syncFbs(userId?: string): Promise<number> {
+/** Синхронизация с Ozon — одна за раз (повторный вызов ждёт идущую), статус виден на странице */
+export function syncFbs(userId?: string): Promise<number> {
+  return track('fbs', () => pullFbs(userId));
+}
+
+async function pullFbs(userId?: string): Promise<number> {
   const since = new Date(Date.now() - 14 * 86400_000).toISOString();
   const to = new Date(Date.now() + 86400_000).toISOString();
   let cursor: string | null = null, n = 0;
@@ -25,6 +31,11 @@ export async function syncFbs(userId?: string): Promise<number> {
       dir: 'ASC', filter: { since, to }, limit: 100, ...(cursor ? { cursor } : {}), with: { analytics_data: false, financial_data: false },
     }, undefined, false);
     const postings: any[] = r.postings ?? r.result?.postings ?? [];
+    // пишем только новые и изменившиеся — из тысяч отправлений за раз меняются десятки
+    const known = new Map((await prisma.ozonFbsPosting.findMany({
+      where: { postingNumber: { in: postings.map((p) => p.posting_number) } },
+      select: { postingNumber: true, status: true, substatus: true, shipmentDate: true, deliveringAt: true, deliveryMethodId: true, products: true },
+    })).map((k) => [k.postingNumber, k]));
     for (const p of postings) {
       const products: FbsProduct[] = (p.products ?? []).map((x: any) => ({
         offerId: x.offer_id, sku: String(x.sku), name: x.name, qty: x.quantity, price: Math.round(Number(x.price) * 100) / 100,
@@ -38,6 +49,11 @@ export async function syncFbs(userId?: string): Promise<number> {
         deliveryMethodId: p.delivery_method?.id ? String(p.delivery_method.id) : null,
         products: products as any,
       };
+      const k = known.get(p.posting_number);
+      const same = k && k.status === data.status && k.substatus === data.substatus && k.deliveryMethodId === data.deliveryMethodId
+        && k.shipmentDate.getTime() === data.shipmentDate.getTime() && (k.deliveringAt?.getTime() ?? null) === (data.deliveringAt?.getTime() ?? null)
+        && JSON.stringify((k.products as unknown as FbsProduct[]).map((x) => [x.offerId, x.qty])) === JSON.stringify(products.map((x) => [x.offerId, x.qty]));
+      if (same) continue;
       await prisma.ozonFbsPosting.upsert({ where: { postingNumber: p.posting_number }, create: { postingNumber: p.posting_number, ...data }, update: data });
       n++;
     }
@@ -153,6 +169,7 @@ export async function fbsState() {
     })),
     notWritten,
     lastNo: (await prisma.ozonFbsBatch.findFirst({ orderBy: { no: 'desc' }, select: { no: true } }))?.no ?? 0,
+    sync: await syncStatus(['fbs']),
   };
 }
 

@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import { api, downloadFile } from '../../api/client';
 import { btnPrimary, btnSecondary, fmtMoney, fmtQty } from './common';
 import { PageHeader } from './StockLayout';
+import SyncBar, { useSyncPoll } from './SyncBar';
 
 // Отправки Ozon FBS: все текущие заказы → сборка группами (квант по лимиту / заказы по N шт / вручную) → этикетки → поставка
 
@@ -60,7 +61,17 @@ export default function OzonFbs() {
     try { const r = await fn(); if (ok) setMsg(ok(r)); } catch (e: any) { setError(e.message); }
     setBusy('');
   }
-  useEffect(() => { run('sync', async () => setData(await api.ozonFbsSync().catch(() => api.ozonFbsState()))); }, []);
+  // Сразу — сохранённое в портале; обновление из Ozon — в фоне (если последнему больше 2 минут)
+  const { sync, setSync } = useSyncPoll(data?.sync, api.ozonFbsSyncStatus, () => api.ozonFbsState().then(setData).catch((e) => setError(e.message)));
+  const refresh = () => api.ozonFbsSync().then((r) => setSync(r.sync)).catch((e) => setError(e.message));
+  useEffect(() => {
+    run('load', async () => {
+      const d = await api.ozonFbsState();
+      setData(d);
+      const at = d.sync?.[0]?.at;
+      if (!d.sync?.[0]?.running && (!at || Date.now() - Date.parse(at) > 2 * 60_000)) refresh();
+    });
+  }, []);
 
   const P: any[] = data?.postings ?? [];
   const batches: any[] = data?.batches ?? [];
@@ -190,9 +201,10 @@ export default function OzonFbs() {
 
   return (
     <div className="space-y-4 pb-28 lg:pb-0">
-      <PageHeader title="Отправки Ozon FBS" hint="Все текущие заказы склада «Рощино». Статусы обновляются из Ozon каждые 15 минут.">
-        <button disabled={!!busy} onClick={() => run('sync', async () => setData(await api.ozonFbsSync()))} className={btnSecondary + ' flex-1 sm:flex-none'}>{busy === 'sync' ? 'Обновляю…' : '↻ Обновить из Ozon'}</button>
-      </PageHeader>
+      <div>
+        <PageHeader title="Отправки Ozon FBS" hint="Все текущие заказы склада «Рощино». Из Ozon обновляется каждые 5 минут." />
+        <div className="-mt-3"><SyncBar sync={sync} onRefresh={refresh} busy={!!busy} /></div>
+      </div>
 
       {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-2.5 text-sm">{error}</div>}
       {msg && <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-4 py-2.5 text-sm">{msg}</div>}

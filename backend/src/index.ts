@@ -72,7 +72,7 @@ app.listen(PORT, () => {
 // Статусы FBO-поставок из Ozon — раз в 15 минут
 if (ozonConfigured()) {
   setInterval(() => { syncAllShipments().catch((e) => console.warn('[fbo sync]', e)); }, 15 * 60_000);
-  setInterval(() => { syncFbs().catch((e) => console.warn('[ozon fbs sync]', e)); }, 15 * 60_000);
+  setInterval(() => { syncFbs().catch((e) => console.warn('[ozon fbs sync]', e.message)); }, 5 * 60_000);
   // Статистика рекламы и продаж за последние дни — раз в 3 часа
   // после каждого снимка (раз в 30 мин) — решения биддера по кампаниям, где он включён
   startAdsSync(runAllBidders);

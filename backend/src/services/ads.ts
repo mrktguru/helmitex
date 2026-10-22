@@ -1,4 +1,5 @@
 import prisma from '../prisma/client';
+import { kick, swr, track } from './syncStatus';
 import { StockError } from './stock';
 import { getSetting, ozon, ozonCall, ozonConfigured, ozonGet, setSetting, sleep } from './ozon';
 import { fromMicro, perf, perfConfigured, perfReport, toMicro } from './perf';
@@ -204,7 +205,24 @@ export async function ensureData(from: string, to: string, force = false): Promi
   try { await running; } finally { running = null; }
 }
 
-// ───────────── Кампании, цены, акции (кэш в памяти) ─────────────
+/** Для страницы: если за дни периода в базе уже что-то есть — отдаём сразу, дозагрузка устаревших идёт в фоне.
+ *  Ждём только дни, которых в базе нет совсем (показать нечего). force — «Обновить»: перезапросить всё в фоне. */
+export async function ensureDataBg(from: string, to: string, force = false): Promise<void> {
+  if (force) { kick('ads-data', () => ensureData(from, to, true)); return; }
+  const kinds: Kind[] = [...(ozonConfigured() ? (['seller', 'finance'] as Kind[]) : []), ...(perfConfigured() ? (['perf'] as Kind[]) : [])];
+  const dates = dateRange(from, to).filter((d) => d <= todayMsk());
+  const have = await prisma.adSyncDay.findMany({ where: { kind: { in: kinds }, date: { in: dates.map(dt) } }, select: { kind: true, date: true } });
+  if (have.length < kinds.length * dates.length) await ensureData(from, to);
+  else kick('ads-data', () => ensureData(from, to));
+}
+
+// ───────────── Кампании, цены, акции (сохраняются в базе, обновляются в фоне) ─────────────
+
+/** «Обновить» на странице: кампании и цены — перезапросить в фоне (не ждём) */
+export function refreshAdsMeta() {
+  campaignMeta(true).catch((e) => console.warn('[ads meta]', (e as Error).message));
+  prices([], false, true).catch((e) => console.warn('[ads prices]', (e as Error).message));
+}
 
 export interface CpcCampaign {
   id: string; title: string; state: string; placement: string[]; dailyBudget: number; weeklyBudget: number; updatedAt: string | null;
@@ -217,14 +235,20 @@ interface Meta {
   searchPromo: { campaignId: string | null; state: string | null; products: { sku: string; bid: number; enabled: boolean; title: string; price: number; prevBid: number | null; prevAt: string | null }[] };
   allSku: { id: string; title: string; state: string } | null;
 }
-let metaCache: Meta | null = null;
+// Кампании: отдаём сохранённое сразу (в т. ч. после перезапуска), обновляем в фоне раз в 10 минут
+let metaSilent = false; // следующее обновление — после наших же действий: без записи «изменено в кабинете»
+const metaStore = swr<Meta>('ads-meta', 10 * 60_000, async () => { const silent = metaSilent; metaSilent = false; return fetchMeta(silent); });
 
-export function invalidateMeta() { metaCache = null; refsCache = null; }
+export function invalidateMeta() { metaStore.reset(); refsStore.reset(); }
 
 // silent — после наших же действий: снимок обновляется без записи «изменено в кабинете»
 export async function campaignMeta(refresh = false, silent = false): Promise<Meta> {
-  if (!refresh && metaCache && Date.now() - metaCache.at < 10 * 60_000) return metaCache;
   if (!perfConfigured()) return { at: Date.now(), cpcAll: [], cpc: [], searchPromo: { campaignId: null, state: null, products: [] }, allSku: null };
+  if (refresh) metaSilent = silent;
+  return metaStore.get(refresh);
+}
+
+async function fetchMeta(silent: boolean): Promise<Meta> {
   const list = (await perf<{ list: any[] }>('GET', '/api/client/campaign')).list ?? [];
   const cpcAll: CpcCampaign[] = list.filter((c) => c.advObjectType === 'SKU').map((c) => ({
     id: String(c.id), title: c.title || `Кампания ${c.id}`, state: c.state, placement: c.placement ?? [],
@@ -244,14 +268,14 @@ export async function campaignMeta(refresh = false, silent = false): Promise<Met
     if ((r.products ?? []).length < 100) break;
   }
   const all = list.find((c) => c.advObjectType === 'ALL_SKU_PROMO' && c.state !== 'CAMPAIGN_STATE_ARCHIVED');
-  metaCache = {
+  const meta: Meta = {
     at: Date.now(), cpcAll, cpc,
     searchPromo: { campaignId: sp ? String(sp.id) : null, state: sp?.state ?? null, products: spProducts },
     allSku: all ? { id: String(all.id), title: all.title, state: all.state } : null,
   };
-  refsCache = null;
-  await detectCampaignChanges(metaCache, silent).catch((e) => console.warn('[ads] snapshot', e));
-  return metaCache;
+  refsStore.reset();
+  await detectCampaignChanges(meta, silent).catch((e) => console.warn('[ads] snapshot', e));
+  return meta;
 }
 
 // ───────────── Изменения, сделанные в кабинете Ozon, — тоже в журнал ─────────────
@@ -346,14 +370,15 @@ interface PriceInfo {
   productId: number; offerId: string; price: number; oldPrice: number; minPrice: number; sellerPrice: number; netPrice: number;
   marketing: { title: string; value: number; to: string }[];
 }
-let priceCache: { at: number; by: Map<string, PriceInfo> } | null = null;
-let actionCache: { at: number; list: { id: number; title: string; type: string; dateEnd: string; products: Map<number, { actionPrice: number; maxActionPrice: number; price: number }> }[] } | null = null;
-export function invalidatePrices() { priceCache = null; actionCache = null; }
+type ActionInfo = { id: number; title: string; type: string; dateEnd: string; products: Map<number, { actionPrice: number; maxActionPrice: number; price: number }> };
 
-async function prices(offerIds: string[], silent = false): Promise<Map<string, PriceInfo>> {
-  const fresh = priceCache && Date.now() - priceCache.at < 5 * 60_000;
-  if (fresh && offerIds.every((o) => priceCache!.by.has(o))) return priceCache!.by;
-  const by = new Map<string, PriceInfo>(fresh ? priceCache!.by : []);
+// Цены всех наших товаров разом — отдаём сохранённое, обновляем в фоне раз в 5 минут
+let priceSilent = false;
+const extraOffers = new Set<string>();
+const priceStore = swr<Map<string, PriceInfo>>('ads-prices', 5 * 60_000, async () => {
+  const silent = priceSilent; priceSilent = false;
+  const offerIds = [...new Set([...(await productRefs()).map((r) => r.offerId).filter((x): x is string => !!x), ...extraOffers])];
+  const by = new Map<string, PriceInfo>();
   if (offerIds.length && ozonConfigured()) {
     const r = await seller('/v5/product/info/prices', { filter: { offer_id: offerIds, visibility: 'ALL' }, limit: 1000 });
     for (const it of r.items ?? []) {
@@ -365,18 +390,16 @@ async function prices(offerIds: string[], silent = false): Promise<Map<string, P
       });
     }
   }
-  priceCache = { at: fresh ? priceCache!.at : Date.now(), by };
-  const fetched = new Map([...by].filter(([o]) => offerIds.includes(o)));
-  await detectPriceChanges(fetched, silent).catch((e) => console.warn('[ads] price snapshot', e));
+  await detectPriceChanges(by, silent).catch((e) => console.warn('[ads] price snapshot', e));
   return by;
-}
+}, { save: (m) => [...m], load: (a) => new Map(a) });
 
-async function actions() {
-  if (actionCache && Date.now() - actionCache.at < 10 * 60_000) return actionCache.list;
+// Акции — раз в 10 минут
+const actionStore = swr<ActionInfo[]>('ads-actions', 10 * 60_000, async () => {
   const r = await ozonGet<{ result: any[] }>('/v1/actions');
-  const list: NonNullable<typeof actionCache>['list'] = [];
+  const list: ActionInfo[] = [];
   for (const a of r.result ?? []) {
-    const products = new Map<number, { actionPrice: number; maxActionPrice: number; price: number }>();
+    const products: ActionInfo['products'] = new Map();
     if (a.is_participating) {
       let lastId: number | undefined;
       for (let i = 0; i < 20; i++) {
@@ -389,17 +412,32 @@ async function actions() {
     }
     list.push({ id: Number(a.id), title: a.title, type: a.action_type, dateEnd: a.date_end, products });
   }
-  actionCache = { at: Date.now(), list };
   return list;
+}, { save: (l) => l.map((a) => ({ ...a, products: [...a.products] })), load: (l: any[]) => l.map((a) => ({ ...a, products: new Map(a.products) })) });
+
+export function invalidatePrices() { actionStore.reset(); }
+
+/** Цены товаров. fresh — дождаться свежих (после изменения цены); silent — без записи «изменено в кабинете» */
+async function prices(offerIds: string[], silent = false, fresh = false): Promise<Map<string, PriceInfo>> {
+  const unknown = offerIds.filter((o) => !extraOffers.has(o));
+  unknown.forEach((o) => extraOffers.add(o));
+  if (fresh) priceSilent = silent;
+  let by = await priceStore.get(fresh);
+  // товара ещё нет в сохранённых ценах — подтянуть сразу
+  if (!fresh && unknown.length && offerIds.some((o) => !by.has(o))) by = await priceStore.get(true);
+  return by;
 }
+
+const actions = () => actionStore.get();
 
 // ───────────── Товары и отчёт ─────────────
 
 interface ProductRef { sku: string; offerId: string | null; name: string; inCatalog: boolean }
 
-let refsCache: { at: number; list: ProductRef[] } | null = null;
-async function productRefs(): Promise<ProductRef[]> {
-  if (refsCache && Date.now() - refsCache.at < 10 * 60_000) return refsCache.list;
+// Товары раздела (каталог + SKU из кампаний) — отдаём сохранённое, обновляем в фоне
+const refsStore = swr<ProductRef[]>('ads-refs', 10 * 60_000, fetchRefs);
+function productRefs() { return refsStore.get(); }
+async function fetchRefs(): Promise<ProductRef[]> {
   const specs = await prisma.productSpec.findMany({ where: { ozonSku: { not: null }, item: { archived: false } }, include: { item: true } });
   const out = new Map<string, ProductRef>(specs.map((s) => [s.ozonSku!, { sku: s.ozonSku!, offerId: s.ozonOfferId, name: s.item.name, inCatalog: true }]));
   const meta = await campaignMeta();
@@ -418,8 +456,7 @@ async function productRefs(): Promise<ProductRef[]> {
       for (const s of skus) { const ref = out.get(s); if (ref) { ref.offerId = it.offer_id; if (!ref.inCatalog && it.name) ref.name = it.name; } }
     }
   }
-  refsCache = { at: Date.now(), list: [...out.values()] };
-  return refsCache.list;
+  return [...out.values()];
 }
 
 // Списания «оплаты за заказ» из начислений, распределённые по SKU пропорционально выручке в день
@@ -487,7 +524,7 @@ function breakEven(t: { accrSale: number; accrPayout: number; accrQty: number },
 
 export async function getProducts(from: string, to: string, force = false) {
   const [pf, pt] = prevRange(from, to);
-  await ensureData(pf, to, force);
+  await ensureDataBg(pf, to, force);
   const refs = await productRefs();
   const skus = refs.map((r) => r.sku);
   const alloc = await allocatedCharges(pf, to);
@@ -511,7 +548,7 @@ export async function getProducts(from: string, to: string, force = false) {
 
 export async function getReport(sku: string, from: string, to: string, force = false) {
   const [pf, pt] = prevRange(from, to);
-  await ensureData(pf, to, force);
+  await ensureDataBg(pf, to, force);
   const refs = await productRefs();
   const ref = refs.find((r) => r.sku === sku) ?? { sku, offerId: null, name: `SKU ${sku}`, inCatalog: false };
   const meta = await campaignMeta();
@@ -722,7 +759,7 @@ export async function setPrice(sku: string, p: { price?: number | null; oldPrice
   ].filter(Boolean).join(', ');
   await log(sku, 'PRICE', `Цена: ${parts}`, actor, { before, after: p });
   invalidatePrices();
-  await prices([ref.offerId], true).catch(() => {});
+  await prices([ref.offerId], true, true).catch(() => {});
 }
 
 export async function setActionPrice(sku: string, actionId: number, actionPrice: number, actor: Actor) {
@@ -737,7 +774,7 @@ export async function setActionPrice(sku: string, actionId: number, actionPrice:
   if (rej.length) throw new StockError(`Ozon отклонил цену в акции: ${rej.map((x: any) => x.reason).join('; ')}`);
   await log(sku, 'ACTION_PRICE', `Цена в акции «${act?.title ?? actionId}»: ${old != null ? `${old} → ` : ''}${actionPrice} ₽`, actor, { actionId, old, actionPrice });
   invalidatePrices();
-  await prices([ref.offerId], true).catch(() => {});
+  await prices([ref.offerId], true, true).catch(() => {});
 }
 
 // Снимок рекламы за текущий день: накопленные показатели каждой кампании + ставки и бюджет
@@ -815,12 +852,12 @@ export function startAdsSync(afterSnapshot?: () => Promise<void>) {
   const run = () => {
     const to = lastFullDay();
     const from = ymd(new Date(dt(to).getTime() - 6 * DAY));
-    ensureData(from, to).catch((e) => console.warn('[ads sync]', e));
+    kick('ads-data', () => ensureData(from, to));
   };
   setTimeout(run, 60_000);
   setInterval(run, 3 * 3600_000);
 
-  const snap = () => snapshotIntraday().then(() => afterSnapshot?.()).catch((e) => console.warn('[ads intraday]', e));
+  const snap = () => track('ads-intraday', async () => { await snapshotIntraday(); await afterSnapshot?.(); }).catch((e) => console.warn('[ads intraday]', e));
   const toNext = 30 * 60_000 - (Date.now() % (30 * 60_000));
   setTimeout(() => { snap(); setInterval(snap, 30 * 60_000); }, toNext);
 }

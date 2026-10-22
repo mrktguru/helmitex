@@ -5,6 +5,7 @@ import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { StockError } from '../services/stock';
 import { downloadFile } from '../services/s3';
 import { batchLabels, carriageAct, pendingLabels, fbsState, formCarriage, postingItems, ship, syncFbs, writeOffPending } from '../services/ozonFbs';
+import { kick, syncStatus } from '../services/syncStatus';
 import { ddmm, fileName, itemsToken, qtyLines, setShareText } from '../services/share';
 
 // Отправки Ozon FBS: все текущие заказы, сборка группами (кванты, пакеты), этикетки и поставки по группам
@@ -31,7 +32,12 @@ const group = async (id: string) => {
 };
 
 router.get('/ozon-fbs/state', h(async (_req, res) => { res.json(await fbsState()); }));
-router.post('/ozon-fbs/sync', h(async (req, res) => { await syncFbs(req.user!.id); res.json(await fbsState()); }));
+// Обновление из Ozon — в фоне: страница сразу показывает сохранённое, а статус обновления опрашивает отдельно
+router.get('/ozon-fbs/sync-status', h(async (_req, res) => { res.json(await syncStatus(['fbs'])); }));
+router.post('/ozon-fbs/sync', h(async (req, res) => {
+  kick('fbs', () => syncFbs(req.user!.id));
+  res.json({ started: true, sync: await syncStatus(['fbs']) });
+}));
 
 const shipBody = z.object({
   postingNumbers: z.array(z.string().max(40)).min(1).max(2000),

@@ -186,6 +186,8 @@ export const api = {
   setGtin: (itemId: string, gtin: string) => request<any>(`/stock/marking/${itemId}/gtin`, { method: 'PUT', body: JSON.stringify({ gtin }) }),
   ozonFbsState: () => request<any>('/stock/ozon-fbs/state'),
   ozonFbsSync: () => request<any>('/stock/ozon-fbs/sync', { method: 'POST' }),
+  ozonFbsSyncStatus: () => request<any[]>('/stock/ozon-fbs/sync-status'),
+  adsSyncStatus: () => request<any[]>('/ads/sync-status'),
   ozonFbsShip: (body: { postingNumbers: string[]; kind: 'quant' | 'multi' | 'manual' | 'bag'; quantTypeId?: string | null; limit?: number | null; labels: boolean; carriage: boolean; reserve?: string[] }) =>
     request<any>('/stock/ozon-fbs/ship', { method: 'POST', body: JSON.stringify(body) }),
   ozonFbsWriteOff: () => request<any>('/stock/ozon-fbs/write-off', { method: 'POST' }),
@@ -279,7 +281,7 @@ export const api = {
   // Аналитика рекламы
   adsStatus: () => request<{ seller: boolean; perf: boolean; lastDay: string }>('/ads/status'),
   adsProducts: (from: string, to: string, refresh = false) =>
-    request<{ from: string; to: string; products: any[] }>(`/ads/products?${new URLSearchParams({ from, to, ...(refresh ? { refresh: '1' } : {}) })}`),
+    request<{ from: string; to: string; products: any[]; sync: any[] }>(`/ads/products?${new URLSearchParams({ from, to, ...(refresh ? { refresh: '1' } : {}) })}`),
   adsReport: (sku: string, from: string, to: string, refresh = false) =>
     request<any>(`/ads/report/${sku}?${new URLSearchParams({ from, to, ...(refresh ? { refresh: '1' } : {}) })}`),
   adsCampaignState: (id: string, on: boolean) => request<{ ok: true }>(`/ads/campaigns/${id}/state`, { method: 'POST', body: JSON.stringify({ on }) }),
