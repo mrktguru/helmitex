@@ -323,11 +323,20 @@ export async function ship(numbers: string[], userId: string, opts: ShipOpts) {
           with: { additional_data: false },
         };
         try {
-          try { await ozon('/v4/posting/fbs/ship', body); } catch (e) {
+          // превышен лимит запросов Ozon — ждём и повторяем, а не теряем заказ из группы
+          const shipOnce = async () => {
+            for (let k = 0; ; k++) {
+              try { return await ozon('/v4/posting/fbs/ship', body); } catch (e) {
+                if (k >= 5 || !/лимит/.test((e as Error).message)) throw e;
+                await sleep(3000 * (k + 1));
+              }
+            }
+          };
+          try { await shipOnce(); } catch (e) {
             // Ozon требует ГТД/РНПТ экземпляров — заполняем «отсутствует» и собираем повторно
             if (!/EXEMPLAR_INFO_NOT_FILLED/.test((e as Error).message)) throw e;
             await fillExemplars(p.postingNumber);
-            await ozon('/v4/posting/fbs/ship', body);
+            await shipOnce();
           }
           await prisma.ozonFbsPosting.update({ where: { postingNumber: p.postingNumber }, data: { status: 'awaiting_deliver', shipError: null } });
           ok.push(p.postingNumber);
