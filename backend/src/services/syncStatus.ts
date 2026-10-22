@@ -86,6 +86,8 @@ export function swr<T>(source: string, ttlMs: number, fetcher: () => Promise<T>,
       return mem.v;
     },
     set(v: T) { mem = { at: Date.now(), v }; },
+    /** последнее известное значение (без запросов) */
+    peek(): T | null { return mem?.v ?? null; },
     reset() { mem = null; },
   };
 }

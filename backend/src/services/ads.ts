@@ -255,17 +255,31 @@ async function fetchMeta(silent: boolean): Promise<Meta> {
     dailyBudget: fromMicro(c.dailyBudget), weeklyBudget: fromMicro(c.weeklyBudget), updatedAt: c.updatedAt ?? null, products: [],
   }));
   const cpc = cpcAll.filter((c) => c.state !== 'CAMPAIGN_STATE_ARCHIVED');
+  let partial = false; // часть данных не пришла — не сравниваем с прошлым снимком (иначе ложные «изменено в кабинете»)
   for (const c of cpc) {
-    const p = await perf<{ products: any[] }>('GET', `/api/client/campaign/${c.id}/v2/products?page=1&pageSize=100`);
-    c.products = (p.products ?? []).map((x) => ({ sku: String(x.sku), bid: fromMicro(x.bid), title: x.title ?? '' }));
+    try {
+      const p = await perf<{ products: any[] }>('GET', `/api/client/campaign/${c.id}/v2/products?page=1&pageSize=100`);
+      c.products = (p.products ?? []).map((x) => ({ sku: String(x.sku), bid: fromMicro(x.bid), title: x.title ?? '' }));
+    } catch (e) {
+      console.warn(`[ads] campaign ${c.id} products:`, (e as Error).message);
+      c.products = metaStore.peek()?.cpc.find((x) => x.id === c.id)?.products ?? [];
+      partial = true;
+    }
   }
   const sp = list.find((c) => c.advObjectType === 'SEARCH_PROMO' && c.state !== 'CAMPAIGN_STATE_ARCHIVED' && c.state !== 'CAMPAIGN_STATE_INACTIVE')
     ?? list.find((c) => c.advObjectType === 'SEARCH_PROMO' && c.state !== 'CAMPAIGN_STATE_ARCHIVED');
-  const spProducts: Meta['searchPromo']['products'] = [];
-  for (let page = 1; page < 20; page++) {
-    const r = await perf<{ products: any[]; total?: string }>('POST', '/api/client/campaign/search_promo/v2/products', { page, pageSize: 100 });
-    for (const x of r.products ?? []) spProducts.push({ sku: String(x.sku), bid: num(x.bid), enabled: !!x.searchPromoStatus, title: x.title ?? '', price: num(x.price), prevBid: x.previousBid ? num(x.previousBid.bid) : null, prevAt: x.previousBid?.updatedAt ?? null });
-    if ((r.products ?? []).length < 100) break;
+  let spProducts: Meta['searchPromo']['products'] = [];
+  try {
+    for (let page = 1; page < 20; page++) {
+      const r = await perf<{ products: any[]; total?: string }>('POST', '/api/client/campaign/search_promo/v2/products', { page, pageSize: 100 });
+      for (const x of r.products ?? []) spProducts.push({ sku: String(x.sku), bid: num(x.bid), enabled: !!x.searchPromoStatus, title: x.title ?? '', price: num(x.price), prevBid: x.previousBid ? num(x.previousBid.bid) : null, prevAt: x.previousBid?.updatedAt ?? null });
+      if ((r.products ?? []).length < 100) break;
+    }
+  } catch (e) {
+    // сбой у Ozon в поисковом продвижении не должен ронять кампании — берём последнее известное
+    console.warn('[ads] search promo:', (e as Error).message);
+    spProducts = metaStore.peek()?.searchPromo.products ?? [];
+    partial = true;
   }
   const all = list.find((c) => c.advObjectType === 'ALL_SKU_PROMO' && c.state !== 'CAMPAIGN_STATE_ARCHIVED');
   const meta: Meta = {
@@ -274,7 +288,7 @@ async function fetchMeta(silent: boolean): Promise<Meta> {
     allSku: all ? { id: String(all.id), title: all.title, state: all.state } : null,
   };
   refsStore.reset();
-  await detectCampaignChanges(meta, silent).catch((e) => console.warn('[ads] snapshot', e));
+  if (!partial) await detectCampaignChanges(meta, silent).catch((e) => console.warn('[ads] snapshot', e));
   return meta;
 }
 
