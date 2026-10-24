@@ -157,33 +157,48 @@ function clusterWarehouses(s: Shipment, storageWarehouseId?: string | null) {
 }
 
 // 3. Свободные тайм-слоты (на 28 дней вперёд)
-export async function getTimeslots(id: string, storageWarehouseId?: string | null) {
-  const s = await load(id);
-  expect(s, 'OZON_DRAFT');
-  draftAlive(s);
-  const from = new Date();
-  const to = new Date(Date.now() + 27 * 86400_000);
-  const ymd = (d: Date) => d.toISOString().slice(0, 10);
+// Слоты Ozon на период. Берём время «сейчас» по часам Ozon (current_time_in_timezone) и убираем слоты,
+// до начала которых меньше LEAD — забронировать их Ozon уже не даст.
+const LEAD_MIN = 30;
+async function fetchSlots(s: Shipment, id: string, storageWarehouseId: string | null | undefined, from: string, to: string) {
   const r = await ozon('/v2/draft/timeslot/info', {
-    draft_id: Number(s.ozonDraftId), date_from: ymd(from), date_to: ymd(to),
+    draft_id: Number(s.ozonDraftId), date_from: from, date_to: to,
     supply_type: s.supplyType, selected_cluster_warehouses: clusterWarehouses(s, storageWarehouseId),
   }, id);
   if (r.error_reason && r.error_reason !== 'UNSPECIFIED') throw new StockError(`Ozon: ${r.error_reason}`);
   const t = r.result?.drop_off_warehouse_timeslots;
+  const now: string | null = t?.current_time_in_timezone ?? null;
+  const cutoff = now ? new Date(Date.parse(now + 'Z') + LEAD_MIN * 60_000).toISOString().slice(0, 19) : null;
   return {
     timezone: t?.warehouse_timezone ?? null,
+    now,
     days: (t?.days ?? []).map((d: any) => ({
       date: d.date_in_timezone,
-      slots: (d.timeslots ?? []).map((x: any) => ({ from: x.from_in_timezone, to: x.to_in_timezone })),
+      slots: (d.timeslots ?? []).map((x: any) => ({ from: x.from_in_timezone, to: x.to_in_timezone }))
+        .filter((x: { from: string }) => !cutoff || x.from > cutoff),
     })).filter((d: any) => d.slots.length),
   };
 }
 
-// 4. Заявка по черновику с выбранным слотом
+export async function getTimeslots(id: string, storageWarehouseId?: string | null) {
+  const s = await load(id);
+  expect(s, 'OZON_DRAFT');
+  draftAlive(s);
+  const ymd = (d: Date) => d.toISOString().slice(0, 10);
+  const r = await fetchSlots(s, id, storageWarehouseId, ymd(new Date()), ymd(new Date(Date.now() + 27 * 86400_000)));
+  return { ...r, fetchedAt: new Date().toISOString() };
+}
+
 export async function book(id: string, opt: { from: string; to: string; storageWarehouseId?: string | null; storageName?: string | null }) {
   const s = await load(id);
   expect(s, 'OZON_DRAFT');
   draftAlive(s);
+  // Перед бронированием — свежая проверка у Ozon: слот ещё есть?
+  const day = opt.from.slice(0, 10);
+  const fresh = await fetchSlots(s, id, opt.storageWarehouseId, day, day);
+  if (!fresh.days.some((d: any) => d.slots.some((x: any) => x.from === opt.from))) {
+    throw new StockError(`Слот ${day.split('-').reverse().slice(0, 2).join('.')} ${opt.from.slice(11, 16)} уже недоступен у Ozon — список слотов обновлён, выберите другой`);
+  }
   try {
     const r = await ozon('/v2/draft/supply/create', {
       draft_id: Number(s.ozonDraftId), supply_type: s.supplyType,

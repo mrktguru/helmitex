@@ -46,7 +46,9 @@ export default function StockQuantAssemble() {
   const effK = parsed ? parsed.quants.length : k;
 
   const maxByStock = src && n ? Math.floor(src.qty / n) : null;
-  const maxByCodes = !imported && qt?.trackCz && qt.freeCodes != null ? Math.floor(qt.freeCodes / n) : null;
+  // новые коды ЧЗ нужны только для «без ЧЗ»; у «с ЧЗ» коды уже на банках
+  const needCodes = !imported && !!qt?.trackCz && src?.state !== 'LABELED';
+  const maxByCodes = needCodes && qt.freeCodes != null ? Math.floor(qt.freeCodes / n) : null;
 
   async function submit() {
     setError('');
@@ -136,7 +138,7 @@ export default function StockQuantAssemble() {
       {error && <p className="text-sm text-red-600">{error}</p>}
       <button disabled={busy || !src || effK < 1 || (maxByStock != null && effK > maxByStock) || (maxByCodes != null && effK > maxByCodes)}
         onClick={submit} className={btnPrimary}>
-        {busy ? 'Формирую…' : imported ? `Внести ${effK} кв.` : `Собрать ${effK} кв. и выдать коды ЧЗ`}
+        {busy ? 'Формирую…' : imported ? `Внести ${effK} кв.` : needCodes ? `Собрать ${effK} кв. и выдать коды ЧЗ` : `Собрать ${effK} кв.`}
       </button>
       {!imported && qt?.trackCz && (
         <p className="text-xs text-slate-500">На каждый квант выдаётся {n} кодов ЧЗ из проекта «{qt.project?.name}». После проведения появятся PDF: этикетки ЧЗ по квантам подряд и этикетки квантов.</p>

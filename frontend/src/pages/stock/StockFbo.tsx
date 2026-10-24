@@ -18,7 +18,7 @@ export default function StockFbo() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [storage, setStorage] = useState<{ id: string; name: string } | null>(null);
-  const [slots, setSlots] = useState<{ timezone: string | null; days: { date: string; slots: { from: string; to: string }[] }[] } | null>(null);
+  const [slots, setSlots] = useState<{ timezone: string | null; fetchedAt?: string; days: { date: string; slots: { from: string; to: string }[] }[] } | null>(null);
   const [slot, setSlot] = useState<{ from: string; to: string } | null>(null);
   const [log, setLog] = useState<any[] | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
@@ -43,10 +43,22 @@ export default function StockFbo() {
   const draftExpired = draftAgeMin != null && draftAgeMin > 29;
   const warehouses: any[] = s?.draftWarehouses ?? [];
 
-  async function loadSlots(storageId?: string) {
-    setSlots(null); setSlot(null);
-    await run('slots', async () => { setSlots(await api.fboTimeslots(id!, storageId)); });
+  async function loadSlots(storageId?: string, quiet = false) {
+    if (!quiet) { setSlots(null); setSlot(null); }
+    const get = async () => {
+      const r = await api.fboTimeslots(id!, storageId);
+      setSlots(r);
+      // выбранный слот пропал у Ozon — снять выбор
+      setSlot((cur) => cur && r.days.some((d: any) => d.slots.some((x: any) => x.from === cur.from)) ? cur : null);
+    };
+    if (quiet) await get().catch(() => {}); else await run('slots', get);
   }
+  // Слоты меняются — пока открыт выбор, обновляем список у Ozon каждые 2 минуты
+  useEffect(() => {
+    if (s?.status !== 'OZON_DRAFT' || draftExpired || !slots) return;
+    const t = window.setInterval(() => loadSlots(storage?.id, true), 120_000);
+    return () => window.clearInterval(t);
+  }, [s?.status, draftExpired, !!slots, storage?.id]);
   // Для кросс-докинга слоты сразу, для прямой — после выбора склада
   useEffect(() => {
     if (s?.status === 'OZON_DRAFT' && s.supplyType === 'CROSSDOCK' && !draftExpired && !slots) loadSlots();
@@ -171,10 +183,19 @@ export default function StockFbo() {
               ))}
             </div>
           ))}
-          {slots?.timezone && <p className="text-xs text-slate-500">Время местное для пункта отгрузки ({slots.timezone}).</p>}
+          {slots && <p className="text-xs text-slate-500 flex flex-wrap gap-x-3">
+            {slots.timezone && <span>Время местное для пункта отгрузки ({slots.timezone}).</span>}
+            {slots.fetchedAt && <span>Слоты от Ozon на {new Date(slots.fetchedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}, обновляются каждые 2 мин.</span>}
+            <button disabled={!!busy} onClick={() => loadSlots(storage?.id)} className="text-brand-700 hover:underline">↻ обновить слоты</button>
+          </p>}
           <div className="flex gap-2">
             <button disabled={!slot || !!busy || (s.supplyType === 'DIRECT' && !storage)}
-              onClick={() => run('book', () => api.fboBook(id!, { from: slot!.from, to: slot!.to, storageWarehouseId: storage?.id ?? null, storageName: storage?.name ?? null }))}
+              onClick={() => run('book', async () => {
+                try { return await api.fboBook(id!, { from: slot!.from, to: slot!.to, storageWarehouseId: storage?.id ?? null, storageName: storage?.name ?? null }); } catch (e) {
+                  loadSlots(storage?.id, true); // Ozon отказал — показать актуальные слоты
+                  throw e;
+                }
+              })}
               className={btnPrimary}>
               {busy === 'book' ? 'Создаю заявку в Ozon…' : slot ? `Создать заявку на ${dayLabel(slot.from)} ${hm(slot.from)}` : 'Выберите слот'}
             </button>

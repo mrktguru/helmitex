@@ -142,8 +142,10 @@ export interface OzonDefaults {
 }
 
 export const OZON_DEFAULTS_KEY = 'ozon.defaults';
+// Пункт отгрузки по умолчанию — РОЩИНО_31 (все кросс-докинг поставки идут через него), пока не выбран другой
+export const DEFAULT_DROPOFF = { dropOffWarehouseId: '1020005000463079', dropOffName: 'РОЩИНО_31', dropOffType: 'DELIVERY_POINT' };
 export const defaultOzonSettings: OzonDefaults = {
-  supplyType: 'CROSSDOCK', clusterId: null, clusterName: null, dropOffWarehouseId: null, dropOffName: null, dropOffType: null,
+  supplyType: 'CROSSDOCK', clusterId: null, clusterName: null, ...DEFAULT_DROPOFF,
 };
 
 // Человекочитаемые статусы заявки Ozon

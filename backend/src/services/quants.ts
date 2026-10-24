@@ -125,10 +125,9 @@ export async function postQuant(tx: Tx, docId: string, importCodes?: string[][])
       codeIds = issued.codeIds;
       jobs.push({ outputBatchId, projectId: qt.project!.id, codeIds });
     } else if (reuseCz) {
+      // Коды уже на банках. Если портал их знает (партию маркировали здесь) — привязываем к кванту;
+      // если нет (например, остатки «с ЧЗ» введены начальными) — квант собирается без списка кодов
       codeIds = await looseCodes(tx, lot.id, n);
-      if (codeIds.length < n) {
-        throw new StockError(`У партии ${lot.number} на банках «с ЧЗ» известно ${codeIds.length} кодов, а в квант нужно ${n}. Промаркируйте партию в разделе «Маркировка».`);
-      }
     }
     const quant = await tx.quant.create({
       data: {

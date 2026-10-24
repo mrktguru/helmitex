@@ -4,7 +4,7 @@ import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { StockError } from '../services/stock';
 import {
-  OZON_DEFAULTS_KEY, OZON_STATE_LABEL, OzonDefaults, defaultOzonSettings, getSetting, ozon, ozonConfigured, setSetting,
+  DEFAULT_DROPOFF, OZON_DEFAULTS_KEY, OZON_STATE_LABEL, OzonDefaults, defaultOzonSettings, getSetting, ozon, ozonConfigured, setSetting,
 } from '../services/ozon';
 import { book, cancelShipment, createOzonDraft, createShipment, getTimeslots, makeLabels, setCargoes, ship, syncAllShipments, syncShipment, syncSkus } from '../services/fbo';
 import { downloadFile } from '../services/s3';
@@ -39,7 +39,9 @@ async function full(id: string) {
 // ───────────── Настройки и справочники Ozon ─────────────
 
 router.get('/ozon/settings', h(async (_req, res) => {
-  res.json({ configured: ozonConfigured(), defaults: await getSetting<OzonDefaults>(OZON_DEFAULTS_KEY, defaultOzonSettings) });
+  const d = await getSetting<OzonDefaults>(OZON_DEFAULTS_KEY, defaultOzonSettings);
+  // в сохранённых настройках нет пункта отгрузки — подставляем РОЩИНО_31
+  res.json({ configured: ozonConfigured(), defaults: d.dropOffWarehouseId ? d : { ...d, ...DEFAULT_DROPOFF } });
 }));
 
 const settingsSchema = z.object({
