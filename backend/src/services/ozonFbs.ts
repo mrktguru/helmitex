@@ -48,7 +48,8 @@ async function pullFbs(userId: string | undefined, full: boolean): Promise<numbe
   }
   await writeOffPassed(userId);
   await markShipped();
-  await refreshCarriages().catch((e) => console.warn('[ozon fbs carriages]', e));
+  // где отправления — видно по их подстатусам; статусы самих поставок обновляем раз в час, с полным списком
+  if (full) await refreshCarriages().catch((e) => console.warn('[ozon fbs carriages]', e));
   return n;
 }
 
