@@ -91,17 +91,16 @@ export async function tubeLabelsPdf(codeIds: string[], override?: TubeLabelVars)
     const top = dmY + dm;
     page.drawImage(eacImg, { x: colX + (colW - eW) / 2, y: top - eH, width: eW, height: eH });
 
-    let y = top - eH - 1.6 * MM;
-    const line = (label: string, value: string | null | undefined) => {
-      if (!value) return;
+    // Тексты прижаты к низу: нижний край даты — по нижнему краю ЧЗ, выше «Годен до», партия, «Партия»
+    const rows: [string, string][] = ([['Партия', vars.lot], ['Годен до', vars.expiry]] as [string, string | null | undefined][])
+      .filter((r): r is [string, string] => !!r[1]);
+    let y = dmY;
+    for (const [label, value] of [...rows].reverse()) {
+      page.drawText(value, { x: colX, y, size: fit(value, bold, 6.5, colW), font: bold, color: black });
+      y += 2.2 * MM;
       page.drawText(label, { x: colX, y, size: 4, font: regular, color: black });
-      y -= 2.2 * MM;
-      const s = fit(value, bold, 6.5, colW);
-      page.drawText(value, { x: colX, y, size: s, font: bold, color: black });
-      y -= 2.3 * MM;
-    };
-    line('Партия', vars.lot);
-    line('Годен до', vars.expiry);
+      y += 2.3 * MM;
+    }
   }
   if (!doc.getPageCount()) throw new Error('Нет кодов для этикеток');
   return Buffer.from(await doc.save());
