@@ -669,6 +669,17 @@ model OzonFbsPosting {
   @@index([batchId])
 }
 
+// Код ЧЗ (уже напечатанный маркировкой на партию), закреплённый за отгрузкой FBS — для малой этикетки на тубу.
+// Закреплённый код не уходит ни в другую отгрузку, ни в квант, ни в WB.
+model ShipmentCode {
+  id        String   @id @default(uuid())
+  docId     String // документ списания «Отгрузка Ozon FBS»
+  czCodeId  String   @unique
+  createdAt DateTime @default(now())
+
+  @@index([docId])
+}
+
 // Квант сборки FBS: отправления на 42 шт., собранные вместе, и их этикетки одним PDF
 model OzonFbsBatch {
   id             String           @id @default(uuid())

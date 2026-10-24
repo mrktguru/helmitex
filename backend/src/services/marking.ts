@@ -95,6 +95,7 @@ export async function looseCodes(tx: Tx, lotId: string, n: number): Promise<stri
       AND (b."lotId" = ${lotId} OR q."lotId" = ${lotId})
       AND NOT EXISTS (SELECT 1 FROM "QuantCode" qc WHERE qc."czCodeId" = c.id AND qc.active)
       AND NOT EXISTS (SELECT 1 FROM "WbOrder" w WHERE w."czCodeId" = c.id)
+      AND NOT EXISTS (SELECT 1 FROM "ShipmentCode" sc WHERE sc."czCodeId" = c.id)
     ORDER BY c."usedAt" ASC, c."pageIndex" ASC
     LIMIT ${n}
     FOR UPDATE OF c`;

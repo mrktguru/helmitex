@@ -3,7 +3,7 @@ import prisma from '../prisma/client';
 import { ozon, ozonCall, ozonPdf, ozonGetFile } from './ozon';
 import { allocateFefo, consume, nextDocNumber, StockError } from './stock';
 import { uploadFile } from './s3';
-import { lotLabelVars } from './marking';
+import { looseCodes, lotLabelVars } from './marking';
 import { syncStatus, track } from './syncStatus';
 
 // Отправки Ozon FBS: зеркало отправлений, сборка группами (кванты, пакеты) со списанием товара и упаковки, этикетки 58×40, поставки.
@@ -182,8 +182,10 @@ export async function fbsState() {
   // сколько кодов ЧЗ на тубы уже выдано по группе (тиражи привязаны к документам списания)
   const docOfBatch = new Map<string, Set<string>>();
   for (const p of postings) if (p.batchId && p.stockDocId) docOfBatch.set(p.batchId, (docOfBatch.get(p.batchId) ?? new Set()).add(p.stockDocId));
-  const czByDoc = new Map((await prisma.outputBatch.groupBy({ by: ['docId'], where: { docId: { in: [...new Set([...docOfBatch.values()].flatMap((x) => [...x]))] } }, _sum: { count: true } }))
+  const allDocs = [...new Set([...docOfBatch.values()].flatMap((x) => [...x]))];
+  const czByDoc = new Map((await prisma.outputBatch.groupBy({ by: ['docId'], where: { docId: { in: allDocs } }, _sum: { count: true } }))
     .map((g) => [g.docId!, g._sum.count ?? 0]));
+  for (const g of await prisma.shipmentCode.groupBy({ by: ['docId'], where: { docId: { in: allDocs } }, _count: true })) czByDoc.set(g.docId, (czByDoc.get(g.docId) ?? 0) + g._count);
   const notWritten = postings.filter((p) => !p.stockDocId && p.shipDay >= WRITE_OFF_SINCE && (p.status === 'awaiting_deliver' || PASSED.includes(p.status))).length;
   return {
     now: new Date().toISOString(),
@@ -547,24 +549,37 @@ export async function pendingLabels(batchId: string) {
 }
 
 // ───────────── ЧЗ на тубы группы ─────────────
-// Ozon FBS коды ЧЗ не требует, но на тубе код должен быть. Тубы, списанные из «с ЧЗ», уже с кодом;
-// на списанные из «без ЧЗ» коды выдаются из пула товара — один раз, тираж привязан к документу списания
-// (OutputBatch.docId), партия и срок — из партии списания. Повторная печать — те же коды.
+// Ozon FBS коды ЧЗ не требует, но на тубе код должен быть. Малая этикетка 30×20 печатается для туб группы:
+//  • «с ЧЗ» из партий, промаркированных в портале, — закрепляем за отгрузкой коды, уже выданные на партию при маркировке
+//    (ShipmentCode; те же коды больше никуда не уйдут). Начальные остатки «с ЧЗ» кодов в портале не имеют — пропускаем;
+//  • «без ЧЗ» — выдаём новые коды из пула товара (тираж привязан к документу списания).
+// Только для неотправленных групп; повторная печать — те же коды.
 
-export async function groupCzCodes(batchId: string): Promise<{ codeIds: string[]; labeled: number }> {
+export async function groupCzCodes(batchId: string): Promise<{ codeIds: string[]; noCodes: number }> {
   const b = await prisma.ozonFbsBatch.findUnique({ where: { id: batchId } });
   if (!b) throw new StockError('Группа не найдена');
   const docIds = [...new Set((await prisma.ozonFbsPosting.findMany({ where: { batchId, stockDocId: { not: null } }, select: { stockDocId: true } })).map((p) => p.stockDocId!))];
-  if (!docIds.length) throw new StockError(`Группа №${b.no} ещё не списана со склада — ЧЗ выдаётся на списанные тубы`);
+  if (!docIds.length) throw new StockError(`Группа №${b.no} ещё не списана со склада — ЧЗ печатается на списанные тубы`);
   const lines = await prisma.stockDocLine.findMany({ where: { docId: { in: docIds }, qty: { lt: 0 }, state: { in: ['LABELED', 'UNLABELED'] } }, include: { item: { include: { spec: true } } } });
-  const labeled = lines.filter((l) => l.state === 'LABELED').reduce((t, l) => t - l.qty, 0);
 
   return prisma.$transaction(async (tx) => {
+    const fixed = await tx.shipmentCode.findMany({ where: { docId: { in: docIds } }, orderBy: { createdAt: 'asc' } });
     const issued = await tx.outputBatch.findMany({ where: { docId: { in: docIds } }, include: { codes: { select: { id: true, pageIndex: true }, orderBy: { pageIndex: 'asc' } } }, orderBy: { createdAt: 'asc' } });
-    if (issued.length) return { codeIds: issued.flatMap((o) => o.codes.map((c) => c.id)), labeled };
+    if (fixed.length || issued.length) return { codeIds: [...fixed.map((f) => f.czCodeId), ...issued.flatMap((o) => o.codes.map((c) => c.id))], noCodes: 0 };
+    if (b.shippedAt) throw new StockError(`Группа №${b.no} уже отправлена — ЧЗ на неё не выдаём`);
+
     const codeIds: string[] = [];
-    for (const l of lines.filter((x) => x.state === 'UNLABELED' && x.item.spec?.requiresCz)) {
+    let noCodes = 0;
+    for (const l of lines.filter((x) => x.item.spec?.requiresCz)) {
       const n = Math.round(-l.qty);
+      if (l.state === 'LABELED') {
+        // коды, напечатанные на эту партию маркировкой и ещё не ушедшие в квант / WB / другую отгрузку
+        const ids = l.lotId ? await looseCodes(tx, l.lotId, n) : [];
+        noCodes += n - ids.length;
+        if (ids.length) await tx.shipmentCode.createMany({ data: ids.map((czCodeId) => ({ docId: l.docId, czCodeId })) });
+        codeIds.push(...ids);
+        continue;
+      }
       const projectId = l.item.spec!.czProjectId;
       if (!projectId) throw new StockError(`Для «${l.item.name}» не выбран проект ЧЗ в карточке SKU`);
       const codes = await tx.$queryRaw<{ id: string; pageIndex: number }[]>`
@@ -581,7 +596,7 @@ export async function groupCzCodes(batchId: string): Promise<{ codeIds: string[]
       await tx.czCode.updateMany({ where: { id: { in: codes.map((c) => c.id) } }, data: { status: 'USED', usedAt: new Date(), outputBatchId: ob.id } });
       codeIds.push(...codes.map((c) => c.id));
     }
-    return { codeIds, labeled };
+    return { codeIds, noCodes };
   }, { timeout: 60_000 });
 }
 
