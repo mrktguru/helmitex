@@ -592,7 +592,11 @@ async function openCarriage(method: string): Promise<string> {
 
 /** Статусы поставок из Ozon (сформирована, отгружена…) — для групп последних дней */
 async function refreshCarriages() {
-  const bs = await prisma.ozonFbsBatch.findMany({ where: { carriageId: { not: null }, createdAt: { gte: new Date(Date.now() - 5 * 86400_000) } }, select: { carriageId: true } });
+  // закрытые и отменённые поставки уже не меняются — их не перезапрашиваем
+  const bs = await prisma.ozonFbsBatch.findMany({
+    where: { carriageId: { not: null }, createdAt: { gte: new Date(Date.now() - 5 * 86400_000) }, NOT: { carriageStatus: { in: ['closed', 'cancelled'] } } },
+    select: { carriageId: true },
+  });
   for (const id of [...new Set(bs.map((b) => b.carriageId!))]) {
     const g = await ozonCall<any>('POST', '/v1/carriage/get', { carriage_id: Number(id) }, undefined, false).catch(() => null);
     if (g?.status) await prisma.ozonFbsBatch.updateMany({ where: { carriageId: id }, data: { carriageStatus: g.status } });
