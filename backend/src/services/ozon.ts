@@ -25,18 +25,47 @@ export async function ozonGet<T = any>(path: string): Promise<T> {
   return ozonCall<T>('GET', path, undefined);
 }
 
+// ───── Ограничение скорости: у Ozon лимит запросов В СЕКУНДУ на кабинет (и строже — на аналитику).
+// Все процессы портала (синхронизация, сборка, биддер, реклама) идут через одну очередь, чтобы не мешать друг другу.
+const sleepMs = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const gates = new Map<string, Promise<void>>();
+function gate(bucket: string, intervalMs: number): Promise<void> {
+  const prev = gates.get(bucket) ?? Promise.resolve();
+  const next = prev.then(() => sleepMs(intervalMs));
+  gates.set(bucket, next);
+  return prev; // стартуем, когда освободилось место; следующий — через intervalMs
+}
+const bucketOf = (path: string): [string, number] => path.startsWith('/v1/analytics/') || path.startsWith('/v2/analytics/') ? ['analytics', 1200] : ['seller', 120];
+// повторять можно чтение; изменения (сборка, отгрузка) — только при 429: Ozon его не выполнял
+const READ = /\/(list|get|info|stocks|data|count|status|prices|by-day)(\/|$)/;
+
+// Сколько запросов к Ozon за последний час — для проверки нагрузки
+const calls: number[] = [];
+export function callsLastHour() { const t = Date.now() - 3600_000; while (calls.length && calls[0] < t) calls.shift(); return calls.length; }
+
 // log = false — для объёмных ответов аналитики и начислений: в журнал пишутся только ошибки
 export async function ozonCall<T>(method: 'GET' | 'POST', path: string, body: unknown, shipmentId?: string, log = true): Promise<T> {
-  const t0 = Date.now();
   let status = 0;
   let data: any = null;
-  try {
-    const res = await fetch(BASE + path, { method, headers: headers(), body: method === 'POST' ? JSON.stringify(body) : undefined });
-    status = res.status;
-    const text = await res.text();
-    try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text.slice(0, 2000) }; }
-  } catch (e: any) {
-    data = { networkError: String(e?.message ?? e) };
+  let t0 = Date.now();
+  const [bucket, interval] = bucketOf(path);
+  for (let attempt = 0; ; attempt++) {
+    await gate('all', 120);
+    if (bucket !== 'seller') await gate(bucket, interval);
+    calls.push(Date.now());
+    t0 = Date.now();
+    status = 0; data = null;
+    try {
+      const res = await fetch(BASE + path, { method, headers: headers(), body: method === 'POST' ? JSON.stringify(body) : undefined });
+      status = res.status;
+      const text = await res.text();
+      try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text.slice(0, 2000) }; }
+    } catch (e: any) {
+      data = { networkError: String(e?.message ?? e) };
+    }
+    const retry = status === 429 || ((status === 0 || status >= 500) && (method === 'GET' || READ.test(path)));
+    if (!retry || attempt >= 3) break;
+    await sleepMs(1500 * 2 ** attempt + Math.random() * 500);
   }
   if (log || status < 200 || status >= 300) {
     await prisma.ozonApiLog.create({

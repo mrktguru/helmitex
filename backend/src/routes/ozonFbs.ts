@@ -4,8 +4,9 @@ import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { StockError } from '../services/stock';
 import { downloadFile } from '../services/s3';
+import { callsLastHour } from '../services/ozon';
 import { batchLabels, carriageAct, pendingLabels, fbsState, formCarriage, postingItems, ship, syncFbs, writeOffPending } from '../services/ozonFbs';
-import { kick, syncStatus } from '../services/syncStatus';
+import { syncStatus } from '../services/syncStatus';
 import { ddmm, fileName, itemsToken, qtyLines, setShareText } from '../services/share';
 
 // Отправки Ozon FBS: все текущие заказы, сборка группами (кванты, пакеты), этикетки и поставки по группам
@@ -33,9 +34,10 @@ const group = async (id: string) => {
 
 router.get('/ozon-fbs/state', h(async (_req, res) => { res.json(await fbsState()); }));
 // Обновление из Ozon — в фоне: страница сразу показывает сохранённое, а статус обновления опрашивает отдельно
+router.get('/ozon-fbs/api-load', h(async (_req, res) => { res.json({ sellerCallsLastHour: callsLastHour() }); }));
 router.get('/ozon-fbs/sync-status', h(async (_req, res) => { res.json(await syncStatus(['fbs'])); }));
 router.post('/ozon-fbs/sync', h(async (req, res) => {
-  kick('fbs', () => syncFbs(req.user!.id));
+  syncFbs(req.user!.id).catch((e) => console.warn('[ozon fbs sync]', (e as Error).message)); // сама учитывается в статусе
   res.json({ started: true, sync: await syncStatus(['fbs']) });
 }));
 

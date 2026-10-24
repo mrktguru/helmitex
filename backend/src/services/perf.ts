@@ -39,6 +39,7 @@ export async function perf<T = any>(method: Method, path: string, body?: unknown
     const text = await res.text();
     if (res.status === 401 && attempt === 0) { token = null; continue; }
     if (res.status === 429 && attempt < 4) { await sleep(3000 * (attempt + 1)); continue; }
+    if (res.status >= 500 && method === 'GET' && attempt < 2) { await sleep(2000 * (attempt + 1)); continue; }
     let data: any = null;
     if (!raw) { try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text.slice(0, 2000) }; } }
     if (method !== 'GET' || !res.ok) {

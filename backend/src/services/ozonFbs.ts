@@ -15,20 +15,53 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ───────────── Синхронизация ─────────────
 
-/** Синхронизация с Ozon — одна за раз (повторный вызов ждёт идущую), статус виден на странице */
-export function syncFbs(userId?: string): Promise<number> {
-  return track('fbs', () => pullFbs(userId));
+const ACTIVE = ['awaiting_packaging', 'awaiting_deliver'];
+let lastFull = 0;
+
+/** Синхронизация с Ozon — одна за раз (повторный вызов ждёт идущую), статус виден на странице.
+ *  Обычно — только активные отправления (ждут сборки/отгрузки): втрое меньше запросов; полный список за 14 дней — раз в час. */
+export function syncFbs(userId?: string, full = false): Promise<number> {
+  return track('fbs', () => pullFbs(userId, full || Date.now() - lastFull > 60 * 60_000));
 }
 
-async function pullFbs(userId?: string): Promise<number> {
-  const since = new Date(Date.now() - 14 * 86400_000).toISOString();
+async function pullFbs(userId: string | undefined, full: boolean): Promise<number> {
+  const since = new Date(Date.now() - 14 * 86400_000);
+  const seen = new Set<string>();
+  let n = await pullList(since, full ? {} : { statuses: ACTIVE }, seen);
+  if (full) lastFull = Date.now();
+  else {
+    // пропавшие из активных — отменены или переданы в Ozon: немного — уточняем по одному, много — полный список
+    const gone = await prisma.ozonFbsPosting.findMany({
+      where: { status: { in: ACTIVE }, inProcessAt: { gte: since }, postingNumber: { notIn: [...seen] } }, select: { postingNumber: true },
+    });
+    if (gone.length > 60) { n += await pullList(since, {}, seen); lastFull = Date.now(); }
+    for (const g of gone.length <= 60 ? gone : []) {
+      const r: any = await ozonCall('POST', '/v3/posting/fbs/get', { posting_number: g.postingNumber }, undefined, false).catch(() => null);
+      const p = r?.result;
+      if (!p?.status) continue;
+      await prisma.ozonFbsPosting.update({
+        where: { postingNumber: g.postingNumber },
+        data: { status: p.status, substatus: p.substatus ?? null, deliveringAt: p.delivering_date ? new Date(p.delivering_date) : null },
+      });
+      n++;
+    }
+  }
+  await writeOffPassed(userId);
+  await markShipped();
+  await refreshCarriages().catch((e) => console.warn('[ozon fbs carriages]', e));
+  return n;
+}
+
+/** Страницы списка отправлений (v4: до 100 за запрос, по cursor); пишет только новые и изменившиеся */
+async function pullList(sinceDate: Date, extra: object, seen: Set<string>): Promise<number> {
+  const since = sinceDate.toISOString();
   const to = new Date(Date.now() + 86400_000).toISOString();
   let cursor: string | null = null, n = 0;
   for (let page = 0; page < 500; page++) {
     // v3 Ozon отключил («obsolete method»); v4 — до 100 за запрос, страницы по cursor, ответ без обёртки result.
     // Объёмный ответ — в журнал API только ошибки
     const r: any = await ozonCall('POST', '/v4/posting/fbs/list', {
-      dir: 'ASC', filter: { since, to }, limit: 100, ...(cursor ? { cursor } : {}), with: { analytics_data: false, financial_data: false },
+      dir: 'ASC', filter: { since, to, ...extra }, limit: 100, ...(cursor ? { cursor } : {}), with: { analytics_data: false, financial_data: false },
     }, undefined, false);
     const postings: any[] = r.postings ?? r.result?.postings ?? [];
     // пишем только новые и изменившиеся — из тысяч отправлений за раз меняются десятки
@@ -37,6 +70,7 @@ async function pullFbs(userId?: string): Promise<number> {
       select: { postingNumber: true, status: true, substatus: true, shipmentDate: true, deliveringAt: true, deliveryMethodId: true, products: true },
     })).map((k) => [k.postingNumber, k]));
     for (const p of postings) {
+      seen.add(p.posting_number);
       const products: FbsProduct[] = (p.products ?? []).map((x: any) => ({
         offerId: x.offer_id, sku: String(x.sku), name: x.name, qty: x.quantity, price: Math.round(Number(x.price) * 100) / 100,
       }));
@@ -60,9 +94,6 @@ async function pullFbs(userId?: string): Promise<number> {
     cursor = (r.has_next ?? r.result?.has_next) ? (r.cursor ?? null) : null;
     if (!cursor || postings.length === 0) break;
   }
-  await writeOffPassed(userId);
-  await markShipped();
-  await refreshCarriages().catch((e) => console.warn('[ozon fbs carriages]', e));
   return n;
 }
 

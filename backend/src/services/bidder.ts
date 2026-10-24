@@ -297,8 +297,13 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
 export async function runAllBidders() {
   const list = await prisma.adBidder.findMany({ where: { enabled: true } });
   for (const b of list) {
+    // Ozon не принял ставку — не повторять ту же попытку каждые 30 минут: пауза 6 часов (одна запись в журнал вместо сотни)
+    const last = await prisma.adBidderLog.findFirst({ where: { campaignId: b.campaignId }, orderBy: { at: 'desc' } });
+    if (last?.action === 'ERROR' && /диапазон/.test(last.reason) && Date.now() - last.at.getTime() < 6 * 3600_000) continue;
     try { await runBidder(b.campaignId); } catch (e) {
-      await prisma.adBidderLog.create({ data: { campaignId: b.campaignId, action: 'ERROR', reason: (e as Error).message.slice(0, 500) } }).catch(() => {});
+      const msg = (e as Error).message;
+      const reason = /диапазон/.test(msg) ? `${msg.slice(0, 400)} — Ozon не принимает такую ставку; следующая попытка через 6 часов` : msg.slice(0, 500);
+      await prisma.adBidderLog.create({ data: { campaignId: b.campaignId, action: 'ERROR', reason } }).catch(() => {});
     }
   }
 }
