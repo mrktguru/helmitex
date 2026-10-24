@@ -75,6 +75,11 @@ export default function StockQuantDoc() {
                 Этикетки ЧЗ — все кванты подряд
               </button>
             )}
+            {qt.trackCz && (
+              <button disabled={generating} onClick={() => dl(`/stock/quant-tube.pdf?docId=${doc.id}`, 'cz30x20.pdf')} className={btnSecondary} title="ЧЗ, ЕАС, партия, срок годности">
+                ЧЗ на тубу 30×20
+              </button>
+            )}
             <button onClick={() => dl(`/stock/quant-labels.pdf?docId=${doc.id}`, 'quants.pdf')} className={batches.length ? btnSecondary : btnPrimary}>
               Этикетки квантов ({qt.labelWidthMm}×{qt.labelHeightMm} мм)
             </button>

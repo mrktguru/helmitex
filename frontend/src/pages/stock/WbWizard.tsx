@@ -590,6 +590,7 @@ function StepPrint({ data, reload }: { data: State; reload: () => void }) {
   const rows: [string, string, string, string, boolean][] = [
     ['pdf/combo', 'Объединённые стикеры (EAN-13 + ЧЗ)', `${combo} шт. · макет этикетки SKU с партией и сроком годности · номер стикера WB в углу${generating ? ' · ещё генерируются' : ''}`, `Стикеры ЧЗ ${id}.pdf`, combo > 0],
     ['pdf/pairs', 'Попарно: стикер WB → стикер ЧЗ', `Один рулон: на каждую банку два стикера подряд, стикер WB вписан в размер этикетки${noSticker.length ? ` · без стикера WB: ${noSticker.map((o) => o.id).slice(0, 3).join(', ')}${noSticker.length > 3 ? '…' : ''} — только стикер ЧЗ` : ''}`, `Стикеры WB + ЧЗ ${id}.pdf`, withSticker > 0 && combo > 0],
+    ['pdf/tube', 'ЧЗ на тубу 30×20', `${combo} шт. · только код ЧЗ, знак ЕАС, партия и срок годности — маленькая этикетка на тубу`, `ЧЗ на тубу ${id}.pdf`, combo > 0],
     ['pdf/trbx', 'Стикеры грузомест', 'QR WB, по одному на место', `Грузоместа ${id}.pdf`, true],
     ['pdf/qr', 'Стикер поставки (QR)', data.supply.done ? 'QR WB' : 'Доступен после передачи в доставку', `QR поставки ${id}.pdf`, !!data.supply.done],
   ];

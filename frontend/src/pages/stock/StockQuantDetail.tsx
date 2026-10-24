@@ -67,6 +67,7 @@ export default function StockQuantDetail() {
         <div className="flex-1" />
         <button onClick={() => dl(`/stock/quant-labels.pdf?ids=${q.id}`)} className={btnSecondary}>Этикетка кванта</button>
         {q.outputBatch?.jobStatus === 'done' && <button onClick={() => dl(`/stock/batches/${q.outputBatch.id}/pdf`)} className={btnSecondary}>Этикетки ЧЗ ({q.units})</button>}
+        {active.length > 0 && <button onClick={() => dl(`/stock/quant-tube.pdf?quantId=${q.id}`)} className={btnSecondary} title="ЧЗ, ЕАС, партия, срок годности">ЧЗ на тубу 30×20</button>}
         {active.length > 0 && <button onClick={() => dl(`/stock/quant-codes.csv?quantId=${q.id}`)} className={btnSecondary}>Список ЧЗ (CSV)</button>}
       </div>
 

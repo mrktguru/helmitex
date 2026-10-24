@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import { tubeLabelsPdf } from '../services/tubeLabel';
 import { calibrate } from '../services/printCalib';
 import multer from 'multer';
 import { z } from 'zod';
@@ -12,7 +13,7 @@ import {
   supplyState, syncSupply, writeOff,
 } from '../services/wbSupply';
 import { fileName, itemsToken, qtyLines, setShareText } from '../services/share';
-import { comboPdf, czXlsx, kiXlsx, supplyQrPdf, trbxPdf, wbStickersPdf } from '../services/wbPdf';
+import { comboPdf, czXlsx, kiXlsx, sortedOrders, supplyQrPdf, trbxPdf, wbStickersPdf } from '../services/wbPdf';
 
 // Отправки WB FBS: мастер сборки поставки
 const router = Router();
@@ -205,6 +206,8 @@ router.get('/wb/supplies/:id/pdf/:kind', h(async (req, res) => {
     pairs: [() => comboPdf(id, true), `Стикеры WB + ЧЗ ${id}.pdf`],
     trbx: [() => trbxPdf(id), `Грузоместа ${id}.pdf`],
     qr: [() => supplyQrPdf(id), `QR поставки ${id}.pdf`],
+    // этикетки на тубу 30×20 по кодам ЧЗ заданий — в порядке листа подбора
+    tube: [async () => tubeLabelsPdf((await sortedOrders(id)).map((o) => o.czCode?.id).filter((x): x is string => !!x)), `ЧЗ на тубу ${id}.pdf`],
   };
   if (!make[kind]) throw new StockError('Неизвестный тип печати');
   const orders = await prisma.wbOrder.findMany({ where: { supplyId: id, canceled: false }, select: { article: true, itemId: true } });
@@ -215,7 +218,7 @@ router.get('/wb/supplies/:id/pdf/:kind', h(async (req, res) => {
     ...(kind === 'qr' || kind === 'trbx' ? [] : qtyLines(items)),
     `Заданий: ${orders.length}`,
   ]);
-  const TAG: Record<string, string> = { stickers: 'STICKERS', combo: 'CZ', pairs: 'WB-CZ', trbx: 'TRBX', qr: 'QR' };
+  const TAG: Record<string, string> = { stickers: 'STICKERS', combo: 'CZ', pairs: 'WB-CZ', trbx: 'TRBX', qr: 'QR', tube: 'CZ30x20' };
   sendFile(res, await calibrate(await make[kind][0]()), fileName(['WB_FBS', id, kind === 'qr' || kind === 'trbx' ? null : itemsToken(items), TAG[kind]]));
 }));
 

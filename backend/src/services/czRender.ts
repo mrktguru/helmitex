@@ -31,7 +31,7 @@ const CACHE_FETCH_CONCURRENCY = 8;
  */
 const inFlight = new Map<string, Promise<Buffer>>();
 
-const cacheKey = (czBatchId: string, pageIndex: number) => `${CACHE_PREFIX}/${czBatchId}/page-${pageIndex}.png`;
+export const czCacheKey = (czBatchId: string, pageIndex: number) => `${CACHE_PREFIX}/${czBatchId}/page-${pageIndex}.png`;
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
@@ -60,7 +60,7 @@ async function buildCleanPng(czBatchId: string, pageIndex: number, raster: Buffe
   }
 
   const cleanPng = await encodeDataMatrix(payload, 10);
-  try { await uploadFile(cacheKey(czBatchId, pageIndex), cleanPng, 'image/png'); } catch (e) { console.warn('[cz] cache write failed:', e); }
+  try { await uploadFile(czCacheKey(czBatchId, pageIndex), cleanPng, 'image/png'); } catch (e) { console.warn('[cz] cache write failed:', e); }
   return cleanPng;
 }
 
@@ -83,7 +83,7 @@ export async function getCleanCzPng(
 ): Promise<Buffer> {
   // Fast path: single GET — no separate HEAD round-trip.
   try {
-    return await downloadFile(cacheKey(czBatchId, pageIndex));
+    return await downloadFile(czCacheKey(czBatchId, pageIndex));
   } catch {
     // Not cached yet — build it.
   }
@@ -117,7 +117,7 @@ export async function getCleanCzPngs(
   const misses: number[] = [];
   await mapLimit(pages, CACHE_FETCH_CONCURRENCY, async (pg) => {
     try {
-      result.set(pg, await downloadFile(cacheKey(czBatchId, pg)));
+      result.set(pg, await downloadFile(czCacheKey(czBatchId, pg)));
       tick();
     } catch {
       misses.push(pg);

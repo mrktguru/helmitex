@@ -17,7 +17,7 @@ async function pngsToPdf(pngs: Buffer[], wMm = 58, hMm = 40): Promise<Buffer> {
   return Buffer.from(await doc.save());
 }
 
-async function sortedOrders(supplyId: string) {
+export async function sortedOrders(supplyId: string) {
   const orders = await prisma.wbOrder.findMany({ where: { supplyId, canceled: false }, include: { czCode: true } });
   const items = await prisma.item.findMany({ where: { id: { in: orders.map((o) => o.itemId).filter((x): x is string => !!x) } } });
   const name = new Map(items.map((i) => [i.id, i.name]));

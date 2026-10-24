@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import { batchCodeIds, tubeLabelsPdf } from '../services/tubeLabel';
 import { calibrate } from '../services/printCalib';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
@@ -212,6 +213,23 @@ router.get('/quant-labels.pdf', async (req: AuthRequest, res: Response): Promise
   ]));
 });
 
+// GET /api/stock/quant-tube.pdf?docId=… | ?quantId=… — этикетки на тубу 30×20 по кодам ЧЗ квантов
+// (в т. ч. собранных из «с ЧЗ», где отдельного тиража нет — коды берутся из состава кванта)
+router.get('/quant-tube.pdf', async (req: AuthRequest, res: Response): Promise<void> => {
+  const where = req.query.docId ? { docId: String(req.query.docId) } : { id: String(req.query.quantId ?? '') };
+  const quants = await prisma.quant.findMany({
+    where, orderBy: { number: 'asc' },
+    include: { quantType: { include: { productItem: true } }, codes: { where: { active: true, czCodeId: { not: null } }, orderBy: { createdAt: 'asc' }, select: { czCodeId: true } } },
+  });
+  const codeIds = quants.flatMap((q) => q.codes.map((c) => c.czCodeId!));
+  if (!codeIds.length) { res.status(404).json({ error: 'У этих квантов нет кодов ЧЗ в портале' }); return; }
+  const items = quants.map((q) => ({ name: q.quantType.productItem.name, qty: q.codes.length }));
+  setShareText(res, ['Этикетки ЧЗ на тубу 30×20', ...qtyLines(items), quants.length === 1 ? quants[0].number : `Квантов: ${quants.length}`]);
+  try {
+    await sendPdf(res, await tubeLabelsPdf(codeIds), fileName(['CZ30x20', itemsToken(items), translit(quants[0].number) + (quants.length > 1 ? `-${translit(quants[quants.length - 1].number).split('-').pop()}` : '')]));
+  } catch (e) { res.status(409).json({ error: `Не удалось собрать этикетки: ${(e as Error).message}` }); }
+});
+
 // GET /api/stock/batches/:id/pdf — PDF одной выдачи (замена кода) без проверки владельца проекта
 router.get('/batches/:id/pdf', async (req: AuthRequest, res: Response): Promise<void> => {
   const batch = await prisma.outputBatch.findUnique({ where: { id: req.params.id } });
@@ -219,6 +237,13 @@ router.get('/batches/:id/pdf', async (req: AuthRequest, res: Response): Promise<
   if (batch.jobStatus !== 'done' || !batch.s3Key) { res.status(409).json({ error: batch.jobStatus === 'error' ? 'Ошибка генерации' : 'Этикетка ещё генерируется' }); return; }
   const lot = batch.lotId ? await prisma.lot.findUnique({ where: { id: batch.lotId }, include: { item: true } }) : null;
   const project = lot ? null : await prisma.project.findUnique({ where: { id: batch.projectId } });
+  const name = lot?.item.name ?? project?.name ?? 'ITEM';
+  // ?format=tube — те же коды на этикетке для тубы 30×20 (ЧЗ, ЕАС, партия, срок)
+  if (req.query.format === 'tube') {
+    setShareText(res, [`Этикетки ЧЗ на тубу 30×20`, `${name} — ${batch.count} шт`, lot && `Партия ${lot.number}`]);
+    await sendPdf(res, await tubeLabelsPdf(await batchCodeIds([batch.id])), fileName(['CZ30x20', itemsToken([{ name, qty: batch.count }]), lot ? translit(lot.number) : batch.id.slice(0, 8)]));
+    return;
+  }
   setShareText(res, [`Этикетки ЧЗ`, `${lot?.item.name ?? project?.name ?? ''} — ${batch.count} шт`, lot && `Партия ${lot.number}`]);
   await sendPdf(res, await downloadFile(batch.s3Key), fileName(['CZ', itemsToken([{ name: lot?.item.name ?? project?.name ?? 'ITEM', qty: batch.count }]), lot ? translit(lot.number) : batch.id.slice(0, 8)]));
 });
