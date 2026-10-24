@@ -184,6 +184,9 @@ export const api = {
   assignCzImport: (id: string, gtin: string, itemId: string) =>
     request<any>(`/stock/marking/imports/${id}/assign`, { method: 'POST', body: JSON.stringify({ gtin, itemId }) }),
   setGtin: (itemId: string, gtin: string) => request<any>(`/stock/marking/${itemId}/gtin`, { method: 'PUT', body: JSON.stringify({ gtin }) }),
+  getPrintCalib: () => request<{ dxMm: number; dyMm: number; scalePct: number }>('/stock/print/calibration'),
+  setPrintCalib: (c: { dxMm: number; dyMm: number; scalePct: number }) =>
+    request<{ dxMm: number; dyMm: number; scalePct: number }>('/stock/print/calibration', { method: 'PUT', body: JSON.stringify(c) }),
   ozonFbsState: () => request<any>('/stock/ozon-fbs/state'),
   ozonFbsSync: () => request<any>('/stock/ozon-fbs/sync', { method: 'POST' }),
   ozonFbsSyncStatus: () => request<any[]>('/stock/ozon-fbs/sync-status'),

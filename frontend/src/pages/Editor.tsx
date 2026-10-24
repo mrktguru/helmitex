@@ -6,6 +6,7 @@ import { api } from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
 import ElementProperties from '../components/ElementProperties';
 import LayerList from '../components/LayerList';
+import PrintCalibration from '../components/PrintCalibration';
 import { genId } from '../lib/uuid';
 import { substituteVariables, hasVariableRefs } from '../lib/variables';
 import { precomputeWraps } from '../lib/wrap';
@@ -172,6 +173,7 @@ export default function Editor() {
   const token = useAuthStore((s) => s.accessToken);
 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'pending' | 'saving' | 'saved' | 'error'>('idle');
+  const [calibOpen, setCalibOpen] = useState(false); // калибровка принтера этикеток
   const [saveError, setSaveError] = useState('');
   const [hasLoaded, setHasLoaded] = useState(false);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -489,6 +491,8 @@ export default function Editor() {
             />
           ))}
         </div>
+        <button onClick={() => setCalibOpen(true)} className="text-xs px-2 py-1 border rounded hover:bg-gray-50" title="Если на печати срезается край этикетки">🖨 Калибровка принтера</button>
+        {calibOpen && <PrintCalibration widthMm={store.widthMm} heightMm={store.heightMm} onClose={() => setCalibOpen(false)} />}
         <button onClick={store.undo} className="text-xs px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-40" disabled={store.past.length === 0}>↩ Отмена</button>
         <button onClick={store.redo} className="text-xs px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-40" disabled={store.future.length === 0}>↪ Повтор</button>
         <div className="ml-auto flex items-center gap-2">

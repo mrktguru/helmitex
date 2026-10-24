@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import { calibrate } from '../services/printCalib';
 import { z } from 'zod';
 import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
@@ -153,7 +154,7 @@ router.get('/batches/:id/download', async (req: AuthRequest, res: Response): Pro
     if (project?.userId !== req.user!.id) { res.status(403).json({ error: 'Forbidden' }); return; }
   }
   try {
-    const buf = await downloadFile(batch.s3Key);
+    const buf = await calibrate(await downloadFile(batch.s3Key));
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="batch-${batch.fromIndex}-${batch.toIndex}.pdf"`);
     res.setHeader('Content-Length', String(buf.length));

@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import { calibrate } from '../services/printCalib';
 import { z } from 'zod';
 import prisma from '../prisma/client';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
@@ -89,7 +90,7 @@ router.get('/ozon-fbs/batches/:id/pending-labels.pdf', h(async (req, res) => {
   ]);
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(fileName(['OZON_FBS', b.carriageId ?? dayTag(b.day), itemsToken(items), groupTag(b), `REST${numbers.length}`]))}`);
-  res.end(pdf);
+  res.end(await calibrate(pdf));
 }));
 router.get('/ozon-fbs/batches/:id/labels.pdf', h(async (req, res) => {
   const b = await group(req.params.id);
@@ -104,7 +105,7 @@ router.get('/ozon-fbs/batches/:id/labels.pdf', h(async (req, res) => {
   ]);
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(fileName(['OZON_FBS', b.carriageId ?? dayTag(b.day), itemsToken(items), groupTag(b)]))}`);
-  res.end(await downloadFile(b.labelS3Key));
+  res.end(await calibrate(await downloadFile(b.labelS3Key)));
 }));
 
 export default router;

@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import { calibrate } from '../services/printCalib';
 import multer from 'multer';
 import { z } from 'zod';
 import prisma from '../prisma/client';
@@ -215,7 +216,7 @@ router.get('/wb/supplies/:id/pdf/:kind', h(async (req, res) => {
     `Заданий: ${orders.length}`,
   ]);
   const TAG: Record<string, string> = { stickers: 'STICKERS', combo: 'CZ', pairs: 'WB-CZ', trbx: 'TRBX', qr: 'QR' };
-  sendFile(res, await make[kind][0](), fileName(['WB_FBS', id, kind === 'qr' || kind === 'trbx' ? null : itemsToken(items), TAG[kind]]));
+  sendFile(res, await calibrate(await make[kind][0]()), fileName(['WB_FBS', id, kind === 'qr' || kind === 'trbx' ? null : itemsToken(items), TAG[kind]]));
 }));
 
 // GET /api/stock/wb/cz.xlsx?supplies=WB-GI-1,WB-GI-2 — таблица использованных ЧЗ
