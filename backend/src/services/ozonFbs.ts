@@ -594,7 +594,8 @@ async function openCarriage(method: string): Promise<string> {
 async function refreshCarriages() {
   // закрытые и отменённые поставки уже не меняются — их не перезапрашиваем
   const bs = await prisma.ozonFbsBatch.findMany({
-    where: { carriageId: { not: null }, createdAt: { gte: new Date(Date.now() - 5 * 86400_000) }, NOT: { carriageStatus: { in: ['closed', 'cancelled'] } } },
+    // только у групп, где ещё есть неотправленное: у отгруженных Ozon оставляет «formed», но смотреть там нечего
+    where: { carriageId: { not: null }, shippedAt: null, createdAt: { gte: new Date(Date.now() - 5 * 86400_000) }, NOT: { carriageStatus: { in: ['closed', 'cancelled'] } } },
     select: { carriageId: true },
   });
   for (const id of [...new Set(bs.map((b) => b.carriageId!))]) {
