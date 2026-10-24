@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import { tubeLabelsPdf } from '../services/tubeLabel';
 import { calibrate } from '../services/printCalib';
 import { z } from 'zod';
 import prisma from '../prisma/client';
@@ -6,7 +7,7 @@ import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { StockError } from '../services/stock';
 import { downloadFile } from '../services/s3';
 import { callsLastHour } from '../services/ozon';
-import { batchLabels, carriageAct, pendingLabels, fbsState, formCarriage, postingItems, ship, syncFbs, writeOffPending } from '../services/ozonFbs';
+import { groupCzCodes, batchLabels, carriageAct, pendingLabels, fbsState, formCarriage, postingItems, ship, syncFbs, writeOffPending } from '../services/ozonFbs';
 import { syncStatus } from '../services/syncStatus';
 import { ddmm, fileName, itemsToken, qtyLines, setShareText } from '../services/share';
 
@@ -91,6 +92,17 @@ router.get('/ozon-fbs/batches/:id/pending-labels.pdf', h(async (req, res) => {
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(fileName(['OZON_FBS', b.carriageId ?? dayTag(b.day), itemsToken(items), groupTag(b), `REST${numbers.length}`]))}`);
   res.end(await calibrate(pdf));
+}));
+// ЧЗ на тубы 30×20 для группы: при первом скачивании выдаются коды на тубы «без ЧЗ», дальше — те же
+router.get('/ozon-fbs/batches/:id/cz-tube.pdf', h(async (req, res) => {
+  const b = await group(req.params.id);
+  const { codeIds, labeled } = await groupCzCodes(b.id);
+  if (!codeIds.length) throw new StockError(labeled ? `Все ${labeled} туб группы №${b.no} ушли из «с ЧЗ» — код на них уже есть, новые не нужны` : `В группе №${b.no} нет туб с обязательной маркировкой`);
+  const items = await postingItems(await prisma.ozonFbsPosting.findMany({ where: { batchId: b.id }, select: { postingNumber: true } }).then((r) => r.map((x) => x.postingNumber)));
+  setShareText(res, [`ЧЗ на тубу 30×20 · ${KIND[b.kind] ?? 'группа'} №${b.no}`, `Этикеток: ${codeIds.length}`, labeled > 0 && `Ещё ${labeled} туб из «с ЧЗ» — код уже на тубе`]);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(fileName(['OZON_FBS', itemsToken(items).replace(/_\d+QT$/, ''), `${codeIds.length}QT`, groupTag(b), 'CZ30x20']))}`);
+  res.end(await calibrate(await tubeLabelsPdf(codeIds)));
 }));
 router.get('/ozon-fbs/batches/:id/labels.pdf', h(async (req, res) => {
   const b = await group(req.params.id);

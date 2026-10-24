@@ -349,6 +349,10 @@ export default function OzonFbs() {
                   {g.passed > 0 && g.inCar + g.notCar > 0 && <button disabled={!!busy} className="text-brand-700 hover:underline font-semibold"
                     onClick={() => run(`pl${b.id}`, () => downloadFile(`/stock/ozon-fbs/batches/${b.id}/pending-labels.pdf`, `OZON_FBS_${b.no}_REST.pdf`))}>
                     {busy === `pl${b.id}` ? 'Ozon формирует…' : `⇩ этикетки несданных (${g.inCar + g.notCar})`}</button>}
+                  {/* ЧЗ на тубы: Ozon не требует, но код на тубе обязателен; первое скачивание выдаёт коды на тубы «без ЧЗ» */}
+                  <button disabled={!!busy} title="Этикетки ЧЗ 30×20 на тубы этой группы (ЧЗ, ЕАС, партия, срок)" className="text-brand-700 hover:underline"
+                    onClick={() => run(`cz${b.id}`, async () => { await downloadFile(`/stock/ozon-fbs/batches/${b.id}/cz-tube.pdf`, `OZON_FBS_${b.no}_CZ30x20.pdf`); setData(await api.ozonFbsState()); })}>
+                    {busy === `cz${b.id}` ? 'Готовлю ЧЗ…' : b.czIssued ? `⇩ ЧЗ на тубы (${b.czIssued})` : '⇩ ЧЗ на тубы'}</button>
                   {b.labels && <button className={clsx('hover:underline', g.passed > 0 && g.inCar + g.notCar > 0 ? 'text-slate-500' : 'text-brand-700 font-medium')} onClick={() => labelsPdf(b)}>⇩ {g.passed > 0 && g.inCar + g.notCar > 0 ? 'все' : 'этикетки'} ({b.postings})</button>}
                   <button disabled={!!busy} className={b.labels ? 'text-slate-500 hover:underline' : 'text-brand-700 hover:underline'}
                     onClick={() => run(`bl${b.id}`, () => api.ozonFbsBatchLabels(b.id), (r) => { setData(r); labelsPdf(b); return `Этикетки группы №${b.no} готовы`; })}>

@@ -6,7 +6,7 @@ import fontkit from '@pdf-lib/fontkit';
 import prisma from '../prisma/client';
 import { downloadFile } from './s3';
 import { encodeDataMatrix } from './datamatrix';
-import { czCacheKey } from './czRender';
+import { czCacheKey, getCleanCzPngs } from './czRender';
 import { lotLabelVars } from './marking';
 
 // Этикетка на тубу 30×20 мм: код ЧЗ (DataMatrix), знак ЕАС, номер партии и срок годности.
@@ -63,11 +63,23 @@ export async function tubeLabelsPdf(codeIds: string[], override?: TubeLabelVars)
   const dm = 15 * MM, dmX = 1.6 * MM, dmY = (H - dm) / 2;
   const colX = dmX + dm + 1.4 * MM, colW = W - colX - 1.3 * MM;
 
+  // Коды из PDF Честного знака, которые ещё ни разу не печатались, не расшифрованы — расшифровать заранее, пачкой по исходному PDF
+  const raw = new Map<string, Buffer>();
+  const undecoded = rows.filter((r) => !r.code);
+  for (const czBatchId of [...new Set(undecoded.map((r) => r.czBatchId))]) {
+    const pages = undecoded.filter((r) => r.czBatchId === czBatchId).map((r) => r.pageIndex);
+    const cb = await prisma.czBatch.findUnique({ where: { id: czBatchId } });
+    if (!cb?.s3Key || cb.s3Key.startsWith('csv:')) continue;
+    const pngs = await getCleanCzPngs(czBatchId, pages, await downloadFile(cb.s3Key));
+    for (const [pg, png] of pngs) raw.set(`${czBatchId}:${pg}`, png);
+  }
+
   for (const id of codeIds) {
     const c = byId.get(id);
     if (!c) continue;
-    // Код расшифрован — кодируем заново чисто; нет — берём очищенную картинку из кэша тиража
-    const png = c.code ? await encodeDataMatrix(c.code, 8) : await downloadFile(czCacheKey(c.czBatchId, c.pageIndex));
+    // Код расшифрован — кодируем заново чисто; нет — очищенная картинка из кэша/расшифровки
+    const png = c.code ? await encodeDataMatrix(c.code, 8)
+      : raw.get(`${c.czBatchId}:${c.pageIndex}`) ?? await downloadFile(czCacheKey(c.czBatchId, c.pageIndex));
     const vars = await varsOf(c);
     const page = doc.addPage([W, H]);
     page.drawImage(await doc.embedPng(png), { x: dmX, y: dmY, width: dm, height: dm });
