@@ -63,7 +63,7 @@ router.get('/quant-types', async (_req: AuthRequest, res: Response) => {
   });
   const out = [];
   for (const t of types) {
-    out.push({ ...t, freeCodes: t.projectId ? await availableCodes(prisma, t.projectId) : null, inStock: t._count.quants });
+    out.push({ ...t, freeCodes: t.trackCz ? await availableCodes(prisma, t.productItemId) : null, inStock: t._count.quants });
   }
   res.json(out);
 });
@@ -101,12 +101,12 @@ async function saveType(req: AuthRequest, res: Response, id?: string): Promise<v
 router.post('/quant-types', (req: AuthRequest, res: Response) => saveType(req, res));
 router.put('/quant-types/:id', (req: AuthRequest, res: Response) => saveType(req, res, req.params.id));
 
-// GET /api/stock/cz-projects — проекты этикеток с полем ЧЗ и числом свободных кодов
+// GET /api/stock/cz-projects — макеты этикеток (проекты) с полем ЧЗ. Коды — в базе ЧЗ товара, не в проекте
 router.get('/cz-projects', async (_req: AuthRequest, res: Response) => {
   const projects = await prisma.project.findMany({ orderBy: { name: 'asc' }, include: { template: { select: { czArea: true } } } });
   const out = [];
   for (const p of projects) {
-    out.push({ id: p.id, name: p.name, hasCzArea: p.template?.czArea != null, freeCodes: await availableCodes(prisma, p.id) });
+    out.push({ id: p.id, name: p.name, hasCzArea: p.template?.czArea != null });
   }
   res.json(out);
 });

@@ -81,7 +81,7 @@ async function addCodes(t: { itemId: string; name: string; projectId: string }, 
     const fileHash = crypto.createHash('sha256').update(fresh.join('\n')).digest('hex');
     await prisma.czBatch.create({
       data: {
-        projectId: t.projectId, s3Key: `csv:${label}`, totalCount: fresh.length, fileHash,
+        itemId: t.itemId, projectId: t.projectId, s3Key: `csv:${label}`, totalCount: fresh.length, fileHash,
         codes: { createMany: { data: fresh.map((code, i) => ({ pageIndex: i + 1, code })) } },
       },
     });

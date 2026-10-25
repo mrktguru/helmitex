@@ -23,10 +23,13 @@ export default function SkuSheet({ item }: { item: any }) {
   const [ozonMsg, setOzonMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [rev, setRev] = useState(0);
+  const [freeCodes, setFreeCodes] = useState<number | null>(null); // свободные коды товара в базе ЧЗ
 
   async function load() {
     const [all, semi, items, prj] = await Promise.all([api.getSpecs(), api.getItems('SEMI'), api.getItems(), api.getCzProjects()]);
-    const sp = all.find((x: any) => x.id === item.id)?.spec ?? null;
+    const row = all.find((x: any) => x.id === item.id);
+    const sp = row?.spec ?? null;
+    setFreeCodes(row?.freeCodes ?? 0);
     setSpec(sp); setSemis(semi); setProjects(prj);
     setMats(items.filter((i: any) => ['CONTAINER', 'LABEL', 'PACKAGING', 'RAW'].includes(i.type)));
     setF({
@@ -41,14 +44,14 @@ export default function SkuSheet({ item }: { item: any }) {
   async function save() {
     setBusy(true); setMsg(null);
     try {
-      if (f.requiresCz && !f.czProjectId) throw new Error('Выберите проект этикетки ЧЗ');
+      if (f.requiresCz && !f.czProjectId) throw new Error('Выберите шаблон этикетки ЧЗ');
       const r = await api.saveSpec(item.id, {
         semiItemId: f.semiItemId || null,
         netQty: parseNum(f.netQty),
         shelfLifeMonths: f.shelfLifeMonths ? Number(f.shelfLifeMonths) : null,
         requiresCz: f.requiresCz,
         czProjectId: f.requiresCz ? f.czProjectId : null,
-        labelProjectId: f.requiresCz && f.labelProjectId && f.labelProjectId !== f.czProjectId ? f.labelProjectId : null,
+        labelProjectId: null, // шаблон один — czProjectId; коды не зависят от шаблона
         materials: lines.filter((l) => l.itemId && parseNum(l.qty)).map((l) => ({ itemId: l.itemId, qtyPerUnit: parseNum(l.qty)! })),
       });
       await load();
@@ -71,7 +74,7 @@ export default function SkuSheet({ item }: { item: any }) {
   const dirty = spec !== null && (
     f.semiItemId !== (spec?.semiItemId ?? '') || parseNum(f.netQty) !== (spec?.netQty ?? null) ||
     (f.shelfLifeMonths ? Number(f.shelfLifeMonths) : null) !== (spec?.shelfLifeMonths ?? null) ||
-    f.requiresCz !== !!spec?.requiresCz || (f.requiresCz && f.czProjectId !== (spec?.czProjectId ?? '')) || (f.requiresCz && f.labelProjectId !== (spec?.labelProjectId ?? '')) ||
+    f.requiresCz !== !!spec?.requiresCz || (f.requiresCz && f.czProjectId !== (spec?.czProjectId ?? '')) || 
     JSON.stringify(lines.filter((l) => l.itemId).map((l) => [l.itemId, parseNum(l.qty)])) !== JSON.stringify((spec?.materials ?? []).map((m: any) => [m.itemId, m.qtyPerUnit]))
   );
   const net = parseNum(f.netQty);
@@ -123,28 +126,18 @@ export default function SkuSheet({ item }: { item: any }) {
         </label>
         {f.requiresCz && (
           <div className="mt-3 grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3 items-end">
-            <label className="flex flex-col gap-1 text-xs text-slate-500">Проект этикетки с кодами ЧЗ
+            <label className="flex flex-col gap-1 text-xs text-slate-500">Шаблон этикетки ЧЗ (как выглядит этикетка)
               <select value={f.czProjectId} onChange={(e) => setF({ ...f, czProjectId: e.target.value })} className={inputCls}>
-                <option value="">— выберите проект —</option>
-                {projects.filter((p) => p.hasCzArea).map((p) => <option key={p.id} value={p.id}>{p.name} · свободно {p.freeCodes}</option>)}
+                <option value="">— выберите шаблон —</option>
+                {projects.filter((p) => p.hasCzArea).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </label>
-            {project && (
-              <Link to={`/projects/${project.id}`} className={clsx('text-sm px-3 py-2 rounded-lg border', project.freeCodes === 0 ? 'border-red-200 bg-red-50 text-red-700' : 'border-slate-200 text-slate-700')}>
-                {project.freeCodes === 0 ? 'Кодов нет — загрузить' : `Кодов: ${project.freeCodes}`} →
-              </Link>
-            )}
+            <Link to="/stock/marking?tab=base" className={clsx('text-sm px-3 py-2 rounded-lg border', freeCodes === 0 ? 'border-red-200 bg-red-50 text-red-700' : 'border-slate-200 text-slate-700')}>
+              {freeCodes === 0 ? 'Кодов нет — загрузить' : `Кодов в базе ЧЗ: ${freeCodes ?? '…'}`} →
+            </Link>
           </div>
         )}
-        {f.requiresCz && (
-          <label className="mt-3 flex flex-col gap-1 text-xs text-slate-500">Шаблон этикетки ЧЗ (что печатается на этикетке)
-            <select value={f.labelProjectId} onChange={(e) => setF({ ...f, labelProjectId: e.target.value })} className={inputCls}>
-              <option value="">как в проекте кодов{project ? ` («${project.name}»)` : ''}</option>
-              {projects.filter((p) => p.hasCzArea && p.id !== f.czProjectId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-            <span className="text-slate-400">Коды ЧЗ берутся из проекта выше, а вид этикетки — из выбранного шаблона. Действует для новых тиражей: маркировка, кванты, WB.</span>
-          </label>
-        )}
+        {f.requiresCz && <p className="mt-2 text-xs text-slate-400">Коды ЧЗ лежат в базе ЧЗ товара и подставляются при генерации на любую этикетку; шаблон отвечает только за оформление.</p>}
       </Section>
 
       <div className="flex flex-wrap items-center gap-3 sticky bottom-3 z-10">

@@ -277,7 +277,11 @@ router.get('/specs', async (_req: AuthRequest, res: Response) => {
     orderBy: { name: 'asc' },
     include: { spec: { include: { semiItem: true, czProject: { select: { id: true, name: true } }, labelProject: { select: { id: true, name: true } }, materials: { include: { item: true }, orderBy: { sort: 'asc' } } } } },
   });
-  res.json(items);
+  // свободные коды в базе ЧЗ товара
+  const free = new Map((await prisma.$queryRaw<{ itemId: string; n: bigint }[]>`
+    SELECT b."itemId", COUNT(*) AS n FROM "CzCode" c JOIN "CzBatch" b ON b.id = c."czBatchId"
+    WHERE c.status = 'PENDING' AND b."itemId" IS NOT NULL GROUP BY 1`).map((r) => [r.itemId, Number(r.n)]));
+  res.json(items.map((i) => ({ ...i, freeCodes: free.get(i.id) ?? 0 })));
 });
 
 // PUT /api/stock/specs/:itemId

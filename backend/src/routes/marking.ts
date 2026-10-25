@@ -16,11 +16,12 @@ router.use(authMiddleware);
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
-async function codeStats(projectIds: string[]) {
+// Коды в базе ЧЗ по товарам
+async function codeStats(itemIds: string[]) {
   const rows = await prisma.$queryRaw<{ projectId: string; status: string; hasText: boolean; n: bigint }[]>`
-    SELECT b."projectId", c.status, (c.code IS NOT NULL) AS "hasText", COUNT(*) AS n
+    SELECT b."itemId" AS "projectId", c.status, (c.code IS NOT NULL) AS "hasText", COUNT(*) AS n
     FROM "CzCode" c JOIN "CzBatch" b ON b.id = c."czBatchId"
-    WHERE b."projectId" = ANY(${projectIds}::text[])
+    WHERE b."itemId" = ANY(${itemIds}::text[])
     GROUP BY 1, 2, 3`;
   const out = new Map<string, { total: number; pending: number; used: number; spoiled: number; noText: number }>();
   for (const r of rows) {
@@ -64,14 +65,13 @@ async function load(itemIds?: string[]) {
     orderBy: { name: 'asc' },
     include: { spec: { include: { czProject: { include: { template: { select: { widthMm: true, heightMm: true, czArea: true } } } } } } },
   });
-  const projectIds = items.map((i) => i.spec?.czProjectId).filter((x): x is string => !!x);
-  const [codes, stock, targets] = await Promise.all([codeStats(projectIds), stockByState(items.map((i) => i.id)), gtinTargets()]);
+  const [codes, stock, targets] = await Promise.all([codeStats(items.map((i) => i.id)), stockByState(items.map((i) => i.id)), gtinTargets()]);
   const gtinOfItem = new Map<string, { gtin: string; source: string }>();
   for (const [gtin, t] of targets) if (!gtinOfItem.has(t.itemId)) gtinOfItem.set(t.itemId, { gtin, source: t.source });
   const empty = { total: 0, pending: 0, used: 0, spoiled: 0, noText: 0 };
   return items.map((i) => {
     const p = i.spec?.czProject ?? null;
-    const c = (p && codes.get(p.id)) || empty;
+    const c = codes.get(i.id) || empty;
     const s = stock.get(i.id) ?? { unlabeled: 0, labeled: 0, inQuant: 0 };
     return {
       id: i.id,

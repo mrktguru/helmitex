@@ -1,4 +1,5 @@
 import { PDFDocument } from 'pdf-lib';
+import { NO_CODES_HINT, claimItemCodes, freeItemCodes } from './czPool';
 import prisma from '../prisma/client';
 import { ozon, ozonCall, ozonPdf, ozonGetFile } from './ozon';
 import { allocateFefo, consume, nextDocNumber, StockError } from './stock';
@@ -581,12 +582,9 @@ export async function groupCzCodes(batchId: string): Promise<{ codeIds: string[]
         continue;
       }
       const projectId = l.item.spec!.czProjectId;
-      if (!projectId) throw new StockError(`Для «${l.item.name}» не выбран проект ЧЗ в карточке SKU`);
-      const codes = await tx.$queryRaw<{ id: string; pageIndex: number }[]>`
-        SELECT c.id, c."pageIndex" FROM "CzCode" c JOIN "CzBatch" cb ON cb.id = c."czBatchId"
-        WHERE cb."projectId" = ${projectId} AND c.status = 'PENDING'
-        ORDER BY cb."uploadedAt" ASC, c."pageIndex" ASC LIMIT ${n} FOR UPDATE OF c SKIP LOCKED`;
-      if (codes.length < n) throw new StockError(`Свободных кодов ЧЗ для «${l.item.name}»: ${codes.length}, нужно ${n}. Загрузите коды в «Маркировка → База ЧЗ».`);
+      if (!projectId) throw new StockError(`Для «${l.item.name}» не выбран шаблон этикетки ЧЗ в карточке SKU`);
+      const codes = await claimItemCodes(tx, l.itemId, n);
+      if (codes.length < n) throw new StockError(`Свободных кодов ЧЗ для «${l.item.name}»: ${codes.length}, нужно ${n}. ${NO_CODES_HINT}`);
       const ob = await tx.outputBatch.create({
         data: {
           projectId, fromIndex: codes[0].pageIndex, toIndex: codes[codes.length - 1].pageIndex, count: n, jobStatus: 'tube',

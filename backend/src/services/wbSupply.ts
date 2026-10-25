@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { freeItemCodes } from './czPool';
 import prisma from '../prisma/client';
 import { PdfJob, StockError, allocateFefo, consume, nextDocNumber } from './stock';
 import { looseCodes, markLot } from './marking';
@@ -250,7 +251,7 @@ export async function supplyState(id: string) {
     sm.count++;
     if (it && !summary.has(key)) {
       for (const g of groups) if (itemOfLot.get(g.lotId) === it.id) sm[g.state === 'LABELED' ? 'labeled' : 'unlabeled'] += g._sum.qty ?? 0;
-      if (it.spec?.czProjectId) sm.freeCodes = await prisma.czCode.count({ where: { status: 'PENDING', czBatch: { projectId: it.spec.czProjectId } } });
+      if (it.spec?.requiresCz) sm.freeCodes = await freeItemCodes(prisma, it.id);
     }
     summary.set(key, sm);
   }
@@ -347,7 +348,8 @@ export async function scanCode(supplyId: string, raw: string, orderId?: string) 
   if (cz.wbOrder) throw new StockError(`Код уже привязан к заданию ${cz.wbOrder.id}`);
   if (cz.quantCodes.length) throw new StockError(`Код в кванте ${cz.quantCodes[0].quant.number}`);
   if (cz.status === 'SPOILED') throw new StockError('Код списан в брак');
-  const specs = await prisma.productSpec.findMany({ where: { czProjectId: cz.czBatch.projectId } });
+  // товар кода — по базе ЧЗ (загрузка привязана к товару)
+  const specs = await prisma.productSpec.findMany({ where: { itemId: cz.czBatch.itemId ?? '-' } });
   const { orders } = await supplyState(supplyId);
   const target = orderId
     ? orders.find((o) => o.id === orderId)

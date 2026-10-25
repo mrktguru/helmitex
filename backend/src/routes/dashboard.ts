@@ -76,12 +76,12 @@ router.get('/dashboard', async (_req: AuthRequest, res: Response) => {
       alerts.push({ level: 'warn', title: `«${t.name}»: не выбран проект этикетки ЧЗ`, text: 'Без проекта кванты не собрать', action: { label: 'Настроить', to: `/stock/catalog/${t.productItemId}` } });
       continue;
     }
-    const free = await availableCodes(prisma, t.projectId);
+    const free = await availableCodes(prisma, t.productItemId);
     if (free < t.unitsPerQuant * 5) {
       alerts.push({
-        level: free < t.unitsPerQuant ? 'crit' : 'warn', title: `Коды ЧЗ «${t.project?.name}»: ${free === 0 ? 'нет' : `осталось ${free}`}`,
-        text: `Хватит на ${Math.floor(free / t.unitsPerQuant)} кв. по ${t.unitsPerQuant} шт. Загрузите коды в проект.`,
-        action: { label: 'К проекту', to: `/projects/${t.projectId}` },
+        level: free < t.unitsPerQuant ? 'crit' : 'warn', title: `Коды ЧЗ «${t.productItem.name}»: ${free === 0 ? 'нет' : `осталось ${free}`}`,
+        text: `Хватит на ${Math.floor(free / t.unitsPerQuant)} кв. по ${t.unitsPerQuant} шт. Загрузите коды в базу ЧЗ.`,
+        action: { label: 'База ЧЗ', to: '/stock/marking?tab=base' },
       });
     }
   }

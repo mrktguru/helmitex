@@ -9,6 +9,12 @@ import { getProjectOrFail } from './projects';
 import { uploadFile } from '../services/s3';
 import { pdfQueue } from '../workers/pdfQueue';
 
+// Коды, загруженные через страницу проекта, — в базу ЧЗ товара, у которого этот проект выбран шаблоном
+async function projectItem(projectId: string): Promise<string | null> {
+  const spec = await prisma.productSpec.findFirst({ where: { OR: [{ czProjectId: projectId }, { labelProjectId: projectId }], requiresCz: true } });
+  return spec?.itemId ?? null;
+}
+
 const router = Router();
 router.use(authMiddleware);
 
@@ -94,6 +100,7 @@ router.post('/:id/cz', upload.single('file'), async (req: AuthRequest, res: Resp
 
   const czBatch = await prisma.czBatch.create({
     data: {
+      itemId: await projectItem(req.params.id),
       projectId: req.params.id,
       s3Key,
       totalCount,
@@ -179,6 +186,7 @@ router.post('/:id/cz/csv', uploadCsv.single('file'), async (req: AuthRequest, re
   const fileHash = crypto.createHash('sha256').update(newCodes.join('\n')).digest('hex');
   const czBatch = await prisma.czBatch.create({
     data: {
+      itemId: await projectItem(req.params.id),
       projectId: req.params.id,
       s3Key: `csv:${fileHash}`,
       totalCount: newCodes.length,

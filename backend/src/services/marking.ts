@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { NO_CODES_HINT, claimItemCodes, freeItemCodes } from './czPool';
 import { PdfJob, StockError, consume, lotBalance, nextDocNumber } from './stock';
 
 type Tx = Prisma.TransactionClient;
@@ -50,15 +51,10 @@ export async function markLot(tx: Tx, lotId: string, n: number, userId: string, 
   const balance = await lotBalance(tx, lot.id, 'UNLABELED');
   if (n > balance + 1e-6) throw new StockError(`В партии ${lot.number} без ЧЗ только ${balance} шт.`);
 
-  const codes = await tx.$queryRaw<{ id: string; pageIndex: number }[]>`
-    SELECT c.id, c."pageIndex"
-    FROM "CzCode" c JOIN "CzBatch" b ON b.id = c."czBatchId"
-    WHERE b."projectId" = ${project.id} AND c.status = 'PENDING'
-    ORDER BY b."uploadedAt" ASC, c."pageIndex" ASC
-    LIMIT ${n}
-    FOR UPDATE OF c SKIP LOCKED`;
+  // коды — из базы ЧЗ товара; макет проекта — только оформление этикетки
+  const codes = await claimItemCodes(tx, lot.itemId, n);
   if (codes.length < n) {
-    throw new StockError(`Свободных кодов ЧЗ для «${lot.item.name}»: ${codes.length}, нужно ${n}. Загрузите коды.`);
+    throw new StockError(`Свободных кодов ЧЗ для «${lot.item.name}»: ${codes.length}, нужно ${n}. ${NO_CODES_HINT}`);
   }
 
   const doc = await tx.stockDoc.create({

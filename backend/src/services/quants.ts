@@ -1,4 +1,5 @@
 import { Prisma, ProductState } from '@prisma/client';
+import { NO_CODES_HINT, claimItemCodes, freeItemCodes } from './czPool';
 import { PdfJob, StockError, allocateFefo, consume, nextNumber, round } from './stock';
 import { looseCodes, lotLabelVars } from './marking';
 
@@ -11,29 +12,16 @@ export function nextQuantNumber(tx: Tx) {
   }, 3);
 }
 
-// Забирает n свободных кодов ЧЗ проекта (те же правила, что у POST /projects/:id/batches)
-async function claimCodes(tx: Tx, projectId: string, n: number) {
-  const codes = await tx.$queryRaw<{ id: string; pageIndex: number }[]>`
-    SELECT c.id, c."pageIndex"
-    FROM "CzCode" c
-    JOIN "CzBatch" b ON b.id = c."czBatchId"
-    WHERE b."projectId" = ${projectId}
-      AND c.status = 'PENDING'
-    ORDER BY b."uploadedAt" ASC, c."pageIndex" ASC
-    LIMIT ${n}
-    FOR UPDATE OF c SKIP LOCKED
-  `;
-  return codes;
-}
+/** Свободные коды товара в базе ЧЗ */
+export const availableCodes = (tx: Tx, itemId: string): Promise<number> => freeItemCodes(tx, itemId);
 
-export async function availableCodes(tx: Tx, projectId: string): Promise<number> {
-  return tx.czCode.count({ where: { status: 'PENDING', czBatch: { projectId } } });
-}
-
-async function issueBatch(tx: Tx, projectId: string, n: number, projectName: string, lotId: string): Promise<{ batchId: string; codeIds: string[] }> {
-  const codes = await claimCodes(tx, projectId, n);
+// projectId — макет этикетки (оформление); коды — из базы ЧЗ товара партии
+async function issueBatch(tx: Tx, projectId: string, n: number, _projectName: string, lotId: string): Promise<{ batchId: string; codeIds: string[] }> {
+  const lot = await tx.lot.findUnique({ where: { id: lotId }, include: { item: true } });
+  if (!lot) throw new StockError('Партия не найдена');
+  const codes = await claimItemCodes(tx, lot.itemId, n);
   if (codes.length < n) {
-    throw new StockError(`В проекте «${projectName}» не хватает кодов ЧЗ: свободно ${codes.length}, нужно ${n}. Загрузите коды.`);
+    throw new StockError(`Свободных кодов ЧЗ для «${lot.item.name}»: ${codes.length}, нужно ${n}. ${NO_CODES_HINT}`);
   }
   const batch = await tx.outputBatch.create({
     data: {
