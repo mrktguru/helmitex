@@ -319,9 +319,10 @@ export default function Editor() {
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     setSaveStatus('saving');
     try {
+      // как и автосохранение — с пересчётом переносов, иначе PDF возьмёт старые (до правки) строки и размер шрифта
       await api.saveTemplate(projectId, {
         widthMm: store.widthMm, heightMm: store.heightMm,
-        elements: store.elements, czArea: store.czArea, barcodeValue: store.barcodeValue || null,
+        elements: precomputeWraps(store.elements, store.variables), czArea: store.czArea, barcodeValue: store.barcodeValue || null,
         printMargins: store.printMargins,
         variables: store.variables,
         variableDefs: store.variableDefs,

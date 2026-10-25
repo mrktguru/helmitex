@@ -12,6 +12,9 @@ import { getCleanCzPngs } from '../services/czRender';
 import { drawEan13Vector } from '../services/barcode';
 
 const MM_TO_PT = 2.8346;
+// Редактор рисует текст размером fontSizePt × 3,7795 px на холсте 3,7795×3 px/мм — это 0,9449 «настоящего» pt.
+// Чтобы PDF совпадал с редактором, без кэша берём тот же множитель.
+const EDITOR_PT = 72 / 76.2;
 const EAC_SVG_PATH = path.resolve(__dirname, '../../assets/eac-icon.svg');
 
 async function renderEacPng(color: string, widthPx: number, heightPx: number): Promise<Buffer> {
@@ -105,6 +108,7 @@ interface LabelElement {
   _wrappedLines?: string[];
   /** Browser-resolved font size in pt (accounts for fit-to-block + correct zoom math). */
   _resolvedFontSizePt?: number;
+  _wrapSig?: string;
   value?: string;
   s3Key?: string;
   strokeColor?: string;
@@ -356,7 +360,12 @@ const worker = new Worker<JobData>(
             const usesBatchVar = el.type === 'variable'
               ? batchVarKeys.includes(el.key ?? '')
               : batchVarKeys.some((k) => new RegExp(`\\{\\{\\s*${k}\\s*\\}\\}`).test(sourceText));
-            const hasCachedLines = !usesBatchVar && Array.isArray(el._wrappedLines) && el._wrappedLines.length > 0;
+            // Кэш из редактора устарел (элемент правили, а переносы не пересчитали) — не берём его, считаем сами.
+            // Без отпечатка (старые макеты) признак — размер не совпадает с указанным (редактор рисует pt × EDITOR_PT)
+            const sig = [el.type === 'variable' ? el.key : el.text, el.fontSizePt, el.widthMm, el.heightMm, el.bold ? 1 : 0, el.fitToBlock ? 1 : 0].join('|');
+            const stale = el._wrapSig != null ? el._wrapSig !== sig
+              : !el.fitToBlock && el._resolvedFontSizePt != null && Math.abs(el._resolvedFontSizePt - (el.fontSizePt ?? 10) * EDITOR_PT) > 0.05;
+            const hasCachedLines = !stale && !usesBatchVar && Array.isArray(el._wrappedLines) && el._wrappedLines.length > 0;
             const hasTokens = !hasCachedLines && el.type === 'text' && sourceText.includes('{{');
             const rawText = hasTokens
               ? sourceText.replace(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g, (m, key) => {
@@ -365,8 +374,8 @@ const worker = new Worker<JobData>(
                 })
               : sourceText;
             // Calculate font size: prefer browser-resolved value (WYSIWYG) when available.
-            const resolvedSize = usesBatchVar && el.fitToBlock ? undefined : el._resolvedFontSizePt;
-            let size = resolvedSize ?? el.fontSizePt ?? 10;
+            const resolvedSize = stale || (usesBatchVar && el.fitToBlock) ? undefined : el._resolvedFontSizePt;
+            let size = resolvedSize ?? (el.fontSizePt ?? 10) * EDITOR_PT;
             if (!resolvedSize && el.fitToBlock && blockW > 0 && blockH > 0) {
               let lo = 1, hi = 200;
               for (let fi = 0; fi < 20; fi++) {

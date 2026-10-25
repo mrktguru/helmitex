@@ -53,29 +53,32 @@ function getFitFontSizePx(text: string, bold: boolean, widthPx: number, heightPx
  * and `_resolvedFontSizePt` are updated. Server skips its own substitution when
  * `_wrappedLines` are present.
  */
+// Отпечаток параметров, от которых зависят переносы: генератор PDF по нему видит, что кэш устарел
+export const wrapSig = (el: any) => [el.type === 'variable' ? el.key : el.text, el.fontSizePt, el.widthMm, el.heightMm, el.bold ? 1 : 0, el.fitToBlock ? 1 : 0].join('|');
+
 export function precomputeWraps(elements: any[], variables: Record<string, string>): any[] {
   return elements.map((el) => {
     if (el.type === 'text') {
       const blockW = el.widthMm ? el.widthMm * SCALE : 0;
       const rendered = hasVariableRefs(el.text) ? substituteVariables(el.text, variables) : (el.text ?? '');
-      if (!blockW || !rendered) return { ...el, _wrappedLines: [rendered] };
+      if (!blockW || !rendered) return { ...el, _wrappedLines: [rendered], _wrapSig: wrapSig(el) };
       const fontSizePx = el.fitToBlock && el.heightMm
         ? getFitFontSizePx(rendered, el.bold, blockW, el.heightMm * SCALE)
         : el.fontSizePt * (SCALE / 3);
       const wrapped = browserWrapText(rendered, el.bold, fontSizePx, blockW);
       const resolvedFontSizePt = fontSizePx * 72 / (SCALE * 25.4);
-      return { ...el, _wrappedLines: wrapped, _resolvedFontSizePt: resolvedFontSizePt };
+      return { ...el, _wrappedLines: wrapped, _resolvedFontSizePt: resolvedFontSizePt, _wrapSig: wrapSig(el) };
     }
     if (el.type === 'variable') {
       const value = variables[el.key] ?? el.placeholder ?? '';
       const blockW = el.widthMm ? el.widthMm * SCALE : 0;
-      if (!blockW) return { ...el, _wrappedLines: [value] };
+      if (!blockW) return { ...el, _wrappedLines: [value], _wrapSig: wrapSig(el) };
       const fontSizePx = el.fitToBlock && el.heightMm
         ? getFitFontSizePx(value || ' ', el.bold, blockW, el.heightMm * SCALE)
         : el.fontSizePt * (SCALE / 3);
       const wrapped = browserWrapText(value, el.bold, fontSizePx, blockW);
       const resolvedFontSizePt = fontSizePx * 72 / (SCALE * 25.4);
-      return { ...el, _wrappedLines: wrapped, _resolvedFontSizePt: resolvedFontSizePt };
+      return { ...el, _wrappedLines: wrapped, _resolvedFontSizePt: resolvedFontSizePt, _wrapSig: wrapSig(el) };
     }
     return el;
   });
