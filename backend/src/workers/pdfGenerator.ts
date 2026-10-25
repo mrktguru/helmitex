@@ -178,8 +178,16 @@ const worker = new Worker<JobData>(
     });
 
     try {
-      // Load template
-      const template = await prisma.labelTemplate.findUnique({ where: { projectId } });
+      // Шаблон: если в карточке SKU выбран отдельный «шаблон этикетки ЧЗ» — он; коды при этом из своего проекта.
+      // SKU ищем по партии тиража, иначе по проекту кодов
+      const ob = await prisma.outputBatch.findUnique({ where: { id: outputBatchId }, select: { lotId: true } });
+      const lotItem = ob?.lotId ? (await prisma.lot.findUnique({ where: { id: ob.lotId }, select: { itemId: true } }))?.itemId : null;
+      const spec = lotItem
+        ? await prisma.productSpec.findUnique({ where: { itemId: lotItem } })
+        : await prisma.productSpec.findFirst({ where: { czProjectId: projectId, requiresCz: true } });
+      const labelProject = spec?.labelProjectId && spec.czProjectId === projectId ? spec.labelProjectId : projectId;
+      let template = await prisma.labelTemplate.findUnique({ where: { projectId: labelProject } });
+      if (labelProject !== projectId && (!template || template.czArea == null)) template = await prisma.labelTemplate.findUnique({ where: { projectId } });
       if (!template) throw new Error('Template not found');
 
       const elements = template.elements as unknown as LabelElement[];

@@ -15,7 +15,7 @@ export default function SkuSheet({ item }: { item: any }) {
   const [semis, setSemis] = useState<any[]>([]);
   const [mats, setMats] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
-  const [f, setF] = useState({ semiItemId: '', netQty: '', shelfLifeMonths: '', requiresCz: false, czProjectId: '' });
+  const [f, setF] = useState({ semiItemId: '', netQty: '', shelfLifeMonths: '', requiresCz: false, czProjectId: '', labelProjectId: '' });
   const [lines, setLines] = useState<Mat[]>([]);
   const [offer, setOffer] = useState('');
   const [ozonProducts, setOzonProducts] = useState<{ offerId: string; name: string }[] | null>(null);
@@ -31,7 +31,7 @@ export default function SkuSheet({ item }: { item: any }) {
     setMats(items.filter((i: any) => ['CONTAINER', 'LABEL', 'PACKAGING', 'RAW'].includes(i.type)));
     setF({
       semiItemId: sp?.semiItemId ?? '', netQty: sp?.netQty != null ? String(sp.netQty).replace('.', ',') : '',
-      shelfLifeMonths: sp?.shelfLifeMonths ? String(sp.shelfLifeMonths) : '', requiresCz: !!sp?.requiresCz, czProjectId: sp?.czProjectId ?? '',
+      shelfLifeMonths: sp?.shelfLifeMonths ? String(sp.shelfLifeMonths) : '', requiresCz: !!sp?.requiresCz, czProjectId: sp?.czProjectId ?? '', labelProjectId: sp?.labelProjectId ?? '',
     });
     setLines(sp?.materials?.length ? sp.materials.map((m: any) => ({ key: String(++seq), itemId: m.itemId, qty: String(m.qtyPerUnit).replace('.', ',') })) : []);
     setOffer(sp?.ozonOfferId ?? '');
@@ -48,6 +48,7 @@ export default function SkuSheet({ item }: { item: any }) {
         shelfLifeMonths: f.shelfLifeMonths ? Number(f.shelfLifeMonths) : null,
         requiresCz: f.requiresCz,
         czProjectId: f.requiresCz ? f.czProjectId : null,
+        labelProjectId: f.requiresCz && f.labelProjectId && f.labelProjectId !== f.czProjectId ? f.labelProjectId : null,
         materials: lines.filter((l) => l.itemId && parseNum(l.qty)).map((l) => ({ itemId: l.itemId, qtyPerUnit: parseNum(l.qty)! })),
       });
       await load();
@@ -70,7 +71,7 @@ export default function SkuSheet({ item }: { item: any }) {
   const dirty = spec !== null && (
     f.semiItemId !== (spec?.semiItemId ?? '') || parseNum(f.netQty) !== (spec?.netQty ?? null) ||
     (f.shelfLifeMonths ? Number(f.shelfLifeMonths) : null) !== (spec?.shelfLifeMonths ?? null) ||
-    f.requiresCz !== !!spec?.requiresCz || (f.requiresCz && f.czProjectId !== (spec?.czProjectId ?? '')) ||
+    f.requiresCz !== !!spec?.requiresCz || (f.requiresCz && f.czProjectId !== (spec?.czProjectId ?? '')) || (f.requiresCz && f.labelProjectId !== (spec?.labelProjectId ?? '')) ||
     JSON.stringify(lines.filter((l) => l.itemId).map((l) => [l.itemId, parseNum(l.qty)])) !== JSON.stringify((spec?.materials ?? []).map((m: any) => [m.itemId, m.qtyPerUnit]))
   );
   const net = parseNum(f.netQty);
@@ -134,6 +135,15 @@ export default function SkuSheet({ item }: { item: any }) {
               </Link>
             )}
           </div>
+        )}
+        {f.requiresCz && (
+          <label className="mt-3 flex flex-col gap-1 text-xs text-slate-500">Шаблон этикетки ЧЗ (что печатается на этикетке)
+            <select value={f.labelProjectId} onChange={(e) => setF({ ...f, labelProjectId: e.target.value })} className={inputCls}>
+              <option value="">как в проекте кодов{project ? ` («${project.name}»)` : ''}</option>
+              {projects.filter((p) => p.hasCzArea && p.id !== f.czProjectId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <span className="text-slate-400">Коды ЧЗ берутся из проекта выше, а вид этикетки — из выбранного шаблона. Действует для новых тиражей: маркировка, кванты, WB.</span>
+          </label>
         )}
       </Section>
 

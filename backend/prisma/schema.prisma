@@ -36,6 +36,7 @@ model Project {
   outputBatches OutputBatch[]
   quantTypes    QuantType[]
   czSpecs       ProductSpec[]  @relation("SpecCzProject")
+  labelSpecs    ProductSpec[]  @relation("SpecLabelProject")
 }
 
 model LabelTemplate {
@@ -289,6 +290,8 @@ model ProductSpec {
   requiresCz      Boolean           @default(false) // обязательна маркировка Честный знак
   czProjectId     String? // проект портала с макетом этикетки ЧЗ
   czProject       Project?          @relation("SpecCzProject", fields: [czProjectId], references: [id])
+  labelProjectId  String? // шаблон этикетки ЧЗ (другой проект); коды по-прежнему из czProject. Пусто — шаблон czProject
+  labelProject    Project?          @relation("SpecLabelProject", fields: [labelProjectId], references: [id])
   updatedAt       DateTime          @updatedAt
   materials       ProductMaterial[]
 }

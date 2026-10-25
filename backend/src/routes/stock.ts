@@ -266,6 +266,7 @@ const specSchema = z.object({
   shelfLifeMonths: z.number().int().min(1).max(120).nullable().optional(),
   requiresCz: z.boolean().optional(),
   czProjectId: z.string().uuid().nullable().optional(),
+  labelProjectId: z.string().uuid().nullable().optional(),
   materials: z.array(z.object({ itemId: z.string().uuid(), qtyPerUnit: z.number().positive() })).max(30),
 });
 
@@ -274,7 +275,7 @@ router.get('/specs', async (_req: AuthRequest, res: Response) => {
   const items = await prisma.item.findMany({
     where: { type: 'PRODUCT', archived: false },
     orderBy: { name: 'asc' },
-    include: { spec: { include: { semiItem: true, czProject: { select: { id: true, name: true } }, materials: { include: { item: true }, orderBy: { sort: 'asc' } } } } },
+    include: { spec: { include: { semiItem: true, czProject: { select: { id: true, name: true } }, labelProject: { select: { id: true, name: true } }, materials: { include: { item: true }, orderBy: { sort: 'asc' } } } } },
   });
   res.json(items);
 });
