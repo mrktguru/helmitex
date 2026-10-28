@@ -23,6 +23,7 @@ export default function StockQuantAssemble() {
   const [typeId, setTypeId] = useState('');
   const [lotKey, setLotKey] = useState('');
   const [count, setCount] = useState('1');
+  const [perQuant, setPerQuant] = useState('');
   const [codesText, setCodesText] = useState('');
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
@@ -33,6 +34,7 @@ export default function StockQuantAssemble() {
   const qt = types.find((t) => t.id === typeId);
   useEffect(() => {
     setLotKey('');
+    setPerQuant(qt ? String(qt.unitsPerQuant) : '');
     if (qt) api.getBalances({ itemId: qt.productItemId }).then(setBalances);
   }, [typeId]);
 
@@ -40,9 +42,10 @@ export default function StockQuantAssemble() {
   const lots = balances.filter((b) => (imported ? b.state === 'LABELED' : b.state === 'UNLABELED' || b.state === 'LABELED') && b.qty > 0)
     .sort((a, b) => (a.lot.expiresAt ? Date.parse(a.lot.expiresAt) : Infinity) - (b.lot.expiresAt ? Date.parse(b.lot.expiresAt) : Infinity));
   const src = lots.find((b) => `${b.lotId}|${b.state}` === lotKey);
-  const n = qt?.unitsPerQuant ?? 0;
+  const n = Number(perQuant) || 0;
+  const customN = !!qt && n > 0 && n !== qt.unitsPerQuant;
   const k = Number(count) || 0;
-  const parsed = useMemo(() => (imported && qt?.trackCz ? parseCodes(codesText, n) : null), [codesText, n, imported, qt]);
+  const parsed = useMemo(() => (imported && qt?.trackCz ? parseCodes(codesText, Math.max(n, 1)) : null), [codesText, n, imported, qt]);
   const effK = parsed ? parsed.quants.length : k;
 
   const maxByStock = src && n ? Math.floor(src.qty / n) : null;
@@ -53,6 +56,7 @@ export default function StockQuantAssemble() {
   async function submit() {
     setError('');
     if (!qt || !src) { setError('Выберите вариант кванта и партию'); return; }
+    if (n < 1) { setError('Укажите, сколько штук в кванте'); return; }
     if (parsed) {
       if (parsed.total % n !== 0) { setError(`Кодов ${parsed.total} — не делится на ${n} (единиц в кванте)`); return; }
       if (parsed.quants.length === 0) { setError('Вставьте коды ЧЗ'); return; }
@@ -60,7 +64,7 @@ export default function StockQuantAssemble() {
     setBusy(true);
     try {
       const doc = await api.assembleQuants({
-        quantTypeId: qt.id, sourceLotId: src.lotId, sourceState: src.state, quantCount: effK,
+        quantTypeId: qt.id, sourceLotId: src.lotId, sourceState: src.state, quantCount: effK, unitsPerQuant: customN ? n : undefined,
         comment: comment || null, imported, codes: parsed?.quants,
       });
       navigate(`/stock/quant/${doc.id}`, { replace: true });
@@ -99,6 +103,10 @@ export default function StockQuantAssemble() {
             ))}
           </select>
         </label>
+        <label className="flex flex-col gap-1 text-xs text-slate-500">Штук в кванте
+          <input disabled={!qt} value={perQuant} onChange={(e) => setPerQuant(e.target.value.replace(/\D/g, '').slice(0, 4))} className={inputCls + ' text-right'} />
+          {customN && <span className="text-amber-700">не как в варианте ({qt.unitsPerQuant} шт)</span>}
+        </label>
         {!parsed && (
           <label className="flex flex-col gap-1 text-xs text-slate-500">Количество квантов
             <input value={count} onChange={(e) => setCount(e.target.value.replace(/\D/g, ''))} className={inputCls + ' text-right'} />
@@ -136,7 +144,7 @@ export default function StockQuantAssemble() {
       )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
-      <button disabled={busy || !src || effK < 1 || (maxByStock != null && effK > maxByStock) || (maxByCodes != null && effK > maxByCodes)}
+      <button disabled={busy || !src || n < 1 || effK < 1 || (maxByStock != null && effK > maxByStock) || (maxByCodes != null && effK > maxByCodes)}
         onClick={submit} className={btnPrimary}>
         {busy ? 'Формирую…' : imported ? `Внести ${effK} кв.` : needCodes ? `Собрать ${effK} кв. и выдать коды ЧЗ` : `Собрать ${effK} кв.`}
       </button>

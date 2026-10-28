@@ -40,8 +40,9 @@ async function issueBatch(tx: Tx, projectId: string, n: number, _projectName: st
  * Сборка квантов: единицы ГП переходят из «без ЧЗ» / «с ЧЗ» в «в кванте», списываются короба и материалы,
  * на каждый квант выдаётся N кодов ЧЗ отдельной выдачей (OutputBatch) — её коды и есть состав кванта.
  * importCodes — ввод уже собранных квантов: коды переданы текстом, ничего не печатается и не списывается.
+ * units — штук в кванте, если не как в варианте; число хранится в каждом кванте (Quant.units).
  */
-export async function postQuant(tx: Tx, docId: string, importCodes?: string[][]): Promise<PdfJob[]> {
+export async function postQuant(tx: Tx, docId: string, importCodes?: string[][], units?: number): Promise<PdfJob[]> {
   const doc = await tx.stockDoc.findUnique({ where: { id: docId } });
   if (!doc || doc.type !== 'QUANT') throw new StockError('Документ не найден');
   if (!doc.quantTypeId) throw new StockError('Не выбран тип кванта');
@@ -57,7 +58,7 @@ export async function postQuant(tx: Tx, docId: string, importCodes?: string[][])
   const lot = await tx.lot.findUnique({ where: { id: doc.sourceLotId }, include: { item: true } });
   if (lot?.itemId !== qt.productItemId) throw new StockError(`Партия не относится к SKU типа «${qt.name}»`);
 
-  const n = qt.unitsPerQuant;
+  const n = units ?? qt.unitsPerQuant;
   const state: ProductState = doc.sourceState ?? (doc.imported ? 'LABELED' : 'UNLABELED');
   // Из «с ЧЗ» коды уже на банках (напечатаны маркировкой) — новые не выдаются, квант получает коды партии россыпью
   const needCz = qt.trackCz && !doc.imported && state === 'UNLABELED';

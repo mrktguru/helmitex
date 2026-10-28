@@ -65,9 +65,11 @@ export default function StockQuants() {
       g.quants.push(x);
       g.units += x.units;
       g.byStatus[x.status] = (g.byStatus[x.status] ?? 0) + 1;
-      const v = g.byVariant.get(x.quantTypeId) ?? { name: x.quantType.name, units: x.quantType.unitsPerQuant, count: 0 };
+      // неполные/нестандартные кванты (20 шт в варианте на 42) — отдельной строкой
+      const vk = `${x.quantTypeId}|${x.units}`;
+      const v = g.byVariant.get(vk) ?? { name: x.quantType.name, units: x.units, count: 0 };
       v.count++;
-      g.byVariant.set(x.quantTypeId, v);
+      g.byVariant.set(vk, v);
       g.value += x.unitCost ?? 0;
       const exp = x.lot.expiresAt ? Date.parse(x.lot.expiresAt) : null;
       if (exp && x.status === 'ASSEMBLED' && (g.nearest == null || exp < g.nearest)) g.nearest = exp;

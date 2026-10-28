@@ -118,6 +118,8 @@ const assembleSchema = z.object({
   sourceLotId: z.string().uuid(),
   sourceState: z.enum(['UNLABELED', 'LABELED']),
   quantCount: z.number().int().min(1).max(500),
+  // штук в кванте, если не как в варианте (например, неполный квант на 20 шт)
+  unitsPerQuant: z.number().int().min(1).max(1000).optional(),
   date: z.string().optional(),
   comment: z.string().max(1000).nullable().optional(),
   // ввод существующих квантов: коды по квантам (для типов с ЧЗ)
@@ -129,7 +131,7 @@ const assembleSchema = z.object({
 router.post('/quant-docs', async (req: AuthRequest, res: Response): Promise<void> => {
   const parsed = assembleSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
-  const { codes, date, imported, ...data } = parsed.data;
+  const { codes, date, imported, unitsPerQuant, ...data } = parsed.data;
   try {
     const { doc, jobs } = await prisma.$transaction(async (tx) => {
       const doc = await tx.stockDoc.create({
@@ -142,7 +144,7 @@ router.post('/quant-docs', async (req: AuthRequest, res: Response): Promise<void
           userId: req.user!.id,
         },
       });
-      const jobs = await postQuant(tx, doc.id, imported ? codes ?? [] : undefined);
+      const jobs = await postQuant(tx, doc.id, imported ? codes ?? [] : undefined, unitsPerQuant);
       return { doc, jobs };
     }, { isolationLevel: 'Serializable', timeout: 60_000 });
     await enqueuePdfJobs(jobs);

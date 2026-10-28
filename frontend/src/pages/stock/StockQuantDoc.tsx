@@ -42,6 +42,7 @@ export default function StockQuantDoc() {
   if (error && !doc) return <p className="text-red-600">{error}</p>;
   if (!doc) return <p className="text-slate-500">Загрузка…</p>;
   const qt = doc.quantType;
+  const units = doc.quants[0]?.units ?? qt.unitsPerQuant;
 
   return (
     <div className="space-y-4">
@@ -54,7 +55,7 @@ export default function StockQuantDoc() {
       <div className="bg-white rounded-xl border p-4 grid grid-cols-2 lg:grid-cols-5 gap-3 text-sm">
         <div><div className="text-xs text-slate-500">Тип</div>{qt.name}</div>
         <div><div className="text-xs text-slate-500">Партия</div><span className="font-mono text-xs">{doc.sourceLotNumber}</span> · {STATE_LABEL[doc.sourceState] || '—'}</div>
-        <div><div className="text-xs text-slate-500">Квантов × ед.</div>{doc.quantCount} × {qt.unitsPerQuant} = {doc.quantCount * qt.unitsPerQuant}</div>
+        <div><div className="text-xs text-slate-500">Квантов × ед.</div>{doc.quantCount} × {units} = {doc.quantCount * units}</div>
         <div><div className="text-xs text-slate-500">Дата</div>{fmtDate(doc.date)} · {doc.user.email}</div>
         <div><div className="text-xs text-slate-500">Себестоимость кванта</div>{fmtMoney(doc.quants[0]?.unitCost)}{doc.quants[0]?.unitCost != null && ' ₽'}</div>
       </div>
@@ -88,7 +89,7 @@ export default function StockQuantDoc() {
             )}
           </div>
           {batches.length > 0 && (
-            <p className="text-xs text-slate-500">В файле ЧЗ этикетки идут блоками по {qt.unitsPerQuant} в порядке номеров квантов: первый блок — в {doc.quants[0]?.number}, второй — в следующий и т. д.</p>
+            <p className="text-xs text-slate-500">В файле ЧЗ этикетки идут блоками по {units} в порядке номеров квантов: первый блок — в {doc.quants[0]?.number}, второй — в следующий и т. д.</p>
           )}
         </div>
       )}
