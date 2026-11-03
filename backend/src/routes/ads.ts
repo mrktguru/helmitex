@@ -9,7 +9,7 @@ import {
   createCampaign, getIntraday, refreshAdsMeta, getProducts, getReport, todayMsk, setActionPrice, setBudget, setCampaignState, setCpcBid, setPrice, setSelected, setSelectedBid, ymd,
 } from '../services/ads';
 import { syncStatus } from '../services/syncStatus';
-import { DEFAULT_LIMITS, DEFAULT_MODS, getBidder, runBidder, saveBidder } from '../services/bidder';
+import { DEFAULT_BOOST, DEFAULT_LIMITS, DEFAULT_MODS, getBidder, runBidder, saveBidder } from '../services/bidder';
 
 const router = Router();
 router.use(authMiddleware);
@@ -115,13 +115,24 @@ const limitsSchema = z.object({
   cooldownMin: z.number().min(30).max(1440), minClicks: z.number().min(0).max(5000), maxChangesPerDay: z.number().int().min(1).max(48),
   stopLossRub: z.number().min(100).max(1_000_000), hourFrom: z.number().min(0).max(23), hourTo: z.number().min(1).max(24),
 }).partial();
+const boostSchema = z.object({
+  weeklyBudget: z.number().min(1000).max(10_000_000), maxBid: z.number().min(1).max(5000), maxCartRub: z.number().min(1).max(100_000),
+  wave: z.boolean(), rampStepPct: z.number().min(1).max(100), rampEveryMin: z.number().min(30).max(1440), satGainPct: z.number().min(0).max(100),
+  holdDays: z.number().int().min(1).max(60), decayPct: z.number().min(1).max(50), keepOrganicPct: z.number().min(1).max(200),
+  rerampOrganicPct: z.number().min(1).max(200), rerampWeeks: z.number().min(1).max(52),
+  marginal: z.boolean(), maxExtraCartRub: z.number().min(1).max(100_000),
+  position: z.boolean(), targetPosition: z.number().min(1).max(10_000), rerampWorsePct: z.number().min(1).max(1000),
+}).partial();
 router.put('/bidder/:id', h(async (req, res) => {
   const b = z.object({
-    enabled: z.boolean(), goal: z.enum(['CART', 'ORDER', 'DRR']), targetCpo: money, targetDrr: z.number().min(0.01).max(1),
-    mods: modsSchema, limits: limitsSchema,
+    enabled: z.boolean(), goal: z.enum(['CART', 'ORDER', 'DRR', 'BOOST']), targetCpo: money, targetDrr: z.number().min(0.01).max(1),
+    mods: modsSchema, limits: limitsSchema, boost: boostSchema.optional(),
   }).parse(req.body);
   const L = { ...DEFAULT_LIMITS, ...b.limits };
-  if (L.minBid >= L.maxBid) throw new StockError('Минимальная ставка должна быть меньше максимальной');
+  const B = { ...DEFAULT_BOOST, ...b.boost };
+  if (b.goal === 'BOOST' && L.minBid >= B.maxBid) throw new StockError('Минимальная ставка должна быть меньше потолка ставки раскрутки');
+  if (b.goal === 'BOOST' && B.rerampOrganicPct > B.keepOrganicPct) throw new StockError('Порог повторного разгона должен быть не выше порога, при котором продолжается снижение');
+  if (b.goal !== 'BOOST' && L.minBid >= L.maxBid) throw new StockError('Минимальная ставка должна быть меньше максимальной');
   if (L.hourFrom >= L.hourTo) throw new StockError('Рабочие часы: начало должно быть раньше конца');
   res.json(await saveBidder(id.parse(req.params.id), { ...b, mods: { ...DEFAULT_MODS, ...b.mods }, limits: L }, (await actor(req)).email));
 }));

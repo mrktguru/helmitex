@@ -3,8 +3,8 @@ import { campaignMeta, increments, setBudget, setCpcBid, ymd } from './ads';
 import { ozon, ozonConfigured } from './ozon';
 
 // Биддер кампании «оплата за клик».
-// Цель (одна): цена корзины с поправкой на конверсию корзины в заказ (по умолчанию), цена заказа или ДРР.
-// Модификаторы (сочетаются с любой целью): часы, темп бюджета, остатки, отклик показов, органика, рост бюджета.
+// Цель (одна): цена корзины с поправкой на конверсию корзины в заказ (по умолчанию), цена заказа, ДРР или раскрутка (см. runBoost).
+// Модификаторы (сочетаются с ценой корзины / заказа / ДРР): часы, темп бюджета, остатки, отклик показов, органика, рост бюджета.
 // Ограничители действуют всегда. Решения — каждые 30 минут после снимка статистики.
 
 const DAY = 86_400_000, MSK = 3 * 3600_000;
@@ -37,6 +37,7 @@ interface State {
   day?: string; changes?: number;
   pending?: { at: string; prevBid: number; prevBase: number; viewsBefore: number; shareBefore: number };
   lastLogAt?: string; lastReason?: string;
+  boost?: BoostState;
 }
 
 export interface Decision {
@@ -57,6 +58,18 @@ async function fboStock(skus: string[]): Promise<Map<string, number>> {
   return by;
 }
 
+// На сколько дней хватит остатков на складах Ozon по самому дефицитному SKU (по заказам за 3 дня); null — продаж нет
+async function stockDays(skus: string[], msk: Date, today: string): Promise<number | null> {
+  const stocks = await fboStock(skus);
+  const days = await Promise.all(skus.map(async (sku) => {
+    const sales = await prisma.adDaySku.findMany({ where: { sku, date: { gte: new Date(ymd(new Date(msk.getTime() - 3 * DAY)) + 'T00:00:00Z'), lt: new Date(today + 'T00:00:00Z') } } });
+    const perDay = sales.reduce((t, x) => t + x.orders, 0) / 3;
+    return perDay > 0 ? (stocks.get(sku) ?? 0) / perDay : null;
+  }));
+  const min = Math.min(...days.filter((x): x is number => x != null));
+  return isFinite(min) ? min : null;
+}
+
 async function dailyAgg(campaignId: string, fromDay: string, toDayExcl: string) {
   const rows = await prisma.adDayCampaign.findMany({ where: { campaignId, date: { gte: new Date(fromDay + 'T00:00:00Z'), lt: new Date(toDayExcl + 'T00:00:00Z') } } });
   const s = (k: 'views' | 'clicks' | 'toCart' | 'orders' | 'ordersMoney' | 'spend') => rows.reduce((t, r) => t + r[k], 0);
@@ -70,18 +83,21 @@ async function writeLog(d: Decision) {
 export async function getBidder(campaignId: string) {
   const cfg = await prisma.adBidder.findUnique({ where: { campaignId } });
   const logs = await prisma.adBidderLog.findMany({ where: { campaignId }, orderBy: { at: 'desc' }, take: 60 });
+  const { boost, ...mods } = (cfg?.mods as any) ?? {};
   return {
     campaignId, enabled: cfg?.enabled ?? false, goal: cfg?.goal ?? 'CART', targetCpo: cfg?.targetCpo ?? 220, targetDrr: cfg?.targetDrr ?? 0.25,
-    mods: { ...DEFAULT_MODS, ...(cfg?.mods as object ?? {}) }, limits: { ...DEFAULT_LIMITS, ...(cfg?.limits as object ?? {}) },
+    mods: { ...DEFAULT_MODS, ...mods }, boost: { ...DEFAULT_BOOST, ...boost }, limits: { ...DEFAULT_LIMITS, ...(cfg?.limits as object ?? {}) },
     state: cfg?.state ?? null, updatedAt: cfg?.updatedAt ?? null, updatedBy: cfg?.updatedBy ?? null, logs,
   };
 }
 
-export async function saveBidder(campaignId: string, data: { enabled: boolean; goal: string; targetCpo: number; targetDrr: number; mods: Partial<Mods>; limits: Partial<Limits> }, email: string | null) {
+export async function saveBidder(campaignId: string, data: { enabled: boolean; goal: string; targetCpo: number; targetDrr: number; mods: Partial<Mods>; limits: Partial<Limits>; boost?: Partial<BoostCfg> }, email: string | null) {
   const prev = await prisma.adBidder.findUnique({ where: { campaignId } });
-  const mods = { ...DEFAULT_MODS, ...data.mods }, limits = { ...DEFAULT_LIMITS, ...data.limits };
-  // при включении базовая ставка = текущая; состояние обнуляется
-  const resetState = !prev?.enabled && data.enabled;
+  // настройки раскрутки хранятся в mods.boost
+  const prevBoost = (prev?.mods as any)?.boost ?? {};
+  const mods = { ...DEFAULT_MODS, ...data.mods, boost: { ...DEFAULT_BOOST, ...prevBoost, ...data.boost } }, limits = { ...DEFAULT_LIMITS, ...data.limits };
+  // при включении или смене цели базовая ставка = текущая; состояние обнуляется (раскрутка начинает с волны 1)
+  const resetState = (!prev?.enabled && data.enabled) || (!!prev && prev.goal !== data.goal);
   await prisma.adBidder.upsert({
     where: { campaignId },
     create: { campaignId, enabled: data.enabled, goal: data.goal, targetCpo: data.targetCpo, targetDrr: data.targetDrr, mods, limits, state: {}, updatedBy: email },
@@ -92,7 +108,7 @@ export async function saveBidder(campaignId: string, data: { enabled: boolean; g
     const meta = await campaignMeta();
     const c = meta.cpcAll.find((x) => x.id === campaignId);
     for (const p of c?.products ?? []) {
-      await prisma.adJournal.create({ data: { sku: p.sku, campaignId, kind: 'NOTE', source: 'AUTO', at: new Date(), userEmail: email, text: `РК ${campaignId}: биддер ${data.enabled ? `включён — цель ${data.goal === 'CART' ? 'цена корзины' : data.goal === 'ORDER' ? 'цена заказа' : 'ДРР'}, заказ ≤ ${fmt(data.targetCpo)} ₽` : 'выключен'}` } });
+      await prisma.adJournal.create({ data: { sku: p.sku, campaignId, kind: 'NOTE', source: 'AUTO', at: new Date(), userEmail: email, text: `РК ${campaignId}: биддер ${data.enabled ? `включён — цель ${data.goal === 'BOOST' ? `раскрутка, бюджет ${fmt(mods.boost.weeklyBudget)} ₽/нед` : `${data.goal === 'CART' ? 'цена корзины' : data.goal === 'ORDER' ? 'цена заказа' : 'ДРР'}, заказ ≤ ${fmt(data.targetCpo)} ₽`}` : 'выключен'}` } });
     }
   }
   return getBidder(campaignId);
@@ -135,6 +151,10 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
   const curBid = c.products.reduce((t, p) => t + p.bid, 0) / c.products.length;
   const base = st.baseBid ?? curBid;
   metrics.bid = round(curBid);
+  if (cfg.goal === 'BOOST') {
+    const B: BoostCfg = { ...DEFAULT_BOOST, ...(cfg.mods as any)?.boost };
+    return runBoost({ campaignId, B, L, c, curBid, st, now, msk, today, hour, reasons, metrics, done, dry });
+  }
 
   // 1. Калибровка по дням: конверсия корзины в заказ за 28 и за 3 последних полных дня
   const d28 = await dailyAgg(campaignId, ymd(new Date(msk.getTime() - 28 * DAY)), today);
@@ -223,14 +243,8 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
   }
   if (mods.stock) {
     try {
-      const stocks = await fboStock(c.products.map((p) => p.sku));
-      const days = await Promise.all(c.products.map(async (p) => {
-        const sales = await prisma.adDaySku.findMany({ where: { sku: p.sku, date: { gte: new Date(ymd(new Date(msk.getTime() - 3 * DAY)) + 'T00:00:00Z'), lt: new Date(today + 'T00:00:00Z') } } });
-        const perDay = sales.reduce((t, x) => t + x.orders, 0) / 3;
-        return perDay > 0 ? (stocks.get(p.sku) ?? 0) / perDay : null;
-      }));
-      const minDays = Math.min(...days.filter((x): x is number => x != null));
-      if (isFinite(minDays)) {
+      const minDays = await stockDays(c.products.map((p) => p.sku), msk, today);
+      if (minDays != null) {
         metrics.stockDays = round(minDays, 1);
         if (minDays < 2) { m *= 0.7; reasons.push(`склад Ozon: запаса на ${fmt(minDays)} дн. — ставка ×0,7 (заказы уходят на FBS)`); }
         else if (minDays < 5) { m *= 0.85; reasons.push(`склад Ozon: запаса на ${fmt(minDays)} дн. — ставка ×0,85`); }
@@ -306,4 +320,259 @@ export async function runAllBidders() {
       await prisma.adBidderLog.create({ data: { campaignId: b.campaignId, action: 'ERROR', reason } }).catch(() => {});
     }
   }
+}
+
+// ───────────── Раскрутка ─────────────
+// Цель BOOST: набрать корзины в пределах недельного бюджета. Три механизма включаются отдельно:
+//  • волна — разгон → удержание → плановое снижение → поддержка → снова разгон;
+//  • предельная цена — повышение проходит, только если дополнительная корзина не дороже потолка (без волны — сама ведёт ставку);
+//  • позиция — хуже цели: снижение на паузе, сильно хуже — повторный разгон.
+// Порядок: ограничители → запрет повышения по предельной цене → позиция → план волны.
+
+export const DEFAULT_BOOST = {
+  weeklyBudget: 150_000, maxBid: 150, maxCartRub: 800,
+  wave: true, rampStepPct: 20, rampEveryMin: 120, satGainPct: 5, holdDays: 6, decayPct: 10, keepOrganicPct: 80, rerampOrganicPct: 70, rerampWeeks: 3,
+  marginal: true, maxExtraCartRub: 700,
+  position: true, targetPosition: 20, rerampWorsePct: 50,
+};
+export type BoostCfg = typeof DEFAULT_BOOST;
+type Phase = 'RAMP' | 'HOLD' | 'DECAY' | 'SUPPORT';
+interface Rate { views: number; clicks: number; carts: number; spend: number; share: number }
+interface Level { orgCarts: number; orgOrders: number; adCarts: number; position: number | null; days: number }
+interface BoostState {
+  phase: Phase; phaseAt: string; wave: number; waveAt: string;
+  peakBid?: number; supportBid?: number; hold?: Level;
+  // последнее изменение ставки: по нему считаются отклик показов и цена дополнительной корзины
+  step?: { at: string; from: number; to: number; before: Rate; checked?: boolean };
+  flat?: number; // разгон: шагов подряд без роста показов
+  lastGain?: number | null; lastExtraCart?: number | null;
+  dayStep?: string; decayFrom?: number; stockCut?: boolean; budgetSet?: number;
+}
+const PHASE_L: Record<Phase, string> = { RAMP: 'разгон', HOLD: 'удержание', DECAY: 'плановое снижение', SUPPORT: 'поддержка' };
+const NO_EXTRA = 99_999; // показы/клики не выросли — дополнительная корзина «бесконечно» дорогая
+
+// Органика по дням: продажи карточки минус продажи с рекламы (всех кампаний), позиция в поиске
+async function organicDays(skus: string[], fromDay: string, toDayExcl: string) {
+  const date = { gte: new Date(fromDay + 'T00:00:00Z'), lt: new Date(toDayExcl + 'T00:00:00Z') };
+  const [all, ad] = await Promise.all([
+    prisma.adDaySku.findMany({ where: { sku: { in: skus }, date } }),
+    prisma.adDayCampaign.findMany({ where: { sku: { in: skus }, date } }),
+  ]);
+  const by = new Map<string, { carts: number; orders: number; adCarts: number; adOrders: number; pos: number[] }>();
+  for (const r of all) {
+    const d = by.get(ymd(r.date)) ?? { carts: 0, orders: 0, adCarts: 0, adOrders: 0, pos: [] };
+    d.carts += r.toCart; d.orders += r.orders; if (r.position != null) d.pos.push(r.position);
+    by.set(ymd(r.date), d);
+  }
+  for (const r of ad) { const d = by.get(ymd(r.date)); if (d) { d.adCarts += r.toCart; d.adOrders += r.orders; } }
+  return [...by.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([day, d]) => ({
+    day, orgCarts: Math.max(0, d.carts - d.adCarts), orgOrders: Math.max(0, d.orders - d.adOrders), adCarts: d.adCarts,
+    position: d.pos.length ? d.pos.reduce((t, v) => t + v, 0) / d.pos.length : null,
+  }));
+}
+function level(days: Awaited<ReturnType<typeof organicDays>>): Level | null {
+  if (!days.length) return null;
+  const avg = (k: 'orgCarts' | 'orgOrders' | 'adCarts') => days.reduce((t, d) => t + d[k], 0) / days.length;
+  const pos = days.map((d) => d.position).filter((x): x is number => x != null);
+  return { orgCarts: avg('orgCarts'), orgOrders: avg('orgOrders'), adCarts: avg('adCarts'), position: pos.length ? pos.reduce((t, v) => t + v, 0) / pos.length : null, days: days.length };
+}
+const pct = (v: number) => `${fmt(v * 100)}%`;
+
+interface BoostCtx {
+  campaignId: string; B: BoostCfg; L: Limits; c: Awaited<ReturnType<typeof campaignMeta>>['cpcAll'][number]; curBid: number; st: State;
+  now: Date; msk: Date; today: string; hour: number; reasons: string[]; metrics: Record<string, unknown>;
+  done: (action: string, extra?: Partial<Decision>) => Promise<Decision>; dry: boolean;
+}
+
+async function runBoost(x: BoostCtx): Promise<Decision> {
+  const { campaignId, B, L, c, curBid, st, now, msk, today, hour, reasons, metrics, done, dry } = x;
+  const t = now.getTime();
+  const bs: BoostState = st.boost ?? { phase: B.wave ? 'RAMP' : 'SUPPORT', phaseAt: now.toISOString(), wave: 1, waveAt: now.toISOString() };
+  if (!st.boost) reasons.push(B.wave ? `раскрутка: старт волны 1 со ставки ${fmt(curBid)} ₽` : 'раскрутка: ровный режим');
+  st.boost = bs;
+  if (!B.wave && bs.phase !== 'SUPPORT') { bs.phase = 'SUPPORT'; bs.phaseAt = now.toISOString(); }
+  const label = () => (B.wave ? `Волна ${bs.wave} · ${PHASE_L[bs.phase]}` : 'Ровный режим');
+  let phaseChanged = false, rampNow = false;
+  const setPhase = (p: Phase, why: string) => {
+    reasons.push(`${label()} → ${PHASE_L[p]}: ${why}`);
+    bs.phase = p; bs.phaseAt = now.toISOString(); bs.flat = 0; phaseChanged = true;
+  };
+  const startWave = (why: string) => {
+    bs.wave += 1; bs.waveAt = now.toISOString(); bs.peakBid = undefined; bs.hold = undefined; bs.supportBid = undefined;
+    setPhase('RAMP', `волна ${bs.wave}: ${why}`); rampNow = true;
+  };
+
+  // Бюджет кампании в Ozon = недельный бюджет раскрутки: его Ozon соблюдает сам
+  if (c.weeklyBudget !== B.weeklyBudget && bs.budgetSet !== B.weeklyBudget) {
+    if (!dry) await setBudget(campaignId, { weeklyBudget: B.weeklyBudget }, ACTOR);
+    bs.budgetSet = B.weeklyBudget;
+    reasons.push(`бюджет кампании ${fmt(c.weeklyBudget)} → ${fmt(B.weeklyBudget)} ₽/нед`);
+  }
+
+  // ── Данные: снимки каждые 30 минут (реклама), дни (органика и позиция)
+  const rows = await prisma.adIntraday.findMany({ where: { campaignId, at: { gte: new Date(t - 74 * 3600_000) } }, orderBy: { at: 'asc' } });
+  const inc = increments(rows);
+  const hOf = (ms: number) => ((ms + MSK) % DAY) / 3600_000;
+  const rate = (from: number, to: number): Rate => ({
+    ...inc.filter((i) => i.at.getTime() > from && i.at.getTime() <= to)
+      .reduce((s, i) => ({ views: s.views + i.views, clicks: s.clicks + i.clicks, carts: s.carts + i.toCart, spend: s.spend + i.spend }), { views: 0, clicks: 0, carts: 0, spend: 0 }),
+    share: demandShare(hOf(from), hOf(from) + (to - from) / 3600_000),
+  });
+  // показатель за «средний день» с поправкой на время суток
+  const per = (r: Rate, k: 'views' | 'clicks' | 'spend') => (r.share > 0 ? r[k] / r.share : 0);
+
+  const d7 = await dailyAgg(campaignId, ymd(new Date(msk.getTime() - 7 * DAY)), today);
+  const cvr = d7.carts >= 20 && d7.clicks > 0 ? d7.carts / d7.clicks : 0.075;
+  const d28 = await dailyAgg(campaignId, ymd(new Date(msk.getTime() - 28 * DAY)), today);
+  const d3 = await dailyAgg(campaignId, ymd(new Date(msk.getTime() - 3 * DAY)), today);
+  const conv28 = d28.carts >= 60 ? d28.orders / d28.carts : null;
+  const conv3 = d3.carts >= 30 ? d3.orders / d3.carts : null;
+  const freeze = conv28 != null && conv3 != null && conv3 / conv28 < 0.67;
+
+  const day24 = rate(t - 24 * 3600_000, t);
+  const cart24 = day24.carts ? day24.spend / day24.carts : null;
+  // судим о цене корзины, когда за сутки потрачено хотя бы три потолка — иначе одна случайная корзина решает всё
+  const cartOver = day24.spend >= B.maxCartRub * 3 && day24.spend > B.maxCartRub * Math.max(1, day24.carts);
+  const spentToday = rows.filter((r) => ymd(r.day) === today).pop()?.spend ?? 0;
+  const dayPlan = B.weeklyBudget / 7;
+  const pace = hour >= 2 ? spentToday / Math.max(1, dayPlan * demandShare(0, hour)) : null;
+  const d6 = await dailyAgg(campaignId, ymd(new Date(msk.getTime() - 6 * DAY)), today);
+  const weekSpent = d6.spend + spentToday;
+  const budgetHit = weekSpent >= B.weeklyBudget * 0.98 || c.state === 'CAMPAIGN_STATE_STOPPED';
+  const w3 = rate(t - 3 * 3600_000, t);
+  const stopLoss = w3.spend >= L.stopLossRub && w3.carts === 0;
+
+  const skus = c.products.map((p) => p.sku);
+  const org = await organicDays(skus, ymd(new Date(msk.getTime() - 45 * DAY)), today);
+  const now2 = level(org.slice(-2)), now3 = level(org.slice(-3));
+  const pos = now2?.position ?? null;
+  const posWorse = B.position && pos != null && pos > B.targetPosition;
+  const posBad = B.position && pos != null && pos > B.targetPosition * (1 + B.rerampWorsePct / 100);
+  const posGood = B.position && pos != null && pos <= B.targetPosition * 0.6;
+
+  let stock: number | null = null;
+  try { stock = await stockDays(skus, msk, today); } catch (e) { metrics.stockError = (e as Error).message.slice(0, 120); }
+
+  // ── Отклик на последнее изменение ставки: показы и цена дополнительной корзины
+  const stepAt = bs.step ? new Date(bs.step.at).getTime() : 0;
+  const cooling = !!bs.step && t - stepAt < B.rampEveryMin * 60_000;
+  let fresh = false; // отклик посчитан в этот запуск
+  if (bs.step && !cooling && !bs.step.checked) {
+    const before = bs.step.before, after = rate(Math.max(stepAt, t - 24 * 3600_000), t);
+    bs.lastGain = per(before, 'views') > 0 ? per(after, 'views') / per(before, 'views') - 1 : null;
+    if (bs.step.to > bs.step.from) {
+      const dClicks = per(after, 'clicks') - per(before, 'clicks'), dSpend = per(after, 'spend') - per(before, 'spend');
+      bs.lastExtraCart = dClicks > 0 ? Math.max(0, dSpend / dClicks / cvr) : dSpend > 0 ? NO_EXTRA : null;
+    }
+    bs.step.checked = true; fresh = true;
+  }
+  const extraTxt = bs.lastExtraCart == null ? null : bs.lastExtraCart >= NO_EXTRA ? 'клики не выросли' : `доп. корзина ≈ ${fmt(bs.lastExtraCart)} ₽`;
+  const margBlock = B.marginal && bs.lastExtraCart != null && bs.lastExtraCart > B.maxExtraCartRub;
+
+  // ── Ограничители: что запрещает повышать
+  const noRaise: string[] = [];
+  if (freeze) noRaise.push(`конверсия корзины в заказ упала: ${pct(conv3!)} против ${pct(conv28!)}`);
+  if (stock != null && stock < 5) noRaise.push(`склад Ozon: запаса на ${fmt(stock)} дн.`);
+  if (pace != null && pace > 1.25) noRaise.push(`темп: потрачено ${fmt(spentToday)} ₽ — выше плана дня (${pct(pace)})`);
+  if (budgetHit) noRaise.push(`бюджет недели выбран (${fmt(weekSpent)} из ${fmt(B.weeklyBudget)} ₽)`);
+  if (cartOver) noRaise.push(`корзина за сутки ${cart24 != null ? `${fmt(cart24)} ₽` : 'без корзин'} — дороже потолка ${fmt(B.maxCartRub)} ₽`);
+  if (margBlock) noRaise.push(`${extraTxt} — дороже ${fmt(B.maxExtraCartRub)} ₽`);
+
+  let target = curBid;
+  const raise = (k: number, why: string) => {
+    if (noRaise.length) { reasons.push(`${why} — не повышаю: ${noRaise.join('; ')}`); return; }
+    target = curBid * (1 + k); reasons.push(why);
+  };
+
+  // ── Фазы
+  if (bs.phase === 'RAMP') {
+    if (fresh && bs.step && bs.step.to > bs.step.from) {
+      bs.flat = bs.lastGain != null && bs.lastGain < B.satGainPct / 100 ? (bs.flat ?? 0) + 1 : 0;
+      reasons.push(`шаг ${fmt(bs.step.from)} → ${fmt(bs.step.to)} ₽: показы ${bs.lastGain != null ? `${bs.lastGain >= 0 ? '+' : ''}${pct(bs.lastGain)}` : '—'}${extraTxt ? `, ${extraTxt}` : ''}`);
+    }
+    const sat = (bs.flat ?? 0) >= 2, dear = margBlock || cartOver;
+    if (cooling) reasons.push(`${label()}: жду отклика на шаг — ещё ${Math.ceil(B.rampEveryMin - (t - stepAt) / 60_000)} мин`);
+    else if (sat || dear || curBid >= B.maxBid || budgetHit) {
+      // дорого — шаг назад, на последнюю ставку, которая ещё окупалась
+      const peak = dear && bs.step && bs.step.to > bs.step.from ? bs.step.from : curBid;
+      bs.peakBid = peak; target = peak;
+      setPhase('HOLD', `${sat ? 'показы перестали расти' : dear ? noRaise.filter((r) => /потолка|дороже/.test(r)).join('; ') : curBid >= B.maxBid ? `потолок ставки ${fmt(B.maxBid)} ₽` : 'бюджет недели выбран'} — пиковая ставка ${fmt(peak)} ₽`);
+    } else raise(B.rampStepPct / 100, `${label()}: +${B.rampStepPct}%`);
+  } else if (bs.phase === 'HOLD') {
+    target = bs.peakBid ?? curBid;
+    const daysIn = (t - new Date(bs.phaseAt).getTime()) / DAY;
+    if (daysIn >= B.holdDays) {
+      const from = ymd(new Date(new Date(bs.phaseAt).getTime() + MSK + DAY)); // полные дни удержания
+      bs.hold = level(org.filter((d) => d.day >= from)) ?? level(org.slice(-B.holdDays)) ?? undefined;
+      bs.dayStep = today;
+      setPhase('DECAY', bs.hold ? `уровень удержания — органика ${fmt(bs.hold.orgCarts)} корзин и ${fmt(bs.hold.orgOrders)} заказов в день${bs.hold.position != null ? `, позиция ${fmt(bs.hold.position)}` : ''}` : 'нет данных по органике');
+    } else reasons.push(`${label()}: держу пиковую ставку ${fmt(target)} ₽, день ${Math.ceil(daysIn)} из ${B.holdDays}`);
+  } else if (bs.phase === 'DECAY') {
+    const keep = bs.hold && now2 && bs.hold.orgCarts > 0 ? now2.orgCarts / bs.hold.orgCarts : null;
+    if (posBad) startWave(`позиция ${fmt(pos!)} при цели ${B.targetPosition}`);
+    else if (bs.dayStep === today || hour < 10) reasons.push(`${label()}: следующий шаг — ${bs.dayStep === today ? 'завтра' : 'сегодня'} после 10:00, когда придут данные за вчера`);
+    else {
+      bs.dayStep = today;
+      if (keep != null && keep < B.keepOrganicPct / 100) {
+        bs.supportBid = bs.decayFrom ?? curBid; target = bs.supportBid;
+        setPhase('SUPPORT', `органика ${pct(keep)} уровня удержания — ставка на шаг выше, поддерживающая ${fmt(bs.supportBid)} ₽`);
+      } else if (posWorse) reasons.push(`${label()}: позиция ${fmt(pos!)} хуже цели ${B.targetPosition} — снижение на паузе`);
+      else if (curBid <= L.minBid) { bs.supportBid = curBid; setPhase('SUPPORT', `дошли до минимальной ставки ${fmt(L.minBid)} ₽, органика держится`); }
+      else {
+        const k = (B.decayPct / 100) * (posGood ? 1.5 : 1);
+        bs.decayFrom = curBid; target = curBid * (1 - k);
+        reasons.push(`${label()}: органика ${keep != null ? `${pct(keep)} уровня удержания` : '— нет данных'}${posGood ? `, позиция ${fmt(pos!)} с запасом` : ''} — снижаю на ${fmt(k * 100)}%`);
+      }
+    }
+  } else if (B.wave) {
+    // поддержка между волнами
+    target = bs.supportBid ?? curBid;
+    const k3 = bs.hold && now3 && bs.hold.orgCarts > 0 ? now3.orgCarts / bs.hold.orgCarts : null;
+    const weeks = (t - new Date(bs.waveAt).getTime()) / (7 * DAY);
+    if (k3 != null && k3 < B.rerampOrganicPct / 100) startWave(`органика ${pct(k3)} уровня удержания`);
+    else if (posBad) startWave(`позиция ${fmt(pos!)} при цели ${B.targetPosition}`);
+    else if (weeks >= B.rerampWeeks) startWave(`по расписанию — прошло ${fmt(weeks)} нед.`);
+    else if (posWorse && hour >= 10 && bs.dayStep !== today && !cooling) {
+      bs.dayStep = today; raise(0.1, `${label()}: позиция ${fmt(pos!)} хуже цели ${B.targetPosition} — +10%`);
+      if (target > curBid) bs.supportBid = target;
+    } else reasons.push(`${label()}: держу ${fmt(target)} ₽${k3 != null ? ` · органика ${pct(k3)} уровня удержания` : ''}${pos != null ? ` · позиция ${fmt(pos)}` : ''}`);
+  } else {
+    // ровный режим: ставку ведут предельная цена и позиция
+    if (cooling) reasons.push(`жду отклика на изменение — ещё ${Math.ceil(B.rampEveryMin - (t - stepAt) / 60_000)} мин`);
+    else if (B.marginal) {
+      if (margBlock) { target = curBid * 0.9; reasons.push(`${extraTxt} — дороже ${fmt(B.maxExtraCartRub)} ₽, −10%`); }
+      else raise(0.1, `${extraTxt ?? 'проверяю, сколько стоит дополнительная корзина'} — +10%`);
+    } else if (B.position && pos != null) {
+      if (posWorse) raise(0.1, `позиция ${fmt(pos)} хуже цели ${B.targetPosition} — +10%`);
+      else if (posGood) { target = curBid * 0.9; reasons.push(`позиция ${fmt(pos)} с запасом — −10%`); }
+      else reasons.push(`позиция ${fmt(pos)} в пределах цели`);
+    } else reasons.push('включите волну, предельную цену или позицию');
+  }
+  // новая волна: первый шаг разгона — сразу, от текущей ставки
+  if (rampNow) { target = curBid; raise(B.rampStepPct / 100, `${label()}: +${B.rampStepPct}%`); }
+
+  // ── Ограничители, которые снижают
+  if (stopLoss && !(cooling && bs.step && bs.step.to < bs.step.from)) { target = Math.min(target, curBid * 0.85); reasons.push(`стоп: ${fmt(w3.spend)} ₽ за 3 ч без корзин — −15%`); }
+  if (stock != null && stock < 2 && !bs.stockCut) { target = Math.min(target, curBid * 0.7); bs.stockCut = true; reasons.push(`склад Ozon: запаса на ${fmt(stock)} дн. — ставка ×0,7`); }
+  if (stock == null || stock >= 5) bs.stockCut = false;
+  if (noRaise.length) target = Math.min(target, curBid);
+  target = roundBid(Math.min(B.maxBid, Math.max(L.minBid, target)));
+
+  Object.assign(metrics, {
+    phase: bs.phase, wave: bs.wave, peakBid: bs.peakBid ?? null, supportBid: bs.supportBid ?? null, target,
+    gain: bs.lastGain != null ? round(bs.lastGain, 3) : null, extraCart: bs.lastExtraCart != null && bs.lastExtraCart < NO_EXTRA ? round(bs.lastExtraCart) : bs.lastExtraCart,
+    cart24: cart24 && round(cart24), carts24: day24.carts, spend24: round(day24.spend), spentToday: round(spentToday), weekSpent: round(weekSpent), pace: pace && round(pace, 2),
+    cvr: round(cvr, 3), position: pos && round(pos, 1), orgNow: now2 && round(now2.orgCarts, 1), orgHold: bs.hold ? round(bs.hold.orgCarts, 1) : null, stockDays: stock && round(stock, 1),
+  });
+
+  const minDelta = Math.max(0.5, curBid * 0.02);
+  if (Math.abs(target - curBid) >= minDelta) {
+    if (!dry) {
+      for (const p of c.products) await setCpcBid(campaignId, p.sku, roundBid(p.bid * target / curBid), ACTOR);
+      bs.step = { at: now.toISOString(), from: curBid, to: target, before: rate(t - 4 * 3600_000, t) };
+      st.lastChangeAt = now.toISOString();
+    }
+    return done(target > curBid ? 'BID_UP' : 'BID_DOWN', { from: curBid, to: target, applied: !dry });
+  }
+  return done(phaseChanged ? 'PHASE' : 'HOLD', { from: curBid, to: curBid });
 }
