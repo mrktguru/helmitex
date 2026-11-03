@@ -477,22 +477,24 @@ async function labelTask(numbers: string[], size: 'small' | 'big') {
   // сразу после «Собрано» Ozon может ещё не видеть отправления — NO_POSTINGS_FOR_BATCH_DOWNLOAD, ждём
   let c: any;
   for (let k = 0; ; k++) {
-    try { c = await ozon('/v2/posting/fbs/package-label/create', { posting_number: numbers }); break; } catch (e) {
+    // 02.11.2026 Ozon отключил /v2/posting/fbs/package-label/create и /v1/…/get (отвечают 429 «rate limit per second»)
+    try { c = await ozon('/v3/posting/fbs/package-label/create', { posting_numbers: numbers }); break; } catch (e) {
       if (k >= 8 || !/NO_POSTINGS_FOR_BATCH_DOWNLOAD/.test((e as Error).message)) throw e;
       await sleep(10_000);
     }
   }
-  const tasks: { task_id: number; task_type: string }[] = c.result?.tasks ?? (c.result?.task_id ? [{ task_id: c.result.task_id, task_type: 'big_label' }] : []);
+  const tasks: { task_id: number; task_type: string }[] = c.tasks ?? c.result?.tasks ?? [];
   const task = tasks.find((t) => t.task_type === want);
   if (!task) throw new StockError(SIZE_ERROR[size]);
   for (let k = 0; k < 30; k++) {
     await sleep(2000);
-    const g = await ozon('/v1/posting/fbs/package-label/get', { task_id: task.task_id });
-    const st = g.result?.status;
-    if (st === 'error') throw new StockError(`Ozon: ошибка формирования этикеток — ${g.result?.error ?? ''}`);
-    if (st === 'completed' && g.result?.file_url) {
-      const missed: string[] = (g.result.unprinted_postings ?? []).map((x: any) => x.posting_number ?? x);
-      return { pdf: await PDFDocument.load(await ozonGetFile(g.result.file_url)), missed };
+    // ответ: { error, file_url, status: { code, postings_count, printed_postings_count, unprinted_postings: [{ posting_number, msg }] } }
+    const g = await ozon('/v2/posting/fbs/package-label/get', { task_id: task.task_id });
+    const st = g.status?.code ?? g.status;
+    if (st === 'error' || st === 'failed') throw new StockError(`Ozon: ошибка формирования этикеток — ${g.error ?? ''}`);
+    if (st === 'completed' && g.file_url) {
+      const missed: string[] = (g.status?.unprinted_postings ?? []).map((x: any) => x.posting_number ?? x);
+      return { pdf: await PDFDocument.load(await ozonGetFile(g.file_url)), missed };
     }
   }
   throw new StockError('Ozon долго формирует этикетки — повторите через минуту');
