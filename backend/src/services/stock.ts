@@ -180,7 +180,9 @@ export const round = (n: number) => Math.round(n * 1e6) / 1e6;
 async function postMix(tx: Tx, doc: DocWithLines): Promise<void> {
   if (!doc.outputItemId) throw new StockError('Не выбран полуфабрикат');
   if (!doc.lines.some((l) => l.qty > 0)) throw new StockError('В замесе нет компонентов');
-  if (!doc.yieldQty || doc.yieldQty <= 0) throw new StockError('Укажите выход в бочку, кг');
+  // Выход в бочку = факт с корректировками (всё, что засыпано и залито, включая воду)
+  const yieldQty = doc.yieldQty && doc.yieldQty > 0 ? doc.yieldQty : round(doc.lines.reduce((s, l) => s + l.qty, 0));
+  if (yieldQty <= 0) throw new StockError('В замесе нет компонентов');
 
   let cost: number | null = 0;
   for (const line of doc.lines) {
@@ -199,11 +201,11 @@ async function postMix(tx: Tx, doc: DocWithLines): Promise<void> {
       itemId: doc.outputItemId,
       barrel: doc.barrel,
       expiresAt: doc.expiresAt,
-      unitCost: cost == null ? null : round(cost / doc.yieldQty),
+      unitCost: cost == null ? null : round(cost / yieldQty),
     },
   });
-  await tx.stockMove.create({ data: { docId: doc.id, lotId: lot.id, state: 'NONE', qty: doc.yieldQty } });
-  await tx.stockDoc.update({ where: { id: doc.id }, data: { status: 'POSTED', postedAt: new Date(), outputLotId: lot.id } });
+  await tx.stockMove.create({ data: { docId: doc.id, lotId: lot.id, state: 'NONE', qty: yieldQty } });
+  await tx.stockDoc.update({ where: { id: doc.id }, data: { status: 'POSTED', postedAt: new Date(), outputLotId: lot.id, yieldQty } });
 }
 
 export interface Allocation { lotId: string | null; lotNumber: string | null; qty: number }

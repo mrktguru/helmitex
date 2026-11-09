@@ -18,6 +18,14 @@ interface Line {
 let seq = 0;
 const numStr = (n: number | null | undefined) => (n == null ? '' : String(Math.round(n * 1e6) / 1e6).replace('.', ','));
 const kgStr = (n: number) => (n < 1 ? `${fmtQty(n * 1000, 0)} г` : `${fmtQty(n, 2)} кг`);
+// Годен до = дата замеса + срок рецептуры (как addMonths на сервере: 31.01 + 1 мес. → 28/29.02)
+function addMonthsIso(date: string, months: number) {
+  const [y, m, d] = date.split('-').map(Number);
+  const r = new Date(Date.UTC(y, m - 1 + months, 1));
+  const last = new Date(Date.UTC(r.getUTCFullYear(), r.getUTCMonth() + 1, 0)).getUTCDate();
+  r.setUTCDate(Math.min(d, last));
+  return r.toISOString().slice(0, 10);
+}
 
 export default function StockMixEdit() {
   const { id } = useParams<{ id: string }>();
@@ -31,8 +39,12 @@ export default function StockMixEdit() {
   const [balances, setBalances] = useState<any[]>([]);
   const [head, setHead] = useState({
     date: new Date().toISOString().slice(0, 10), outputItemId: '', plannedQty: '', barrel: '',
-    yieldQty: '', expiresAt: '', comment: '',
+    expiresAt: '', comment: '',
   });
+  // Срок годности, исправленный вручную (двойной клик), больше не пересчитывается от даты и рецептуры
+  const [expManual, setExpManual] = useState(false);
+  const [expEdit, setExpEdit] = useState(false);
+  const [yieldPosted, setYieldPosted] = useState<number | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
   const [stages, setStages] = useState<Record<string, string>>({});
   const [qc, setQc] = useState('');
@@ -47,8 +59,10 @@ export default function StockMixEdit() {
     setStatus(d.status); setNumber(d.number);
     setHead({
       date: d.date.slice(0, 10), outputItemId: d.outputItemId ?? '', plannedQty: numStr(d.plannedQty), barrel: d.barrel ?? '',
-      yieldQty: numStr(d.yieldQty), expiresAt: d.expiresAt ? d.expiresAt.slice(0, 10) : '', comment: d.comment ?? '',
+      expiresAt: d.expiresAt ? d.expiresAt.slice(0, 10) : '', comment: d.comment ?? '',
     });
+    setYieldPosted(d.yieldQty ?? null);
+    setExpManual(!!d.expiresAt);
     setLines(d.lines.map((l: any) => ({
       key: String(++seq), itemId: l.itemId, stage: l.stage ?? 1, planQty: l.planQty, qty: numStr(l.qty),
       lotId: l.lotId ?? '', reason: l.reason ?? '', lotNumber: l.lotNumber,
@@ -78,6 +92,14 @@ export default function StockMixEdit() {
     // без округления массы — иначе вода этапа от округлённой массы уйдёт на граммы (20 → 20,001)
     setHead((h) => ({ ...h, plannedQty: w && waterPct > 0 ? numStr(w * 100 / waterPct) : '' }));
   }
+  const shelfMonths: number | null = semi?.recipe?.shelfLifeMonths ?? null;
+  const autoExpires = shelfMonths && head.date ? addMonthsIso(head.date, shelfMonths) : '';
+  useEffect(() => {
+    if (readOnly) return;
+    // черновик со сроком, совпадающим с расчётным, — срок не ручной, дальше следует за датой
+    if (expManual) { if (autoExpires && head.expiresAt === autoExpires) setExpManual(false); return; }
+    setHead((h) => (h.expiresAt === autoExpires ? h : { ...h, expiresAt: autoExpires }));
+  }, [autoExpires, expManual, readOnly]);
   useEffect(() => {
     setStages(semi?.recipe?.stages ?? {});
     setQc(semi?.recipe?.qc ?? '');
@@ -132,7 +154,8 @@ export default function StockMixEdit() {
 
   const planTotal = lines.reduce((s, l) => s + (l.planQty ?? 0), 0);
   const factTotal = lines.reduce((s, l) => s + (parseNum(l.qty) ?? 0), 0);
-  const yieldQty = parseNum(head.yieldQty);
+  // Выход в бочку — сколько замешали: факт с корректировками (после проведения — записанный в документе)
+  const yieldQty = readOnly && yieldPosted != null ? yieldPosted : Math.round(factTotal * 1e6) / 1e6;
 
   // Отклонение считаем по компоненту целиком (он может быть разбит на несколько лотов)
   const devByItem = useMemo(() => {
@@ -165,7 +188,7 @@ export default function StockMixEdit() {
       outputItemId: head.outputItemId || null,
       plannedQty: parseNum(head.plannedQty),
       barrel: head.barrel || null,
-      yieldQty: yieldQty,
+      yieldQty: yieldQty || null,
       expiresAt: head.expiresAt || null,
       comment: head.comment || null,
       lines: lines.map((l) => ({
@@ -181,7 +204,7 @@ export default function StockMixEdit() {
       if (post) {
         const missing = lines.find((l) => (parseNum(l.qty) ?? 0) > 0 && !l.lotId && !rawById.get(l.itemId)?.noStock);
         if (missing) throw new Error(`Выберите лот: ${rawById.get(missing.itemId)?.name}`);
-        if (!yieldQty) throw new Error('Укажите выход в бочку, кг');
+        if (!yieldQty) throw new Error('Факт замеса — 0 кг');
         if (bigDev.length && !confirm(`Отклонение больше 3 %: ${bigDev.map(([i]) => rawById.get(i)?.name).join(', ')}. Провести всё равно?`)) { setBusy(false); return; }
       }
       if (isNew) {
@@ -358,18 +381,23 @@ export default function StockMixEdit() {
         )}
 
         {lines.length > 0 && (
-          <div className="bg-white rounded-xl border p-4 grid grid-cols-2 lg:grid-cols-6 gap-3 items-end">
+          <div className="bg-white rounded-xl border p-4 grid grid-cols-2 lg:grid-cols-4 gap-3 items-end">
             <div className="text-sm"><div className="text-xs text-slate-500">По норме</div>{fmtQty(planTotal, 2)} кг</div>
-            <div className="text-sm"><div className="text-xs text-slate-500">Факт (с корр.)</div>{fmtQty(factTotal, 2)} кг</div>
-            <label className="flex flex-col gap-1 text-xs text-slate-500">Выход в бочку, кг
-              <input disabled={readOnly} value={head.yieldQty} onChange={(e) => setHead({ ...head, yieldQty: e.target.value })} className={inputCls + ' text-right'} />
-            </label>
-            <div className="text-sm"><div className="text-xs text-slate-500">Потери</div>
-              {yieldQty != null ? <span className={clsx(factTotal - yieldQty > factTotal * 0.02 && 'text-amber-700 font-semibold')}>{fmtQty(factTotal - yieldQty, 2)} кг</span> : '—'}
+            <div className="text-sm" title="Выход в бочку — по факту с корректировками"><div className="text-xs text-slate-500">Факт (с корр.) = выход в бочку</div><b>{fmtQty(factTotal, 2)} кг</b></div>
+            <div className="flex flex-col gap-1 text-xs text-slate-500">
+              <span>Годен до{!readOnly && (expManual
+                ? <> · вручную{autoExpires && <button type="button" onClick={() => { setExpManual(false); setExpEdit(false); }} className="ml-1 text-brand-600 hover:underline">по рецептуре</button>}</>
+                : shelfMonths ? ` · ${shelfMonths} мес.` : ' · срок не задан в рецептуре')}</span>
+              {expEdit && !readOnly ? (
+                <input type="date" autoFocus value={head.expiresAt} onChange={(e) => { setExpManual(true); setHead({ ...head, expiresAt: e.target.value }); }}
+                  onBlur={() => setExpEdit(false)} onKeyDown={(e) => e.key === 'Enter' && setExpEdit(false)} className={inputCls} />
+              ) : (
+                <div onDoubleClick={() => !readOnly && setExpEdit(true)} title={readOnly ? undefined : 'Двойной клик — изменить вручную'}
+                  className={clsx('text-sm text-slate-900 py-1.5 select-none', !readOnly && 'cursor-text rounded border border-dashed border-transparent hover:border-slate-300 px-2 -mx-2')}>
+                  {head.expiresAt ? fmtDate(head.expiresAt) : '—'}
+                </div>
+              )}
             </div>
-            <label className="flex flex-col gap-1 text-xs text-slate-500">Годен до
-              <input type="date" disabled={readOnly} value={head.expiresAt} onChange={(e) => setHead({ ...head, expiresAt: e.target.value })} className={inputCls} />
-            </label>
             <label className="flex flex-col gap-1 text-xs text-slate-500">Комментарий
               <input disabled={readOnly} value={head.comment} onChange={(e) => setHead({ ...head, comment: e.target.value })} className={inputCls} />
             </label>
@@ -398,7 +426,7 @@ export default function StockMixEdit() {
         </div>
         {!readOnly && (
           <p className="text-xs text-slate-500">
-            Порядок работы: рассчитать → сохранить черновик → распечатать карту для оператора → внести факт и лоты с карты → указать выход → провести.
+            Порядок работы: рассчитать → сохранить черновик → распечатать карту для оператора → внести факт и лоты с карты → провести. Выход в бочку = факт с корректировками, срок годности — от даты замеса по рецептуре (двойной клик — изменить).
             Лоты подставлены по FEFO (ближайший срок годности первым).
           </p>
         )}
@@ -442,7 +470,7 @@ export default function StockMixEdit() {
         </table>
         <div className="mt-3">Корректировки (компонент, кг, лот, причина):</div>
         {[1, 2, 3].map((i) => <div key={i} className="border-b border-slate-400 h-6" />)}
-        <div className="mt-3">Итого по норме {fmtQty(planTotal, 2)} кг · Выход в бочку ________ кг · Подпись мастера ______________</div>
+        <div className="mt-3">Итого по норме {fmtQty(planTotal, 2)} кг · Факт с корректировками ________ кг · Годен до {head.expiresAt ? fmtDate(head.expiresAt) : '________'} · Подпись мастера ______________</div>
         <div className="mt-1 text-slate-600">Навески меньше 1 кг указаны в граммах. Лот — подсказка по FEFO; если берёте другой мешок, впишите его номер в «Факт/Лот».</div>
       </div>
     </>

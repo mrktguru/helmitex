@@ -20,6 +20,7 @@ export default function StockRecipes() {
   const [stages, setStages] = useState<Record<string, string>>({});
   const [qc, setQc] = useState('');
   const [comment, setComment] = useState('');
+  const [shelf, setShelf] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -43,6 +44,7 @@ export default function StockRecipes() {
     setStages(r?.stages ?? {});
     setQc(r?.qc ?? '');
     setComment(r?.comment ?? '');
+    setShelf(r?.shelfLifeMonths ? String(r.shelfLifeMonths) : '');
     if (id !== 'new') setParams((p) => { p.set('recipe', id); return p; }, { replace: true });
   }
 
@@ -63,6 +65,7 @@ export default function StockRecipes() {
         lines: used.map((l) => ({ itemId: l.itemId, percent: parseNum(l.percent)!, stage: Number(l.stage) || 1 })),
         stages: Object.fromEntries(stageNums.map((n) => [n, stages[n] ?? ''])),
         qc: qc || null,
+        shelfLifeMonths: shelf ? Number(shelf) : null,
         comment: comment || null,
       });
       await load(r.id);
@@ -161,7 +164,11 @@ export default function StockRecipes() {
           </div>
         )}
 
-        <div className="bg-white rounded-xl border p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="bg-white rounded-xl border p-4 grid grid-cols-1 md:grid-cols-[160px_minmax(0,1fr)_minmax(0,1fr)] gap-3">
+          <label className="flex flex-col gap-1 text-xs text-slate-500" title="Годен до в замесе = дата замеса + срок">Срок годности, мес.
+            <input value={shelf} onChange={(e) => setShelf(e.target.value.replace(/\D/g, '').slice(0, 3))} className={inputCls + ' text-right'} placeholder="12" />
+            <span className="text-[11px]">от даты замеса</span>
+          </label>
           <label className="flex flex-col gap-1 text-xs text-slate-500">Нормы ОТК
             <textarea value={qc} onChange={(e) => setQc(e.target.value)} rows={2} className={inputCls} placeholder="pH 8,5–9,2 · вязкость 95–110 KU · плотность 1,42–1,46" />
           </label>

@@ -259,6 +259,7 @@ model Recipe {
   items     Item[]       @relation("ItemRecipe") // полуфабрикаты, которые замешиваются по этой рецептуре
   stages    Json? // { "1": "Вода и диспергаторы · мин. обороты, 3 мин", … }
   qc        String? // нормы ОТК текстом
+  shelfLifeMonths Int? // срок годности полуфабриката от даты замеса — подставляется в замес
   comment   String?
   updatedAt DateTime     @updatedAt
   lines     RecipeLine[]

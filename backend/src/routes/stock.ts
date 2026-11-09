@@ -173,6 +173,7 @@ const recipeSchema = z.object({
   name: z.string().trim().min(1).max(200),
   stages: z.record(z.string().max(300)).nullable().optional(),
   qc: z.string().max(2000).nullable().optional(),
+  shelfLifeMonths: z.number().int().min(1).max(120).nullable().optional(),
   comment: z.string().max(2000).nullable().optional(),
   lines: z.array(z.object({
     itemId: z.string().uuid(),
