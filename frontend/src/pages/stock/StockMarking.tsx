@@ -313,10 +313,16 @@ function CzImport({ skus, onDone }: { skus: any[]; onDone: () => void }) {
     try {
       const r = await api.getCzImports();
       setRows(r);
+      setError((e) => (e.startsWith('Нет связи') ? '' : e));
       window.clearTimeout(timer.current);
       if (r.some((x) => x.status === 'processing')) timer.current = window.setTimeout(load, 2000);
       else onDone();
-    } catch (e: any) { setError(e.message); }
+    } catch (e: any) {
+      // Сбой опроса (502 при перезапуске сервера) не останавливает слежение — распознавание идёт на сервере
+      setError(`Нет связи с сервером (${e.message}) — повторяю…`);
+      window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(load, 5000);
+    }
   }
   useEffect(() => { load(); return () => window.clearTimeout(timer.current); }, []);
 
