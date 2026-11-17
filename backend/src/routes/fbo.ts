@@ -274,12 +274,11 @@ router.get('/fbo/:id/labels.pdf', h(async (req, res) => {
   const m = s.timeslotFrom?.match(/^\d{4}-(\d{2})-(\d{2})T(\d{2}:\d{2})/);
   const to = s.timeslotTo?.match(/T(\d{2}:\d{2})/)?.[1];
   const slot = m ? `${m[2]}.${m[1]}, ${m[3]}${to ? `–${to}` : ''}` : null;
-  const route = s.supplyType === 'CROSSDOCK'
-    ? `кросс-докинг${s.dropOffName ? ` через ${s.dropOffName}` : ''}`
-    : `прямая поставка${s.storageName ? `, склад ${s.storageName}` : ''}`;
+  // **…** — жирный в Telegram (кириллицу иначе жирной в простом тексте не сделать)
   setShareText(res, [
-    `Отправка Ozon FBO${slot ? ` · Слот: ${slot}` : ` · ${s.number}`}`,
-    `Кластер ${s.clusterName ?? s.clusterId ?? '—'} · ${route}`,
+    '**Отправка Ozon FBO**',
+    slot && `Слот: ${slot}`,
+    `Кластер ${s.clusterName ?? s.clusterId ?? '—'}`,
     ...[...groups.values()].flatMap((g) => [g.name, `Количество: ${g.boxes} ${plural(g.boxes, 'коробка', 'коробки', 'коробок')} х ${g.units} шт`]),
   ]);
   const items = [...groups.values()].map((g) => ({ name: g.name, qty: g.boxes * g.units }));
