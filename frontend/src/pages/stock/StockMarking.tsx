@@ -202,7 +202,6 @@ function History() {
                     )}
                     {d.status === 'POSTED' && d.batch?.jobStatus === 'done' && (<>
                       <button className="text-brand-700 hover:underline" onClick={() => downloadFile(`/stock/batches/${d.batch.id}/pdf`, `${d.number}.pdf`).catch((e) => setError(e.message))}>⇩ PDF</button>
-                      <button className="text-brand-700 hover:underline" title="Этикетки на тубу 30×20: ЧЗ, ЕАС, партия, срок годности" onClick={() => downloadFile(`/stock/batches/${d.batch.id}/pdf?format=tube`, `${d.number}_30x20.pdf`).catch((e) => setError(e.message))}>⇩ туба 30×20</button>
                     </>)}
                     {d.status === 'POSTED' && <button className="text-slate-500 hover:text-red-600" onClick={() => cancel(d)}>Отменить</button>}
                   </td>
