@@ -39,6 +39,13 @@ const bucketOf = (path: string): [string, number] => path.startsWith('/v1/analyt
 // повторять можно чтение; изменения (сборка, отгрузка) — только при 429: Ozon его не выполнял
 const READ = /\/(list|get|info|stocks|data|count|status|prices|by-day)(\/|$)/;
 
+// Методы черновиков FBO: у Ozon на них отдельный жёсткий лимит. Быстрые повторы при 429 только сжигают его —
+// для них ждём долго на уровне сценария (fbo.ts, withRateWait), а здесь не повторяем.
+const DRAFT = /^\/v1\/draft\/(crossdock|direct)\/create$|^\/v2\/draft\/create\/info$/;
+
+/** Ozon ответил 429 — лимит запросов */
+export class OzonRateLimitError extends StockError {}
+
 // Сколько запросов к Ozon за последний час — для проверки нагрузки
 const calls: number[] = [];
 export function callsLastHour() { const t = Date.now() - 3600_000; while (calls.length && calls[0] < t) calls.shift(); return calls.length; }
@@ -63,7 +70,7 @@ export async function ozonCall<T>(method: 'GET' | 'POST', path: string, body: un
     } catch (e: any) {
       data = { networkError: String(e?.message ?? e) };
     }
-    const retry = status === 429 || ((status === 0 || status >= 500) && (method === 'GET' || READ.test(path)));
+    const retry = (status === 429 && !DRAFT.test(path)) || ((status === 0 || status >= 500) && (method === 'GET' || READ.test(path)));
     if (!retry || attempt >= 3) break;
     await sleepMs(1500 * 2 ** attempt + Math.random() * 500);
   }
@@ -73,7 +80,7 @@ export async function ozonCall<T>(method: 'GET' | 'POST', path: string, body: un
     }).catch((e) => console.warn('[ozon] log failed', e));
   }
 
-  if (status === 429) throw new StockError(`Ozon: превышен лимит запросов (${path}). Подождите минуту и повторите.`);
+  if (status === 429) throw new OzonRateLimitError(`Ozon: превышен лимит запросов (${path}). Подождите минуту и повторите.`);
   if (status < 200 || status >= 300) {
     const msg = data?.message ?? data?.error ?? data?.networkError ?? JSON.stringify(data)?.slice(0, 300);
     throw new StockError(`Ozon ${path}: ${status || 'нет связи'} ${msg ?? ''}`.trim());

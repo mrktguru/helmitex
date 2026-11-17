@@ -1,7 +1,7 @@
 import { FboStatus } from '@prisma/client';
 import prisma from '../prisma/client';
 import { StockError, consume, nextDocNumber, nextNumber } from './stock';
-import { ozon, ozonGetFile, poll } from './ozon';
+import { OzonRateLimitError, ozon, ozonGetFile, poll } from './ozon';
 import { uploadFile } from './s3';
 
 const MAX_BOXES = 30;            // /v1/cargoes/create: не больше 30 коробок
@@ -92,6 +92,23 @@ export async function createShipment(
   }, { isolationLevel: 'Serializable' });
 }
 
+// Черновики, созданные в Ozon, но не дождавшиеся ответа (лимит) — id поставки → draft_id
+const pendingDrafts = new Map<string, { draftId: number; key: string; at: number }>();
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// Лимит Ozon на методы черновиков: при 429 ждём 20 с и повторяем, пока не выйдет время
+async function withRateWait<T>(until: number, fn: () => Promise<T>): Promise<T> {
+  for (;;) {
+    try { return await fn(); } catch (e) {
+      if (!(e instanceof OzonRateLimitError) || Date.now() + 20_000 > until) {
+        if (e instanceof OzonRateLimitError) throw new StockError('Ozon ограничил частоту запросов к черновикам поставок. Нажмите ещё раз через минуту — продолжим этот же черновик.');
+        throw e;
+      }
+      await sleep(20_000);
+    }
+  }
+}
+
 // 2. Черновик в Ozon и расчёт складов
 export async function createOzonDraft(id: string, opt: {
   supplyType: 'CROSSDOCK' | 'DIRECT'; clusterId: string; clusterName?: string | null;
@@ -102,22 +119,38 @@ export async function createOzonDraft(id: string, opt: {
   try {
     const items = itemsBySku(s).map((i) => ({ sku: Number(i.sku), quantity: i.quantity }));
     const cluster_info = { macrolocal_cluster_id: Number(opt.clusterId), items };
+    const until = Date.now() + 150_000;
+    // Повторное нажатие после сбоя — продолжаем уже созданный черновик, а не создаём новый (каждый тратит лимит)
+    const key = JSON.stringify({ opt, items });
+    const prev = pendingDrafts.get(id);
     let created: any;
-    if (opt.supplyType === 'CROSSDOCK') {
+    if (prev && prev.key === key && Date.now() - prev.at < 25 * 60_000) {
+      created = { draft_id: prev.draftId, errors: [] };
+    } else if (opt.supplyType === 'CROSSDOCK') {
       if (!opt.dropOffWarehouseId) throw new StockError('Для кросс-докинга выберите пункт отгрузки');
-      created = await ozon('/v1/draft/crossdock/create', {
+      created = await withRateWait(until, () => ozon('/v1/draft/crossdock/create', {
         cluster_info, deletion_sku_mode: 'PARTIAL',
         delivery_info: {
           type: 'DROPOFF',
           drop_off_warehouse: { warehouse_id: Number(opt.dropOffWarehouseId), warehouse_type: (opt.dropOffType ?? 'DELIVERY_POINT').replace(/^WAREHOUSE_TYPE_/, '') },
         },
-      }, id);
+      }, id));
     } else {
-      created = await ozon('/v1/draft/direct/create', { cluster_info, deletion_sku_mode: 'PARTIAL' }, id);
+      created = await withRateWait(until, () => ozon('/v1/draft/direct/create', { cluster_info, deletion_sku_mode: 'PARTIAL' }, id));
     }
     if (created.errors?.length) throw new StockError(describeDraftErrors(created.errors));
     const draftId = created.draft_id;
-    const info = await poll(() => ozon('/v2/draft/create/info', { draft_id: draftId }, id), (r: any) => r.status !== 'IN_PROGRESS');
+    if (!prev || prev.draftId !== draftId) pendingDrafts.set(id, { draftId, key, at: Date.now() });
+    // Ozon считает черновик пару секунд; опрашиваем не чаще раза в 3 с, при лимите — ждём
+    await sleep(2500);
+    let info: any;
+    for (;;) {
+      info = await withRateWait(until, () => ozon('/v2/draft/create/info', { draft_id: draftId }, id));
+      if (info.status !== 'IN_PROGRESS') break;
+      if (Date.now() > until) throw new StockError('Ozon долго считает черновик — нажмите ещё раз через минуту (продолжим этот же черновик)');
+      await sleep(3000);
+    }
+    pendingDrafts.delete(id);
     if (info.status !== 'SUCCESS') throw new StockError(info.errors?.length ? describeDraftErrors(info.errors) : `Черновик не создан: ${info.status}`);
     const cluster = info.clusters?.[0];
     return prisma.fboShipment.update({

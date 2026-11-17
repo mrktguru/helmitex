@@ -138,7 +138,7 @@ export default function StockFbo() {
                 ? { supplyType: s.supplyType, clusterId: s.clusterId, clusterName: s.clusterName, dropOffWarehouseId: s.dropOffWarehouseId, dropOffName: s.dropOffName, dropOffType: s.dropOffType }
                 : { ...defaults, ...(s.clusterId ? { clusterId: s.clusterId, clusterName: s.clusterName } : {}) }}
               busy={!!busy}
-              saveLabel={busy === 'draft' ? 'Создаю черновик в Ozon…' : 'Создать черновик в Ozon'}
+              saveLabel={busy === 'draft' ? 'Создаю черновик в Ozon… (при лимите Ozon — до 2 мин)' : 'Создать черновик в Ozon'}
               onSave={(p: Place) => run('draft', () => api.fboDraft(id!, p))}
             />
           )}
