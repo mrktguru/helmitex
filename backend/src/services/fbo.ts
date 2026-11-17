@@ -153,6 +153,16 @@ export async function createOzonDraft(id: string, opt: {
     pendingDrafts.delete(id);
     if (info.status !== 'SUCCESS') throw new StockError(info.errors?.length ? describeDraftErrors(info.errors) : `Черновик не создан: ${info.status}`);
     const cluster = info.clusters?.[0];
+    // Черновик создан, но ни один склад кластера не принимает поставку — дальше слоты не найдутся (404), говорим сразу
+    const whs: any[] = cluster?.warehouses ?? [];
+    // state: FULL_AVAILABLE / (частично) … / NOT_AVAILABLE — блокируем, только если недоступны все
+    if (whs.length && whs.every((w) => w.availability_status?.state === 'NOT_AVAILABLE')) {
+      const reasons = [...new Set(whs.map((w) => w.availability_status?.invalid_reason).filter(Boolean))];
+      const where = `в кластер «${cluster?.cluster_name ?? opt.clusterName ?? opt.clusterId}»`
+        + (opt.supplyType === 'CROSSDOCK' && opt.dropOffName ? ` через пункт ${opt.dropOffName}` : '');
+      throw new StockError(`Ozon сейчас не принимает поставку ${where}: ${reasons.map(unavailableText).join('; ') || 'склады недоступны'}. `
+        + 'Выберите другой пункт отгрузки или другой кластер.');
+    }
     return prisma.fboShipment.update({
       where: { id },
       data: {
@@ -166,6 +176,17 @@ export async function createOzonDraft(id: string, opt: {
       },
     });
   } catch (e) { return fail(id, e); }
+}
+
+// Причины недоступности склада в черновике Ozon
+function unavailableText(r: string): string {
+  const map: Record<string, string> = {
+    NOT_AVAILABLE_MATRIX: 'нет маршрута в логистической матрице Ozon (из этого пункта в этот кластер не возят)',
+    NOT_AVAILABLE_SUPPLY_TYPE: 'этот тип поставки сюда не принимается',
+    NOT_AVAILABLE_WAREHOUSE_LIMIT: 'склад исчерпал лимит приёмки',
+    NOT_AVAILABLE_ITEMS: 'склад не принимает эти товары',
+  };
+  return map[r] ?? r;
 }
 
 function describeDraftErrors(errors: any[]): string {
