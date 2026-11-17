@@ -46,18 +46,58 @@ function errorText(e: unknown): string | null {
 
 // Скачивание файла с авторизацией (PDF, CSV): fetch → blob → <a download>
 export async function downloadFile(path: string, fallbackName: string): Promise<void> {
-  const token = useAuthStore.getState().accessToken;
-  const res = await fetch(BASE + path, { headers: token ? { Authorization: `Bearer ${token}` } : {}, credentials: 'include' });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({})) as { error?: string };
-    throw new Error(body.error ?? `HTTP ${res.status}`);
+  if (!isTouch()) showToast('Готовлю файл…');
+  try {
+    const get = (token: string | null) => fetch(BASE + path, { headers: token ? { Authorization: `Bearer ${token}` } : {}, credentials: 'include' });
+    let res = await get(useAuthStore.getState().accessToken);
+    // истёк access-токен (15 мин) — обновляем и повторяем
+    if (res.status === 401) {
+      const r = await fetch(`${BASE}/auth/refresh`, { method: 'POST', credentials: 'include' });
+      if (r.ok) {
+        const data = await r.json() as { accessToken: string };
+        useAuthStore.getState().setAuth(data.accessToken, useAuthStore.getState().user!);
+        res = await get(data.accessToken);
+      }
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as { error?: string };
+      throw new Error(body.error ?? `HTTP ${res.status}`);
+    }
+    const cd = res.headers.get('Content-Disposition') ?? '';
+    const m = cd.match(/filename\*=UTF-8''([^;]+)/);
+    const name = m ? decodeURIComponent(m[1]) : fallbackName;
+    // что за товар и сколько — сервер присылает для «Поделиться» (Telegram, MAX…)
+    const share = res.headers.get('X-Share-Text');
+    saveBlob(await res.blob(), name, share ? decodeURIComponent(share) : undefined);
+  } catch (e) {
+    document.getElementById('dl-toast')?.remove();
+    throw e;
   }
-  const cd = res.headers.get('Content-Disposition') ?? '';
-  const m = cd.match(/filename\*=UTF-8''([^;]+)/);
-  const name = m ? decodeURIComponent(m[1]) : fallbackName;
-  // что за товар и сколько — сервер присылает для «Поделиться» (Telegram, MAX…)
-  const share = res.headers.get('X-Share-Text');
-  saveBlob(await res.blob(), name, share ? decodeURIComponent(share) : undefined);
+}
+
+// Плашка в углу (десктоп): «Готовлю файл…» → «Файл готов · Сохранить»
+function showToast(text: string, link?: { href: string; name: string }): void {
+  document.getElementById('dl-toast')?.remove();
+  const t = document.createElement('div');
+  t.id = 'dl-toast';
+  t.className = 'fixed bottom-4 right-4 z-[100] max-w-sm bg-white border border-slate-200 rounded-xl shadow-xl p-3 text-sm flex items-center gap-3';
+  const span = document.createElement('span');
+  span.className = 'text-slate-700 break-all';
+  span.textContent = text;
+  t.appendChild(span);
+  if (link) {
+    const a = document.createElement('a');
+    a.href = link.href; a.download = link.name;
+    a.className = 'shrink-0 rounded-lg bg-brand-600 text-white px-3 py-1.5 font-medium';
+    a.textContent = 'Сохранить';
+    t.appendChild(a);
+    const x = document.createElement('button');
+    x.className = 'shrink-0 text-slate-400 hover:text-slate-600';
+    x.textContent = '✕';
+    x.onclick = () => t.remove();
+    t.appendChild(x);
+  }
+  document.body.appendChild(t);
 }
 
 // Телефон/планшет: программный клик после await браузеры блокируют — показываем панель с кнопками
@@ -66,11 +106,19 @@ const isTouch = () => typeof window !== 'undefined' && window.matchMedia('(point
 export function saveBlob(blob: Blob, name: string, text?: string): void {
   const url = URL.createObjectURL(blob);
   if (!isTouch()) {
+    // ссылка должна быть в документе — иначе часть браузеров (Яндекс на Windows) игнорирует программный клик
     const a = document.createElement('a');
     a.href = url;
     a.download = name;
+    a.style.display = 'none';
+    document.body.appendChild(a);
     a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    a.remove();
+    // запасной путь: если браузер всё же не начал скачивание — ручной клик по «Сохранить» срабатывает всегда
+    showToast(`Файл готов: ${name}`, { href: url, name });
+    const toast = document.getElementById('dl-toast');
+    setTimeout(() => { if (document.getElementById('dl-toast') === toast) toast?.remove(); }, 20_000);
+    setTimeout(() => URL.revokeObjectURL(url), 120_000);
     return;
   }
   document.getElementById('dl-sheet')?.remove();
