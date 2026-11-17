@@ -384,6 +384,12 @@ async function applyOrder(s: Shipment, o: any) {
   if (o.state === 'COMPLETED') {
     await prisma.fboShipment.updateMany({ where: { id, status: 'SHIPPED' }, data: { status: 'COMPLETED' } });
   }
+  // Заявку отменили в Ozon (в кабинете или сам Ozon) — отменяем и у нас, кванты возвращаются на склад.
+  // Уже отгруженную не трогаем: кванты списаны, это разбирается вручную.
+  if (o.state === 'CANCELLED' && !['SHIPPED', 'COMPLETED', 'CANCELLED'].includes(s.status)) {
+    await cancelShipment(id);
+    console.log(`[fbo sync] ${s.number}: заявка отменена в Ozon — поставка отменена, кванты вернулись на склад`);
+  }
 }
 
 // Состояния заявки Ozon, при которых груз уже передан
