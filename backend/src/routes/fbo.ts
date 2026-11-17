@@ -8,6 +8,10 @@ import {
 } from '../services/ozon';
 import { book, cancelShipment, createOzonDraft, createShipment, getTimeslots, makeLabels, setCargoes, ship, syncAllShipments, syncShipment, syncSkus } from '../services/fbo';
 import { downloadFile } from '../services/s3';
+import { fileName, itemsToken, setShareText, translit } from '../services/share';
+
+const plural = (n: number, one: string, few: string, many: string) =>
+  n % 10 === 1 && n % 100 !== 11 ? one : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? few : many;
 import { getDemand } from '../services/demand';
 
 const router = Router();
@@ -250,11 +254,41 @@ router.post('/fbo/:id/cancel', h(async (req, res) => { await cancelShipment(req.
 router.post('/fbo/:id/sync', h(async (req, res) => { await syncShipment(req.params.id); res.json(await full(req.params.id)); }));
 
 router.get('/fbo/:id/labels.pdf', h(async (req, res) => {
-  const s = await prisma.fboShipment.findUnique({ where: { id: req.params.id } });
+  const s = await prisma.fboShipment.findUnique({
+    where: { id: req.params.id },
+    include: { cargoes: { include: { quant: { include: { quantType: { include: { productItem: true } } } } } } },
+  });
   if (!s?.labelS3Key) throw new StockError('Этикетки ещё не получены');
   const buf = await downloadFile(s.labelS3Key);
+
+  // Товар и штук в коробке: «Шпатлёвка Unitex, туба 350 г» → «Количество: 2 коробки х 42 шт»
+  const groups = new Map<string, { name: string; units: number; boxes: number }>();
+  for (const c of s.cargoes) {
+    const name = c.quant.quantType.productItem.name;
+    const k = `${name}|${c.quant.units}`;
+    const g = groups.get(k) ?? { name, units: c.quant.units, boxes: 0 };
+    g.boxes++;
+    groups.set(k, g);
+  }
+  // Слот: Ozon отдаёт время склада строкой «2026-11-17T19:00:00»
+  const m = s.timeslotFrom?.match(/^\d{4}-(\d{2})-(\d{2})T(\d{2}:\d{2})/);
+  const to = s.timeslotTo?.match(/T(\d{2}:\d{2})/)?.[1];
+  const slot = m ? `${m[2]}.${m[1]}, ${m[3]}${to ? `–${to}` : ''}` : null;
+  const route = s.supplyType === 'CROSSDOCK'
+    ? `кросс-докинг${s.dropOffName ? ` через ${s.dropOffName}` : ''}`
+    : `прямая поставка${s.storageName ? `, склад ${s.storageName}` : ''}`;
+  setShareText(res, [
+    `Отправка Ozon FBO${slot ? ` · Слот: ${slot}` : ` · ${s.number}`}`,
+    `Кластер ${s.clusterName ?? s.clusterId ?? '—'} · ${route}`,
+    ...[...groups.values()].flatMap((g) => [g.name, `Количество: ${g.boxes} ${plural(g.boxes, 'коробка', 'коробки', 'коробок')} х ${g.units} шт`]),
+  ]);
+  const items = [...groups.values()].map((g) => ({ name: g.name, qty: g.boxes * g.units }));
+  const name = fileName([
+    'OZON_FBO', s.clusterName && translit(s.clusterName.replace(/\s+/g, '-')).replace(/-+/g, '-'),
+    m && `${m[2]}${m[1]}`, itemsToken(items), `${s.cargoes.length}BOX`, translit(s.number),
+  ]);
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`Грузоместа ${s.number}.pdf`)}`);
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(name)}`);
   res.end(buf);
 }));
 
