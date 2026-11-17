@@ -1,6 +1,6 @@
 import { Prisma, ProductState } from '@prisma/client';
 import { NO_CODES_HINT, claimItemCodes, freeItemCodes } from './czPool';
-import { PdfJob, StockError, allocateFefo, consume, nextNumber, round } from './stock';
+import { PdfJob, StockError, allocateFefo, consume, lotBalance, nextNumber, round } from './stock';
 import { looseCodes, lotLabelVars } from './marking';
 
 type Tx = Prisma.TransactionClient;
@@ -41,8 +41,10 @@ async function issueBatch(tx: Tx, projectId: string, n: number, _projectName: st
  * на каждый квант выдаётся N кодов ЧЗ отдельной выдачей (OutputBatch) — её коды и есть состав кванта.
  * importCodes — ввод уже собранных квантов: коды переданы текстом, ничего не печатается и не списывается.
  * units — штук в кванте, если не как в варианте; число хранится в каждом кванте (Quant.units).
+ * extraLotIds — объединение партий одного месяца срока годности (на этикетке срок без дня): квант добирается
+ *   из нескольких партий, сначала мелкие остатки; квант числится за партией, давшей в него больше всего единиц.
  */
-export async function postQuant(tx: Tx, docId: string, importCodes?: string[][], units?: number): Promise<PdfJob[]> {
+export async function postQuant(tx: Tx, docId: string, importCodes?: string[][], units?: number, extraLotIds?: string[]): Promise<PdfJob[]> {
   const doc = await tx.stockDoc.findUnique({ where: { id: docId } });
   if (!doc || doc.type !== 'QUANT') throw new StockError('Документ не найден');
   if (!doc.quantTypeId) throw new StockError('Не выбран тип кванта');
@@ -55,11 +57,46 @@ export async function postQuant(tx: Tx, docId: string, importCodes?: string[][],
     include: { materials: { include: { item: true }, orderBy: { sort: 'asc' } }, boxItem: true, project: { include: { template: true } } },
   });
   if (!qt) throw new StockError('Тип кванта не найден');
-  const lot = await tx.lot.findUnique({ where: { id: doc.sourceLotId }, include: { item: true } });
-  if (lot?.itemId !== qt.productItemId) throw new StockError(`Партия не относится к SKU типа «${qt.name}»`);
+  const lotIds = [...new Set([doc.sourceLotId, ...(extraLotIds ?? [])])];
+  const lots = await tx.lot.findMany({ where: { id: { in: lotIds } }, include: { item: true } });
+  if (lots.length !== lotIds.length) throw new StockError('Партия не найдена');
+  if (lots.some((l) => l.itemId !== qt.productItemId)) throw new StockError(`Партия не относится к SKU типа «${qt.name}»`);
+  const month = (l: { expiresAt: Date | null }) => l.expiresAt?.toISOString().slice(0, 7) ?? null;
+  if (lots.length > 1 && (lots.some((l) => !month(l)) || new Set(lots.map(month)).size > 1)) {
+    throw new StockError('Объединять можно только партии с одним месяцем срока годности');
+  }
+  const lot = lots.find((l) => l.id === doc.sourceLotId)!;
 
   const n = units ?? qt.unitsPerQuant;
   const state: ProductState = doc.sourceState ?? (doc.imported ? 'LABELED' : 'UNLABELED');
+
+  // Раскладка единиц по квантам: одна партия — как раньше; несколько — сначала самые мелкие остатки
+  type Part = { lot: (typeof lots)[number]; qty: number };
+  let queue: { lot: Part['lot']; left: number }[];
+  if (lots.length === 1) queue = [{ lot, left: k * n }];
+  else {
+    const withBal = await Promise.all(lots.map(async (l) => ({ lot: l, left: Math.floor((await lotBalance(tx, l.id, state)) + 1e-6) })));
+    queue = withBal.filter((x) => x.left > 0).sort((a, b) => a.left - b.left);
+    const total = queue.reduce((s, x) => s + x.left, 0);
+    if (total < k * n) throw new StockError(`В партиях месяца ${total} шт, нужно ${k * n}`);
+  }
+  const plan: { parts: Part[]; main: Part['lot'] }[] = [];
+  for (let i = 0; i < k; i++) {
+    const parts: Part[] = [];
+    for (let need = n; need > 0;) {
+      const q = queue[0];
+      const take = Math.min(need, q.left);
+      parts.push({ lot: q.lot, qty: take });
+      q.left -= take; need -= take;
+      if (q.left <= 0) queue.shift();
+    }
+    plan.push({ parts, main: parts.reduce((a, b) => (b.qty > a.qty ? b : a)).lot });
+  }
+  const sumBy = (pairs: [Part['lot'], number][]) => {
+    const m = new Map<string, { lot: Part['lot']; qty: number }>();
+    for (const [l, q] of pairs) m.set(l.id, { lot: l, qty: (m.get(l.id)?.qty ?? 0) + q });
+    return [...m.values()];
+  };
   // Из «с ЧЗ» коды уже на банках (напечатаны маркировкой) — новые не выдаются, квант получает коды партии россыпью
   const needCz = qt.trackCz && !doc.imported && state === 'UNLABELED';
   const reuseCz = qt.trackCz && !doc.imported && state === 'LABELED';
@@ -80,8 +117,12 @@ export async function postQuant(tx: Tx, docId: string, importCodes?: string[][],
   }
 
   // Единицы: из исходного состояния — в «в кванте»
-  await consume(tx, docId, lot.id, state, k * n, lot.item.name);
-  await tx.stockMove.create({ data: { docId, lotId: lot.id, state: 'IN_QUANT', qty: k * n } });
+  for (const c of sumBy(plan.flatMap((p) => p.parts.map((x) => [x.lot, x.qty] as [Part['lot'], number])))) {
+    await consume(tx, docId, c.lot.id, state, c.qty, c.lot.item.name);
+  }
+  for (const c of sumBy(plan.map((p) => [p.main, n] as [Part['lot'], number]))) {
+    await tx.stockMove.create({ data: { docId, lotId: c.lot.id, state: 'IN_QUANT', qty: c.qty } });
+  }
 
   // Короба и материалы по FEFO (при вводе существующих квантов не списываются)
   let extraCost: number | null = 0;
@@ -102,26 +143,31 @@ export async function postQuant(tx: Tx, docId: string, importCodes?: string[][],
       }
     }
   }
-  const quantCost = lot.unitCost == null || extraCost == null ? null : round(lot.unitCost * n + extraCost / k);
+  const quantCost = (parts: Part[]) => {
+    if (extraCost == null || parts.some((p) => p.lot.unitCost == null)) return null;
+    return round(parts.reduce((s, p) => s + p.lot.unitCost! * p.qty, 0) + extraCost / k);
+  };
 
   const jobs: PdfJob[] = [];
   for (let i = 0; i < k; i++) {
+    const { parts, main } = plan[i];
     let outputBatchId: string | null = null;
     let codeIds: string[] = [];
     if (needCz) {
-      const issued = await issueBatch(tx, qt.project!.id, n, qt.project!.name, lot.id);
+      const issued = await issueBatch(tx, qt.project!.id, n, qt.project!.name, main.id);
       outputBatchId = issued.batchId;
       codeIds = issued.codeIds;
       jobs.push({ outputBatchId, projectId: qt.project!.id, codeIds });
     } else if (reuseCz) {
       // Коды уже на банках. Если портал их знает (партию маркировали здесь) — привязываем к кванту;
       // если нет (например, остатки «с ЧЗ» введены начальными) — квант собирается без списка кодов
-      codeIds = await looseCodes(tx, lot.id, n);
+      // при объединении — коды с тех партий, откуда взяты единицы
+      for (const p of parts) codeIds.push(...await looseCodes(tx, p.lot.id, p.qty));
     }
     const quant = await tx.quant.create({
       data: {
         number: await nextQuantNumber(tx),
-        quantTypeId: qt.id, lotId: lot.id, docId, units: n, unitCost: quantCost, outputBatchId,
+        quantTypeId: qt.id, lotId: main.id, docId, units: n, unitCost: quantCost(parts), outputBatchId,
       },
     });
     if (codeIds.length) {

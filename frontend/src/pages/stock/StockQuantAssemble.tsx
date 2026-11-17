@@ -41,7 +41,27 @@ export default function StockQuantAssemble() {
   // Источник: «без ЧЗ» для сборки, «с ЧЗ» — для ввода существующих или досборки из россыпи
   const lots = balances.filter((b) => (imported ? b.state === 'LABELED' : b.state === 'UNLABELED' || b.state === 'LABELED') && b.qty > 0)
     .sort((a, b) => (a.lot.expiresAt ? Date.parse(a.lot.expiresAt) : Infinity) - (b.lot.expiresAt ? Date.parse(b.lot.expiresAt) : Infinity));
-  const src = lots.find((b) => `${b.lotId}|${b.state}` === lotKey);
+  // Срок на этикетке — месяц и год, поэтому партии одного месяца (и одного состояния) можно собирать вместе
+  const monthOf = (b: any) => (b.lot.expiresAt ? String(b.lot.expiresAt).slice(0, 7) : null);
+  const groups = useMemo(() => {
+    const m = new Map<string, any[]>();
+    for (const b of lots) {
+      const mo = monthOf(b);
+      if (!mo) continue;
+      const key = `m|${mo}|${b.state}`;
+      m.set(key, [...(m.get(key) ?? []), b]);
+    }
+    return [...m].filter(([, list]) => list.length > 1).map(([key, list]) => {
+      const [, mo, state] = key.split('|');
+      // основная партия (за ней числится квант) — с наибольшим остатком
+      const main = list.reduce((a, b) => (b.qty > a.qty ? b : a));
+      return { key, month: mo, state, list, main, qty: list.reduce((s, b) => s + b.qty, 0) };
+    });
+  }, [lots]);
+  const group = groups.find((g) => g.key === lotKey);
+  const src = group
+    ? { lotId: group.main.lotId, state: group.state, qty: group.qty, extraLotIds: group.list.filter((b) => b !== group.main).map((b) => b.lotId) }
+    : lots.find((b) => `${b.lotId}|${b.state}` === lotKey);
   const n = Number(perQuant) || 0;
   const customN = !!qt && n > 0 && n !== qt.unitsPerQuant;
   const k = Number(count) || 0;
@@ -64,7 +84,7 @@ export default function StockQuantAssemble() {
     setBusy(true);
     try {
       const doc = await api.assembleQuants({
-        quantTypeId: qt.id, sourceLotId: src.lotId, sourceState: src.state, quantCount: effK, unitsPerQuant: customN ? n : undefined,
+        quantTypeId: qt.id, sourceLotId: src.lotId, extraLotIds: src.extraLotIds, sourceState: src.state, quantCount: effK, unitsPerQuant: customN ? n : undefined,
         comment: comment || null, imported, codes: parsed?.quants,
       });
       navigate(`/stock/quant/${doc.id}`, { replace: true });
@@ -96,20 +116,37 @@ export default function StockQuantAssemble() {
         <label className="flex flex-col gap-1 text-xs text-slate-500">Партия
           <select disabled={!qt} value={lotKey} onChange={(e) => setLotKey(e.target.value)} className={inputCls}>
             <option value="">{qt && lots.length === 0 ? '— нет остатков —' : '— выберите —'}</option>
-            {lots.map((b) => (
-              <option key={b.lotId + b.state} value={`${b.lotId}|${b.state}`}>
-                {b.lot.number} · {STATE_LABEL[b.state]} · {fmtQty(b.qty)} шт{b.lot.expiresAt ? ` · до ${fmtDate(b.lot.expiresAt)}` : ''}
-              </option>
-            ))}
+            {groups.length > 0 && (
+              <optgroup label="Партии одного месяца срока — вместе">
+                {groups.map((g) => (
+                  <option key={g.key} value={g.key}>
+                    Срок {g.month.slice(5)}.{g.month.slice(0, 4)} · {STATE_LABEL[g.state]} · {fmtQty(g.qty)} шт · {g.list.length} парт.
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            <optgroup label="Отдельные партии">
+              {lots.map((b) => (
+                <option key={b.lotId + b.state} value={`${b.lotId}|${b.state}`}>
+                  {b.lot.number} · {STATE_LABEL[b.state]} · {fmtQty(b.qty)} шт{b.lot.expiresAt ? ` · до ${fmtDate(b.lot.expiresAt)}` : ''}
+                </option>
+              ))}
+            </optgroup>
           </select>
         </label>
         <label className="flex flex-col gap-1 text-xs text-slate-500">Штук в кванте
-          <input disabled={!qt} value={perQuant} onChange={(e) => setPerQuant(e.target.value.replace(/\D/g, '').slice(0, 4))} className={inputCls + ' text-right'} />
+          <input disabled={!qt} value={perQuant} inputMode="numeric"
+            onFocus={() => { if (qt && perQuant === String(qt.unitsPerQuant)) setPerQuant(''); }}
+            onBlur={() => { if (qt && !perQuant) setPerQuant(String(qt.unitsPerQuant)); }}
+            onChange={(e) => setPerQuant(e.target.value.replace(/\D/g, '').slice(0, 4))} className={inputCls + ' text-right'} />
           {customN && <span className="text-amber-700">не как в варианте ({qt.unitsPerQuant} шт)</span>}
         </label>
         {!parsed && (
           <label className="flex flex-col gap-1 text-xs text-slate-500">Количество квантов
-            <input value={count} onChange={(e) => setCount(e.target.value.replace(/\D/g, ''))} className={inputCls + ' text-right'} />
+            <input value={count} inputMode="numeric"
+              onFocus={() => { if (count === '1') setCount(''); }}
+              onBlur={() => { if (!count) setCount('1'); }}
+              onChange={(e) => setCount(e.target.value.replace(/\D/g, ''))} className={inputCls + ' text-right'} />
           </label>
         )}
         <label className={clsx('flex flex-col gap-1 text-xs text-slate-500', parsed && 'sm:col-span-2')}>Комментарий
@@ -129,6 +166,12 @@ export default function StockQuantAssemble() {
         </div>
       )}
 
+      {group && (
+        <p className="text-sm text-slate-600 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2">
+          Сначала добираются мелкие остатки: {[...group.list].sort((a, b) => a.qty - b.qty).map((b) => `${b.lot.number} (${fmtQty(b.qty)})`).join(', ')}.
+          {' '}Квант числится за партией, из которой в нём больше всего штук.
+        </p>
+      )}
       {qt && src && (
         <div className="bg-white rounded-xl border p-4 text-sm grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div><div className="text-xs text-slate-500">Единиц</div>{effK * n} из {fmtQty(src.qty)}</div>

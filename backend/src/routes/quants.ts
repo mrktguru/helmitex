@@ -116,6 +116,8 @@ router.get('/cz-projects', async (_req: AuthRequest, res: Response) => {
 const assembleSchema = z.object({
   quantTypeId: z.string().uuid(),
   sourceLotId: z.string().uuid(),
+  // объединение партий одного месяца срока: остальные партии группы
+  extraLotIds: z.array(z.string().uuid()).max(100).optional(),
   sourceState: z.enum(['UNLABELED', 'LABELED']),
   quantCount: z.number().int().min(1).max(500),
   // штук в кванте, если не как в варианте (например, неполный квант на 20 шт)
@@ -131,7 +133,7 @@ const assembleSchema = z.object({
 router.post('/quant-docs', async (req: AuthRequest, res: Response): Promise<void> => {
   const parsed = assembleSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
-  const { codes, date, imported, unitsPerQuant, ...data } = parsed.data;
+  const { codes, date, imported, unitsPerQuant, extraLotIds, ...data } = parsed.data;
   try {
     const { doc, jobs } = await prisma.$transaction(async (tx) => {
       const doc = await tx.stockDoc.create({
@@ -144,7 +146,7 @@ router.post('/quant-docs', async (req: AuthRequest, res: Response): Promise<void
           userId: req.user!.id,
         },
       });
-      const jobs = await postQuant(tx, doc.id, imported ? codes ?? [] : undefined, unitsPerQuant);
+      const jobs = await postQuant(tx, doc.id, imported ? codes ?? [] : undefined, unitsPerQuant, extraLotIds);
       return { doc, jobs };
     }, { isolationLevel: 'Serializable', timeout: 60_000 });
     await enqueuePdfJobs(jobs);
@@ -161,15 +163,20 @@ router.get('/quant-docs/:id', async (req: AuthRequest, res: Response): Promise<v
       quantType: { include: { productItem: true, boxItem: true } },
       lines: { include: { item: true }, orderBy: { sort: 'asc' } },
       quants: { orderBy: { number: 'asc' }, include: { outputBatch: { select: { id: true, jobStatus: true } } } },
+      moves: { where: { qty: { lt: 0 } } },
     },
   });
   if (!doc || doc.type !== 'QUANT') { res.status(404).json({ error: 'Not found' }); return; }
-  const lotIds = [doc.sourceLotId, ...doc.lines.map((l) => l.lotId)].filter((x): x is string => !!x);
+  // из каких партий взяты единицы (при объединении по месяцу — несколько)
+  const srcMoves = doc.moves.filter((m) => m.state === doc.sourceState);
+  const lotIds = [doc.sourceLotId, ...doc.lines.map((l) => l.lotId), ...srcMoves.map((m) => m.lotId)].filter((x): x is string => !!x);
   const lots = await prisma.lot.findMany({ where: { id: { in: lotIds } }, select: { id: true, number: true } });
   const num = new Map(lots.map((l) => [l.id, l.number]));
   res.json({
     ...doc,
-    sourceLotNumber: doc.sourceLotId ? num.get(doc.sourceLotId) : null,
+    sourceLotNumber: srcMoves.length > 1
+      ? srcMoves.map((m) => `${num.get(m.lotId)} (${-m.qty})`).join(', ')
+      : doc.sourceLotId ? num.get(doc.sourceLotId) : null,
     lines: doc.lines.map((l) => ({ ...l, lotNumber: l.lotId ? num.get(l.lotId) : null })),
   });
 });
