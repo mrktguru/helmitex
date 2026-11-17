@@ -116,22 +116,24 @@ export default function StockQuantAssemble() {
         <label className="flex flex-col gap-1 text-xs text-slate-500">Партия
           <select disabled={!qt} value={lotKey} onChange={(e) => setLotKey(e.target.value)} className={inputCls}>
             <option value="">{qt && lots.length === 0 ? '— нет остатков —' : '— выберите —'}</option>
-            {groups.length > 0 && (
-              <optgroup label="Партии одного месяца срока — вместе">
-                {groups.map((g) => (
+            {(['LABELED', 'UNLABELED'] as const).map((st) => {
+              const inGroup = new Set(groups.filter((g) => g.state === st).flatMap((g) => g.list.map((b: any) => b.lotId)));
+              const single = lots.filter((b) => b.state === st && !inGroup.has(b.lotId));
+              const gs = groups.filter((g) => g.state === st);
+              if (!gs.length && !single.length) return null;
+              // по сроку: группы месяца и одиночные партии вперемешку, раньше истекающие — выше
+              const rows = [
+                ...gs.map((g) => ({ at: g.month, el: (
                   <option key={g.key} value={g.key}>
-                    Срок {g.month.slice(5)}.{g.month.slice(0, 4)} · {STATE_LABEL[g.state]} · {fmtQty(g.qty)} шт · {g.list.length} парт.
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            <optgroup label="Отдельные партии">
-              {lots.map((b) => (
-                <option key={b.lotId + b.state} value={`${b.lotId}|${b.state}`}>
-                  {b.lot.number} · {STATE_LABEL[b.state]} · {fmtQty(b.qty)} шт{b.lot.expiresAt ? ` · до ${fmtDate(b.lot.expiresAt)}` : ''}
-                </option>
-              ))}
-            </optgroup>
+                    Срок {g.month.slice(5)}.{g.month.slice(0, 4)} · {fmtQty(g.qty)} шт · {g.list.length} парт.
+                  </option>) })),
+                ...single.map((b) => ({ at: b.lot.expiresAt ? String(b.lot.expiresAt).slice(0, 7) : '9999', el: (
+                  <option key={b.lotId + b.state} value={`${b.lotId}|${b.state}`}>
+                    {b.lot.expiresAt ? `Срок ${fmtDate(b.lot.expiresAt).slice(3)} · ` : ''}{fmtQty(b.qty)} шт · {b.lot.number}
+                  </option>) })),
+              ].sort((a, b) => a.at.localeCompare(b.at));
+              return <optgroup key={st} label={st === 'LABELED' ? 'С ЧЗ' : 'Без ЧЗ'}>{rows.map((r) => r.el)}</optgroup>;
+            })}
           </select>
         </label>
         <label className="flex flex-col gap-1 text-xs text-slate-500">Штук в кванте
