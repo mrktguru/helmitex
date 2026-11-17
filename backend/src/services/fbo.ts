@@ -1,7 +1,7 @@
 import { FboStatus } from '@prisma/client';
 import prisma from '../prisma/client';
 import { StockError, consume, nextDocNumber, nextNumber } from './stock';
-import { OzonRateLimitError, ozon, ozonGetFile, poll } from './ozon';
+import { OzonRateLimitError, ozon, ozonCall, ozonGetFile, poll } from './ozon';
 import { uploadFile } from './s3';
 
 const MAX_BOXES = 30;            // /v1/cargoes/create: не больше 30 коробок
@@ -357,6 +357,13 @@ export async function syncShipment(id: string) {
   const r = await ozon('/v3/supply-order/get', { order_ids: [Number(s.ozonOrderId)] }, id);
   const o = r.orders?.[0];
   if (!o) return s;
+  await applyOrder(s, o);
+  return load(id);
+}
+
+// Заявка Ozon → поставка портала: номера, статус, склад, слот; автосписание и закрытие
+async function applyOrder(s: Shipment, o: any) {
+  const id = s.id;
   const supply = o.supplies?.[0];
   const ts = o.timeslot?.timeslot;
   await prisma.fboShipment.update({
@@ -377,7 +384,6 @@ export async function syncShipment(id: string) {
   if (o.state === 'COMPLETED') {
     await prisma.fboShipment.updateMany({ where: { id, status: 'SHIPPED' }, data: { status: 'COMPLETED' } });
   }
-  return load(id);
 }
 
 // Состояния заявки Ozon, при которых груз уже передан
@@ -389,8 +395,20 @@ export async function syncAllShipments(): Promise<void> {
     where: { ozonOrderId: { not: null }, status: { notIn: ['CANCELLED', 'COMPLETED'] } },
     select: { id: true },
   });
-  for (const a of active) {
-    try { await syncShipment(a.id); } catch (e) { console.warn('[fbo sync]', a.id, (e as Error).message); }
+  // Одним запросом на пачку заявок (до 50), а не по запросу на каждую поставку
+  for (let i = 0; i < active.length; i += 50) {
+    const list = await Promise.all(active.slice(i, i + 50).map((a) => load(a.id)));
+    let orders: any[];
+    try {
+      const r = await ozonCall<any>('POST', '/v3/supply-order/get', { order_ids: list.map((s) => Number(s.ozonOrderId)) }, undefined, false);
+      orders = r.orders ?? [];
+    } catch (e) { console.warn('[fbo sync]', (e as Error).message); continue; }
+    const byId = new Map(orders.map((o) => [String(o.order_id), o]));
+    for (const s of list) {
+      const o = byId.get(String(s.ozonOrderId));
+      if (!o) continue;
+      try { await applyOrder(s, o); } catch (e) { console.warn('[fbo sync]', s.id, (e as Error).message); }
+    }
   }
 }
 
