@@ -300,7 +300,7 @@ export const api = {
     request<{ timezone: string | null; days: { date: string; slots: { from: string; to: string }[] }[] }>(
       `/stock/fbo/${id}/timeslots${storageWarehouseId ? `?storageWarehouseId=${storageWarehouseId}` : ''}`),
   fboBook: (id: string, data: any) => request<any>(`/stock/fbo/${id}/book`, { method: 'POST', body: JSON.stringify(data) }),
-  fboAction: (id: string, action: 'cargoes' | 'labels' | 'ship' | 'cancel' | 'sync') =>
+  fboAction: (id: string, action: 'cargoes' | 'labels' | 'ship' | 'cancel' | 'sync' | 'trim') =>
     request<any>(`/stock/fbo/${id}/${action}`, { method: 'POST' }),
   fboLog: (id: string) => request<any[]>(`/stock/fbo/${id}/log`),
   saveQuantType: (id: string | null, data: any) =>

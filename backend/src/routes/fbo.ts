@@ -6,7 +6,7 @@ import { StockError } from '../services/stock';
 import {
   DEFAULT_DROPOFF, OZON_DEFAULTS_KEY, OZON_STATE_LABEL, OzonDefaults, defaultOzonSettings, getSetting, ozon, ozonConfigured, setSetting,
 } from '../services/ozon';
-import { book, cancelShipment, createOzonDraft, createShipment, getTimeslots, makeLabels, setCargoes, ship, syncAllShipments, syncShipment, syncSkus } from '../services/fbo';
+import { book, cancelShipment, createOzonDraft, createShipment, getTimeslots, makeLabels, setCargoes, ship, syncAllShipments, syncShipment, syncSkus, trimToOzon } from '../services/fbo';
 import { downloadFile } from '../services/s3';
 import { fileName, itemsToken, setShareText, translit } from '../services/share';
 
@@ -250,6 +250,7 @@ router.post('/fbo/:id/book', h(async (req, res) => {
 router.post('/fbo/:id/cargoes', h(async (req, res) => { await setCargoes(req.params.id); res.json(await full(req.params.id)); }));
 router.post('/fbo/:id/labels', h(async (req, res) => { await makeLabels(req.params.id); res.json(await full(req.params.id)); }));
 router.post('/fbo/:id/ship', h(async (req, res) => { await ship(req.params.id, req.user!.id); res.json(await full(req.params.id)); }));
+router.post('/fbo/:id/trim', h(async (req, res) => { await trimToOzon(req.params.id); res.json(await full(req.params.id)); }));
 router.post('/fbo/:id/cancel', h(async (req, res) => { await cancelShipment(req.params.id); res.json(await full(req.params.id)); }));
 router.post('/fbo/:id/sync', h(async (req, res) => { await syncShipment(req.params.id); res.json(await full(req.params.id)); }));
 

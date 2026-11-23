@@ -163,6 +163,28 @@ export async function createOzonDraft(id: string, opt: {
       throw new StockError(`Ozon сейчас не принимает поставку ${where}: ${reasons.map(unavailableText).join('; ') || 'склады недоступны'}. `
         + 'Выберите другой пункт отгрузки или другой кластер.');
     }
+    // Сколько Ozon реально примет: состав bundle_id каждого склада (с PARTIAL Ozon молча урезает количество,
+    // отрезанное лежит в restricted_bundle_id). Пишем accepted { sku: шт } в склад черновика.
+    const requested = itemsBySku(s);
+    for (const w of whs) {
+      if (w.availability_status?.state === 'NOT_AVAILABLE') continue;
+      w.accepted = Object.fromEntries(w.bundle_id ? await bundleItems(w.bundle_id, id) : new Map());
+    }
+    const place = {
+      supplyType: opt.supplyType, clusterId: String(opt.clusterId), clusterName: cluster?.cluster_name ?? opt.clusterName ?? null,
+      dropOffWarehouseId: opt.supplyType === 'CROSSDOCK' ? String(opt.dropOffWarehouseId) : null,
+      dropOffName: opt.supplyType === 'CROSSDOCK' ? opt.dropOffName ?? null : null,
+      dropOffType: opt.supplyType === 'CROSSDOCK' ? opt.dropOffType ?? null : null,
+    };
+    if (opt.supplyType === 'CROSSDOCK') {
+      const w = whs.find((x) => x.accepted);
+      const short = w ? shortage(requested, w.accepted) : [];
+      if (short.length) {
+        // Черновик не годится — остаёмся на шаге «Состав», показываем, сколько примет Ozon, и предлагаем урезать
+        await prisma.fboShipment.update({ where: { id }, data: { ...place, status: 'DRAFT', ozonDraftId: null, draftCreatedAt: null, draftWarehouses: whs } });
+        throw new StockError(shortageText(short, `кластер «${place.clusterName ?? opt.clusterId}»`));
+      }
+    }
     return prisma.fboShipment.update({
       where: { id },
       data: {
@@ -176,6 +198,83 @@ export async function createOzonDraft(id: string, opt: {
       },
     });
   } catch (e) { return fail(id, e); }
+}
+
+// Состав бандла Ozon (черновика или заявки): sku → штук
+async function bundleItems(bundleId: string, shipmentId?: string): Promise<Map<string, number>> {
+  const m = new Map<string, number>();
+  let last_id = '';
+  for (let page = 0; page < 20; page++) {
+    const r = await ozon('/v1/supply-order/bundle', {
+      bundle_ids: [bundleId], is_asc: true, limit: 100, sort_field: 'UNSPECIFIED', ...(last_id ? { last_id } : {}),
+    }, shipmentId);
+    for (const it of r.items ?? []) m.set(String(it.sku), (m.get(String(it.sku)) ?? 0) + Number(it.quantity ?? 0));
+    if (!r.has_next || !r.last_id) break;
+    last_id = r.last_id;
+  }
+  return m;
+}
+
+type Short = { sku: string; name: string; requested: number; accepted: number };
+// SKU, которых Ozon примет меньше, чем в поставке
+function shortage(requested: { sku: string; name: string; quantity: number }[], accepted: Map<string, number> | Record<string, number>): Short[] {
+  const get = (k: string) => (accepted instanceof Map ? accepted.get(k) : accepted[k]) ?? 0;
+  return requested.filter((r) => get(r.sku) < r.quantity).map((r) => ({ sku: r.sku, name: r.name, requested: r.quantity, accepted: get(r.sku) }));
+}
+
+function shortageText(short: Short[], where: string): string {
+  return `Ozon примет в ${where} не всё: `
+    + short.map((x) => `«${x.name}» — ${x.accepted ? `не больше ${x.accepted} шт` : 'не принимает'} (в поставке ${x.requested} шт)`).join('; ')
+    + '. Уменьшите поставку до допустимого количества или выберите другой кластер.';
+}
+
+// Урезать поставку до того, что примет Ozon (по последнему черновику): лишние кванты — обратно на склад.
+// Кванты целые: если лимит не кратен кванту — остаётся меньше лимита (например, лимит 38 при кванте 42 → 0 коробок).
+export async function trimToOzon(id: string) {
+  const s = await load(id);
+  expect(s, 'DRAFT');
+  const whs: any[] = Array.isArray(s.draftWarehouses) ? (s.draftWarehouses as any[]) : [];
+  const accepted: Record<string, number> | undefined = whs.find((w) => w.accepted)?.accepted;
+  if (!accepted) throw new StockError('Нет данных Ozon о допустимом количестве — создайте черновик заново');
+  const left = new Map(Object.entries(accepted));
+  // Оставляем самые ранние по сроку годности (как при подборе), остальные снимаем
+  const byFefo = [...s.cargoes].sort((a, b) => (a.quant.lot.expiresAt?.getTime() ?? Infinity) - (b.quant.lot.expiresAt?.getTime() ?? Infinity) || a.sort - b.sort);
+  const drop: typeof s.cargoes = [];
+  for (const c of byFefo) {
+    const sku = c.quant.quantType.productItem.spec!.ozonSku!;
+    const room = left.get(sku) ?? 0;
+    if (c.quant.units <= room) left.set(sku, room - c.quant.units); else drop.push(c);
+  }
+  if (drop.length === 0) throw new StockError('Ozon принимает весь состав — урезать нечего, создайте черновик заново');
+  if (drop.length === s.cargoes.length) {
+    throw new StockError('В этот кластер Ozon не примет ни одной целой коробки — отмените поставку или выберите другой кластер');
+  }
+  await prisma.$transaction([
+    prisma.fboCargo.deleteMany({ where: { id: { in: drop.map((c) => c.id) } } }),
+    prisma.quant.updateMany({ where: { id: { in: drop.map((c) => c.quantId) }, status: 'RESERVED' }, data: { status: 'ASSEMBLED' } }),
+    prisma.fboShipment.update({ where: { id }, data: { draftWarehouses: [], ozonDraftId: null, draftCreatedAt: null, lastError: null } }),
+  ]);
+  pendingDrafts.delete(id);
+  return load(id);
+}
+
+// Сверка заявки Ozon с поставкой: в заявке (бандл поставки) не меньше штук, чем в наших коробках?
+async function supplyShortage(s: Shipment, order?: any): Promise<Short[]> {
+  let o = order;
+  if (!o) o = (await ozon('/v3/supply-order/get', { order_ids: [Number(s.ozonOrderId)] }, s.id)).orders?.[0];
+  const bundleId = o?.supplies?.[0]?.bundle_id;
+  if (!bundleId) return [];
+  return shortage(itemsBySku(s), await bundleItems(bundleId, s.id));
+}
+
+const SUPPLY_SHORT = 'Заявка Ozon урезана';
+async function assertSupplyMatches(s: Shipment) {
+  if (!s.ozonOrderId) return;
+  const short = await supplyShortage(s);
+  if (short.length) {
+    throw new StockError(`${SUPPLY_SHORT}: ` + short.map((x) => `«${x.name}» — Ozon ждёт ${x.accepted} шт, в коробках ${x.requested}`).join('; ')
+      + '. Лишнее Ozon не примет — отмените поставку и создайте заново на допустимое количество.');
+  }
 }
 
 // Причины недоступности склада в черновике Ozon
@@ -247,6 +346,12 @@ export async function book(id: string, opt: { from: string; to: string; storageW
   const s = await load(id);
   expect(s, 'OZON_DRAFT');
   draftAlive(s);
+  // Прямая поставка: склад, который примет не всё, не бронируем
+  if (s.supplyType === 'DIRECT' && opt.storageWarehouseId) {
+    const w = ((s.draftWarehouses as any[]) ?? []).find((x) => String(x.storage_warehouse?.warehouse_id) === String(opt.storageWarehouseId));
+    const short = w?.accepted ? shortage(itemsBySku(s), w.accepted) : [];
+    if (short.length) throw new StockError(shortageText(short, `склад ${opt.storageName ?? opt.storageWarehouseId}`));
+  }
   // Перед бронированием — свежая проверка у Ozon: слот ещё есть?
   const day = opt.from.slice(0, 10);
   const fresh = await fetchSlots(s, id, opt.storageWarehouseId, day, day);
@@ -283,6 +388,7 @@ export async function setCargoes(id: string) {
   try {
     if (!s.ozonSupplyId) { await syncShipment(id); s = await load(id); }
     if (!s.ozonSupplyId) throw new StockError('Ozon ещё не выдал номер поставки — повторите через минуту');
+    await assertSupplyMatches(s);
     const cargoes = s.cargoes.map((c) => ({
       key: c.quant.number,
       value: {
@@ -318,6 +424,7 @@ export async function makeLabels(id: string) {
   try {
     const ids = s.cargoes.map((c) => c.ozonCargoId).filter(Boolean);
     if (ids.length !== s.cargoes.length) throw new StockError('Не у всех квантов есть номер грузоместа — передайте грузоместа заново');
+    await assertSupplyMatches(s);
     const r = await ozon('/v1/cargoes-label/create', { supply_id: Number(s.ozonSupplyId), cargoes: ids.map((x) => ({ cargo_id: Number(x) })) }, id);
     if (r.errors?.error_reasons?.length) throw new StockError(`Ozon: ${r.errors.error_reasons.join(', ')}`);
     const g = await poll(() => ozon('/v1/cargoes-label/get', { operation_id: r.operation_id }, id), (x: any) => x.status !== 'IN_PROGRESS', 20);
@@ -398,6 +505,16 @@ async function applyOrder(s: Shipment, o: any) {
       ...(ts && !s.timeslotFrom ? { timeslotFrom: ts.from, timeslotTo: ts.to } : {}),
     },
   });
+  // До отгрузки сверяем состав заявки: Ozon мог урезать количество — показываем это в поставке
+  if (['BOOKED', 'CARGOES_SET', 'LABELS_READY'].includes(s.status) && !SHIPPED_STATES.includes(o.state) && o.state !== 'CANCELLED') {
+    try {
+      const short = await supplyShortage(s, o);
+      const msg = short.length ? `${SUPPLY_SHORT}: ` + short.map((x) => `«${x.name}» — Ozon ждёт ${x.accepted} шт, в коробках ${x.requested}`).join('; ')
+        + '. Лишнее Ozon не примет — отмените поставку и создайте заново на допустимое количество.' : null;
+      if (msg) await prisma.fboShipment.update({ where: { id }, data: { lastError: msg } });
+      else if (s.lastError?.startsWith(SUPPLY_SHORT)) await prisma.fboShipment.update({ where: { id }, data: { lastError: null } });
+    } catch (e) { console.warn('[fbo sync] bundle', s.number, (e as Error).message); }
+  }
   // Ozon уже принял груз, а у нас поставка не отгружена — списываем кванты сами
   if (SHIPPED_STATES.includes(o.state) && ['BOOKED', 'CARGOES_SET', 'LABELS_READY'].includes(s.status)) {
     await ship(id, s.userId);

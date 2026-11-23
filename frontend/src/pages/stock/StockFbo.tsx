@@ -70,13 +70,25 @@ export default function StockFbo() {
   const step = STEP_OF[s.status];
   const cancelled = s.status === 'CANCELLED';
   const units = s.cargoes.reduce((t: number, c: any) => t + c.quant.units, 0);
-  const bySku = new Map<string, { name: string; offer: string; boxes: number; units: number }>();
+  const bySku = new Map<string, { name: string; offer: string; sku: string; boxes: number; units: number; quants: number[] }>();
   for (const c of s.cargoes) {
     const p = c.quant.quantType.productItem;
-    const v = bySku.get(p.id) ?? { name: p.name, offer: p.spec?.ozonOfferId ?? '—', boxes: 0, units: 0 };
-    v.boxes++; v.units += c.quant.units;
+    const v = bySku.get(p.id) ?? { name: p.name, offer: p.spec?.ozonOfferId ?? '—', sku: String(p.spec?.ozonSku ?? ''), boxes: 0, units: 0, quants: [] as number[] };
+    v.boxes++; v.units += c.quant.units; v.quants.push(c.quant.units);
     bySku.set(p.id, v);
   }
+  // Сколько примет Ozon по последнему черновику (кросс-докинг: один склад). Есть только когда Ozon урезал состав.
+  const accepted: Record<string, number> | null = s.status === 'DRAFT' && s.supplyType === 'CROSSDOCK'
+    ? warehouses.find((w) => w.accepted)?.accepted ?? null : null;
+  const limits = accepted ? [...bySku.values()].map((v) => {
+    const lim = accepted[v.sku] ?? 0;
+    let room = lim, keep = 0, keepUnits = 0;
+    for (const u of [...v.quants].sort((a, b) => a - b)) if (u <= room) { room -= u; keep++; keepUnits += u; }
+    return { ...v, lim, keep, keepUnits };
+  }) : null;
+  const short = limits?.filter((x) => x.lim < x.units) ?? [];
+  const dropBoxes = short.reduce((t, x) => t + x.boxes - x.keep, 0);
+  const keepBoxes = s.cargoes.length - dropBoxes;
   const quantIds = s.cargoes.map((c: any) => c.quantId).join(',');
 
   return (
@@ -109,16 +121,36 @@ export default function StockFbo() {
         <h3 className="font-semibold text-sm">Состав: {s.cargoes.length} коробок · {units} шт</h3>
         <table className="w-full text-sm tabular-nums">
           <tbody>
-            {[...bySku.values()].map((v) => (
+            {(limits ?? [...bySku.values()]).map((v: any) => (
               <tr key={v.offer} className="border-b last:border-0">
                 <td className="py-1">{v.name}</td>
                 <td className="py-1 font-mono text-xs text-slate-500">{v.offer}</td>
                 <td className="py-1 text-right">{v.boxes} кор.</td>
                 <td className="py-1 text-right">{v.units} шт</td>
+                {limits && (
+                  <td className={clsx('py-1 text-right pl-3', v.lim < v.units ? 'text-red-700 font-medium' : 'text-green-700')}>
+                    {v.lim < v.units ? `Ozon примет ${v.lim} шт → ${v.keep} кор. (${v.keepUnits} шт)` : 'Ozon примет всё'}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
+        {short.length > 0 && (
+          <div className="text-sm bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 space-y-2">
+            <p>
+              Ozon ограничил приёмку в кластер <b>{s.clusterName}</b>: лишнее он не примет, а стикеры на него выдаст.
+              {keepBoxes > 0
+                ? <> Можно урезать поставку до целых коробок в пределах лимита: {dropBoxes} кор. вернутся на склад, останется {keepBoxes}.</>
+                : <> Ни одна целая коробка в лимит не помещается — отмените поставку или выберите другой кластер.</>}
+            </p>
+            {keepBoxes > 0 && (
+              <button disabled={!!busy} onClick={() => run('trim', () => api.fboAction(id!, 'trim'))} className={btnPrimary}>
+                {busy === 'trim' ? 'Урезаю…' : `Урезать до ${keepBoxes} кор. и создать черновик заново`}
+              </button>
+            )}
+          </div>
+        )}
         {s.clusterName && (
           <p className="text-sm text-slate-600">
             {s.supplyType === 'CROSSDOCK' ? 'Кросс-докинг' : 'Прямая'} · {s.clusterName}
@@ -157,11 +189,12 @@ export default function StockFbo() {
             <div className="flex flex-wrap gap-2">
               {warehouses.filter((w) => w.storage_warehouse).map((w) => {
                 const wid = String(w.storage_warehouse.warehouse_id);
-                const ok = w.availability_status?.state === 'FULL_AVAILABLE';
+                const lacks = w.accepted && [...bySku.values()].some((v) => (w.accepted[v.sku] ?? 0) < v.units);
+                const ok = w.availability_status?.state === 'FULL_AVAILABLE' && !lacks;
                 return (
                   <button key={wid} disabled={!ok} onClick={() => { setStorage({ id: wid, name: w.storage_warehouse.name }); loadSlots(wid); }}
                     className={clsx('border rounded-lg px-3 py-2 text-left text-sm', storage?.id === wid ? 'border-brand-500 bg-brand-50' : 'hover:bg-slate-50', !ok && 'opacity-40')}>
-                    {w.storage_warehouse.name}<div className="text-xs text-slate-500">{ok ? 'доступен' : w.availability_status?.invalid_reason}</div>
+                    {w.storage_warehouse.name}<div className="text-xs text-slate-500">{lacks ? 'примет не всё' : ok ? 'доступен' : w.availability_status?.invalid_reason}</div>
                   </button>
                 );
               })}
