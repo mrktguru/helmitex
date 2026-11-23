@@ -64,12 +64,15 @@ function Dynamics({ d }: { d: Charts }) {
   const s = d.series;
   const dates = s.map((x) => x.date);
   const hasFbs = s.some((x) => x.fbs > 0);
+  // рекламные — по атрибуции Ozon (могут превышать все заказы дня), органика — остальное
+  const adOrd = (x: Day) => Math.min(x.adOrders, x.fbo + x.fbs);
+  const orgOrd = (x: Day) => Math.max(0, x.fbo + x.fbs - x.adOrders);
   const camps = d.campaigns.slice(0, CAMP_COLORS.length);
   const multi = camps.length > 1;
 
   const panels: PanelSpec[] = [
-    { title: `Заказы, шт (без отмен) · FBO${hasFbs ? ' + FBS' : ''}`, short: 'Заказы, шт', h: 190,
-      stack: [{ values: s.map((x) => x.fbo), color: C.fbo }, { values: s.map((x) => x.fbs), color: C.fbs }] },
+    { title: 'Заказы, шт (без отмен) · реклама + органика', short: 'Заказы: реклама + органика', h: 190,
+      stack: [{ values: s.map((x) => adOrd(x)), color: C.ad }, { values: s.map((x) => orgOrd(x)), color: C.org }] },
     { title: 'Показы органические, шт', short: 'Показы орг., шт', h: 150, lines: [{ values: s.map((x) => x.orgViews), color: C.org }] },
     { title: 'Добавления в корзину органические, шт', short: 'Корзины орг., шт', h: 140, stack: [{ values: s.map((x) => x.orgCart), color: C.org }] },
     { title: 'Показы по рекламе, шт', short: 'Показы рекл., шт', h: 150, lines: [{ values: s.map((x) => x.adViews), color: C.ad }] },
@@ -92,7 +95,9 @@ function Dynamics({ d }: { d: Charts }) {
       <>
         {head(x.date)}
         {x.date === d.today && <div className="text-amber-700 font-ui">день ещё не закончился</div>}
-        <div>Заказы без отмен: <b>{x.fbo + x.fbs}</b>{hasFbs && <> (FBO {x.fbo} · FBS {x.fbs})</>}</div>
+        <div>Заказы без отмен: <b>{x.fbo + x.fbs}</b> · <span style={{ color: C.ad }}>реклама {x.adOrders}</span> · <span style={{ color: C.org }}>органика {orgOrd(x)}</span></div>
+        {x.adOrders > x.fbo + x.fbs && <div className="text-amber-700 font-ui">рекламных по атрибуции Ozon больше, чем всех заказов дня</div>}
+        {hasFbs && <div className="text-slate-500">FBO {x.fbo} · FBS {x.fbs}</div>}
         <div className="text-slate-500">Заказано по аналитике Ozon: {x.orders}</div>
         <div><span style={{ color: C.org }}>●</span> Органика: показы {fmt(x.orgViews)} · корзины {fmt(x.orgCart)}</div>
         <div><span style={{ color: C.ad }}>●</span> Реклама: показы {fmt(x.adViews)} · клики {fmt(x.adClicks)} · корзины {fmt(x.adCart)} · заказы {fmt(x.adOrders)}</div>
@@ -111,14 +116,13 @@ function Dynamics({ d }: { d: Charts }) {
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
         <h2 className="font-semibold">Динамика по дням <span className="font-normal text-sm text-slate-500">· сегодня слева</span></h2>
         <Legend items={[
-          { color: C.fbo, label: 'FBO' }, ...(hasFbs ? [{ color: C.fbs, label: 'FBS' }] : []),
           { color: C.org, label: 'органика' }, { color: C.ad, label: 'реклама' },
           ...(multi ? camps.map((c, k) => ({ color: CAMP_COLORS[k], label: c.title, kind: 'dash' as const })) : []),
         ]} />
       </div>
       <MultiPanel dates={dates} panels={panels} tooltip={tip} today={d.today} gap={36} />
       <p className="mt-1 text-[11px] text-slate-500 leading-4">
-        Органика = всего по аналитике Ozon − реклама (может быть занижена: Ozon засчитывает рекламе заказы и корзины несколько дней после клика).
+        Органика = всего − реклама (заказы: без отмен − рекламные по атрибуции Ozon; показы и корзины: аналитика Ozon − реклама) (может быть занижена: Ozon засчитывает рекламе заказы и корзины несколько дней после клика).
         СПП — скидка за счёт Ozon от цены продавца, по начислениям дня: FBO попадает в них после выкупа, пустые дни соединены пунктиром.
         {multi && ' Средняя цена клика взвешена по кликам: расход всех кампаний ÷ все клики.'}
       </p>
