@@ -9,6 +9,7 @@ import {
   createCampaign, getIntraday, refreshAdsMeta, getProducts, getReport, todayMsk, setActionPrice, setBudget, setCampaignState, setCpcBid, setPrice, setSelected, setSelectedBid, ymd,
 } from '../services/ads';
 import { syncStatus } from '../services/syncStatus';
+import { getCharts, setStockAnchor } from '../services/adsCharts';
 import { DEFAULT_BOOST, DEFAULT_LIMITS, DEFAULT_MODS, getBidder, runBidder, saveBidder } from '../services/bidder';
 
 const router = Router();
@@ -45,7 +46,7 @@ router.get('/status', h(async (_req, res) => {
   res.json({ seller: ozonConfigured(), perf: perfConfigured(), lastDay: todayMsk() });
 }));
 
-const ADS_SOURCES = ['ads-data', 'ads-meta', 'ads-prices', 'ads-intraday'];
+const ADS_SOURCES = ['ads-data', 'ads-meta', 'ads-prices', 'ads-intraday', 'ads-postings', 'ads-supplies'];
 router.get('/products', h(async (req, res) => {
   const p = period(req.query);
   if (p.refresh) refreshAdsMeta();
@@ -57,6 +58,18 @@ router.get('/sync-status', h(async (_req, res) => { res.json(await syncStatus(AD
 router.get('/report/:sku', h(async (req, res) => {
   const p = period(req.query);
   res.json(await getReport(req.params.sku, p.from, p.to, p.refresh));
+}));
+
+// Графики: заказы FBO/FBS, органика и реклама, цена клика, СПП, локальные заказы, кластеры и остатки
+router.get('/charts/:sku', h(async (req, res) => {
+  const p = period(req.query);
+  res.json(await getCharts(req.params.sku, p.from, p.to, p.refresh));
+}));
+// Точка отсчёта остатков FBO (день, когда сток был 0 во всех кластерах); null — определять автоматически
+router.put('/stock-anchor/:sku', h(async (req, res) => {
+  const { date } = z.object({ date: z.string().regex(ISO).nullable() }).parse(req.body);
+  await setStockAnchor(req.params.sku, date);
+  res.json({ ok: true });
 }));
 
 const id = z.string().regex(/^\d+$/);

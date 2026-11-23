@@ -13,6 +13,7 @@ import { Gran, PRODUCT_METRICS, productBuckets } from './periods';
 import { addDays } from './util';
 import SyncBar, { useSyncPoll } from '../stock/SyncBar';
 import { Icon } from './icons';
+import AdsCharts from './charts/AdsCharts';
 
 type Tab = 'table' | 'camps' | 'bidder' | 'price' | 'journal';
 const TABS: [Tab, string, string][] = [['table', 'Таблица', 'table'], ['camps', 'Кампании', 'target'], ['bidder', 'Биддер', 'bolt'], ['price', 'Цена', 'tag'], ['journal', 'Журнал', 'list']];
@@ -31,6 +32,7 @@ export default function AdsAnalytics() {
   const [newCampaign, setNewCampaign] = useState(false);
   const [bidderFocus, setBidderFocus] = useState<string | null>(null);
   const reqId = useRef(0);
+  const [chartsVer, setChartsVer] = useState(0);
 
   const last = status?.lastDay ?? '';
   const gran = (params.get('g') as Gran) || 'day';
@@ -47,7 +49,7 @@ export default function AdsAnalytics() {
   useEffect(() => { api.adsStatus().then(setStatus).catch((e) => setError(e.message)); }, []);
   // Данные из базы портала — сразу; устаревшее Ozon догружает в фоне, после чего таблица тихо обновляется
   const [syncInit, setSyncInit] = useState<any[] | null>(null);
-  const { sync } = useSyncPoll(syncInit, api.adsSyncStatus, () => { loadList(false, true); loadReport(true); });
+  const { sync } = useSyncPoll(syncInit, api.adsSyncStatus, () => { loadList(false, true); loadReport(true); setChartsVer((v) => v + 1); });
   async function loadList(refresh = false, silent = false) {
     if (!from || !to) return;
     if (!silent) setLoading('list');
@@ -127,6 +129,7 @@ export default function AdsAnalytics() {
         </div>
       ) : (
         <div className={clsx('transition-opacity', loading === 'report' && 'opacity-60')}>
+          {tab === 'table' && sku && <div className="mb-4"><AdsCharts sku={sku} from={from} to={to} version={chartsVer} /></div>}
           {tab === 'table' && (
             <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
               <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-slate-200">

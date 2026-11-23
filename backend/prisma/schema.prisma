@@ -499,11 +499,43 @@ model AdDayCharge {
 
 // Какие дни уже загружены (чтобы не перезапрашивать дни без данных)
 model AdSyncDay {
-  kind      String // seller | perf | finance
+  kind      String // seller | perf | finance | postings
   date      DateTime @db.Date
   fetchedAt DateTime @default(now())
 
   @@id([kind, date])
+}
+
+// Отправления Ozon (FBO и FBS) для графиков: строка = отправление × SKU. Кластеры — из financial_data.
+model OzonPosting {
+  postingNumber String
+  sku           String
+  scheme        String // FBO | FBS
+  status        String
+  orderDay      String // день заказа по Москве (in_process_at, иначе created_at), YYYY-MM-DD
+  qty           Int
+  price         Float
+  clusterFrom   String? // кластер склада отгрузки
+  clusterTo     String? // кластер покупателя
+  warehouse     String?
+  syncedAt      DateTime @updatedAt
+
+  @@id([postingNumber, sku])
+  @@index([sku, orderDay])
+}
+
+// Поставки FBO из Ozon (все, не только созданные порталом) — приход товара в кластер для оценки остатков
+model OzonSupply {
+  supplyId       String    @id
+  orderId        String
+  state          String
+  clusterId      String?
+  clusterName    String?
+  createdAt      DateTime
+  timeslotFrom   DateTime?
+  stateUpdatedAt DateTime?
+  items          Json // [{ sku, qty }]
+  syncedAt       DateTime  @updatedAt
 }
 
 // Снимок рекламы каждые 30 минут: накопленные за текущий день (МСК) показатели кампании.

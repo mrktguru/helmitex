@@ -24,6 +24,7 @@ import { syncFbs } from './services/ozonFbs';
 import { syncAllShipments } from './services/fbo';
 import { ozonConfigured } from './services/ozon';
 import { startAdsSync } from './services/ads';
+import { startChartsSync } from './services/adsCharts';
 import { runAllBidders } from './services/bidder';
 import { errorHandler } from './middleware/errorHandler';
 
@@ -78,6 +79,7 @@ if (ozonConfigured()) {
   // Статистика рекламы и продаж за последние дни — раз в 3 часа
   // после каждого снимка (раз в 30 мин) — решения биддера по кампаниям, где он включён
   startAdsSync(runAllBidders);
+  startChartsSync();
 }
 
 export default app;

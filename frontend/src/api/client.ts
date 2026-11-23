@@ -335,6 +335,9 @@ export const api = {
     request<{ from: string; to: string; products: any[]; sync: any[] }>(`/ads/products?${new URLSearchParams({ from, to, ...(refresh ? { refresh: '1' } : {}) })}`),
   adsReport: (sku: string, from: string, to: string, refresh = false) =>
     request<any>(`/ads/report/${sku}?${new URLSearchParams({ from, to, ...(refresh ? { refresh: '1' } : {}) })}`),
+  adsCharts: (sku: string, from: string, to: string, refresh = false) =>
+    request<any>(`/ads/charts/${sku}?${new URLSearchParams({ from, to, ...(refresh ? { refresh: '1' } : {}) })}`),
+  adsStockAnchor: (sku: string, date: string | null) => request<{ ok: true }>(`/ads/stock-anchor/${sku}`, { method: 'PUT', body: JSON.stringify({ date }) }),
   adsCampaignState: (id: string, on: boolean) => request<{ ok: true }>(`/ads/campaigns/${id}/state`, { method: 'POST', body: JSON.stringify({ on }) }),
   adsCampaignBid: (id: string, sku: string, bid: number) => request<{ ok: true }>(`/ads/campaigns/${id}/bid`, { method: 'PUT', body: JSON.stringify({ sku, bid }) }),
   adsCampaignBudget: (id: string, data: { weeklyBudget?: number | null; dailyBudget?: number | null }) =>
