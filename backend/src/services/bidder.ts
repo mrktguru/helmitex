@@ -320,6 +320,13 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
   }
 
   const minDelta = Math.max(0.5, curBid * 0.02);
+  // пауза после изменения — для любой правки (модификаторы и ограничение шага тоже), кроме стоп-лосса:
+  // иначе ставка «догоняет» цель шагами каждые 30 минут
+  if (Math.abs(target - curBid) >= minDelta && coolLeft > 0 && !stopLoss) {
+    if (!reasons.some((x) => x.startsWith('пауза после изменения'))) reasons.push(`пауза после изменения: ещё ${Math.ceil(coolLeft)} мин — следующий шаг к ${fmt(target)} ₽ после неё`);
+    if (budgetAction) return done('BUDGET_UP', { from: budgetAction.from, to: budgetAction.to, applied: budgetAction.applied });
+    return done('HOLD', { from: curBid, to: curBid });
+  }
   if (Math.abs(target - curBid) >= minDelta && (st.changes ?? 0) < L.maxChangesPerDay) {
     const up = target > curBid;
     if (up && freeze) { reasons.push('повышение заблокировано перестраховкой'); return done(budgetAction ? 'BUDGET_UP' : 'HOLD', budgetAction ? { from: budgetAction.from, to: budgetAction.to, applied: budgetAction.applied } : {}); }
