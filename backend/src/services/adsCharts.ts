@@ -1,7 +1,7 @@
 import prisma from '../prisma/client';
 import { kick, track } from './syncStatus';
 import { getSetting, ozonCall, ozonConfigured, setSetting, sleep } from './ozon';
-import { campaignMeta, dateRange, todayMsk, ymd } from './ads';
+import { allocatedCharges, campaignMeta, dateRange, todayMsk, ymd } from './ads';
 
 // Графики «Аналитики рекламы»: отправления FBO/FBS с кластерами, поставки FBO и оценка остатков по кластерам.
 // Ozon не хранит историю остатков, поэтому остаток считается от «нулевой» даты (сток кончился везде)
@@ -235,14 +235,16 @@ export async function getCharts(sku: string, from: string, to: string, force = f
   }
 
   const days = dateRange(from, to);
-  const [skuDays, camDays, postingsRaw, supplies, meta, snap] = await Promise.all([
+  const [skuDays, camDays, postingsRaw, supplies, meta, snap, alloc] = await Promise.all([
     prisma.adDaySku.findMany({ where: { sku, date: { gte: dt(from), lte: dt(to) } } }),
     prisma.adDayCampaign.findMany({ where: { sku, date: { gte: dt(from), lte: dt(to) } } }),
     prisma.ozonPosting.findMany({ where: { sku, orderDay: { gte: lo, lte: today }, NOT: { status: 'cancelled' } }, select: { orderDay: true, qty: true, scheme: true, clusterFrom: true, clusterTo: true } }),
     prisma.ozonSupply.findMany({ where: { createdAt: { gte: new Date(dt(lo).getTime() - 30 * DAY) } }, orderBy: { createdAt: 'asc' } }),
     campaignMeta().catch(() => null),
     stockNow(sku),
+    allocatedCharges(from, to).catch(() => new Map<string, Map<string, number>>()),
   ]);
+  const cpoBy = alloc.get(sku) ?? new Map<string, number>();
   const postings = postingsRaw as P[];
 
   // ── по дням
@@ -288,7 +290,10 @@ export async function getCharts(sku: string, from: string, to: string, force = f
       adViews, adClicks, adCart, adOrders: sum('orders'),
       orgViews: Math.max(0, (s?.views ?? 0) - adViews),
       orgCart: Math.max(0, (s?.toCart ?? 0) - adCart),
-      spend: Math.round(spend), cpc: adClicks > 0 ? r1(spend / adClicks) : null, cpcBy,
+      spend: Math.round(spend),
+      // оплата за заказ — списания из начислений, распределённые по выручке товаров
+      spendCpo: Math.round((cpoBy.get(`${d}|sel`) ?? 0) + (cpoBy.get(`${d}|all`) ?? 0)),
+      cpc: adClicks > 0 ? r1(spend / adClicks) : null, cpcBy,
       // СПП — скидка за счёт Ozon от цены продавца; по начислениям дня (FBO — после выкупа)
       spp: sale > 0 && buyer > 0 && q > 0 ? r1((sale - buyer) / sale * 100) : null,
       buyerPrice: sale > 0 && buyer > 0 && q > 0 ? Math.round(buyer / q) : null,

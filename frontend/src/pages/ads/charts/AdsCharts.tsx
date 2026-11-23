@@ -9,7 +9,7 @@ import { C, CAMP_COLORS, Legend, MultiPanel, PanelSpec } from './chartKit';
 interface Day {
   date: string; orders: number; fbo: number; fbs: number; loc: number; local: number | null;
   views: number; toCart: number; adViews: number; adClicks: number; adCart: number; adOrders: number;
-  orgViews: number; orgCart: number; spend: number; cpc: number | null; cpcBy: Record<string, number | null>;
+  orgViews: number; orgCart: number; spend: number; spendCpo: number; cpc: number | null; cpcBy: Record<string, number | null>;
   spp: number | null; buyerPrice: number | null;
 }
 interface Cluster {
@@ -77,7 +77,8 @@ function Dynamics({ d }: { d: Charts }) {
     { title: 'Добавления в корзину органические, шт', short: 'Корзины орг., шт', h: 140, stack: [{ values: s.map((x) => x.orgCart), color: C.org }] },
     { title: 'Показы по рекламе, шт', short: 'Показы рекл., шт', h: 150, lines: [{ values: s.map((x) => x.adViews), color: C.ad }] },
     { title: 'Добавления в корзину по рекламе, шт', short: 'Корзины рекл., шт', h: 140, stack: [{ values: s.map((x) => x.adCart), color: C.ad }] },
-    { title: multi ? 'Цена клика, ₽ · средняя по всем кампаниям (расход ÷ клики) и по каждой' : 'Цена клика, ₽', short: 'Цена клика, ₽', h: 160, zero: false,
+    { title: `Цена клика, ₽ (линия, левая шкала${multi ? '; средняя по всем кампаниям и по каждой' : ''}) · расход на рекламу, ₽ (столбцы, правая шкала)`, short: 'Цена клика ₽ · расход ₽', h: 170, zero: false,
+      right: { bars: { values: s.map((x) => x.spend + (x.spendCpo ?? 0)), color: C.ad, opacity: 0.22 }, unit: '₽' },
       lines: [
         ...(multi ? camps.map((c, k) => ({ values: s.map((x) => x.cpcBy[c.id] ?? null), color: CAMP_COLORS[k], width: 1.3, dash: '5 3', dots: false })) : []),
         { values: s.map((x) => x.cpc), color: C.fg2, width: 2 },
@@ -101,7 +102,8 @@ function Dynamics({ d }: { d: Charts }) {
         <div className="text-slate-500">Заказано по аналитике Ozon: {x.orders}</div>
         <div><span style={{ color: C.org }}>●</span> Органика: показы {fmt(x.orgViews)} · корзины {fmt(x.orgCart)}</div>
         <div><span style={{ color: C.ad }}>●</span> Реклама: показы {fmt(x.adViews)} · клики {fmt(x.adClicks)} · корзины {fmt(x.adCart)} · заказы {fmt(x.adOrders)}</div>
-        <div>Цена клика: {x.cpc != null ? `${fmt(x.cpc, 1)} ₽` : '—'} · расход {fmt(x.spend)} ₽</div>
+        <div>Цена клика: {x.cpc != null ? `${fmt(x.cpc, 1)} ₽` : '—'}</div>
+        <div>Расход на рекламу: <b>{fmt(x.spend + (x.spendCpo ?? 0))} ₽</b>{x.spendCpo > 0 && <> (за клики {fmt(x.spend)} · за заказы {fmt(x.spendCpo)})</>}</div>
         {multi && camps.map((c, k) => x.cpcBy[c.id] != null && (
           <div key={c.id} className="pl-3"><span style={{ color: CAMP_COLORS[k] }}>━</span> {c.title.slice(0, 28)}: {fmt(x.cpcBy[c.id], 1)} ₽</div>
         ))}
@@ -124,7 +126,7 @@ function Dynamics({ d }: { d: Charts }) {
       <p className="mt-1 text-[11px] text-slate-500 leading-4">
         Органика = всего − реклама (заказы: без отмен − рекламные по атрибуции Ozon; показы и корзины: аналитика Ozon − реклама) (может быть занижена: Ozon засчитывает рекламе заказы и корзины несколько дней после клика).
         СПП — скидка за счёт Ozon от цены продавца, по начислениям дня: FBO попадает в них после выкупа, пустые дни соединены пунктиром.
-        {multi && ' Средняя цена клика взвешена по кликам: расход всех кампаний ÷ все клики.'}
+        {multi && ' Средняя цена клика взвешена по кликам: расход всех кампаний ÷ все клики.'} Расход — за клики и оплата за заказ (списания из начислений, по дате начисления).
       </p>
     </section>
   );

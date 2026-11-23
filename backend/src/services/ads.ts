@@ -482,7 +482,7 @@ async function fetchRefs(): Promise<ProductRef[]> {
 }
 
 // Списания «оплаты за заказ» из начислений, распределённые по SKU пропорционально выручке в день
-async function allocatedCharges(from: string, to: string): Promise<Map<string, Map<string, number>>> {
+export async function allocatedCharges(from: string, to: string): Promise<Map<string, Map<string, number>>> {
   const meta = await campaignMeta();
   const charges = await prisma.adDayCharge.findMany({ where: { kind: 'ORDER', date: { gte: dt(from), lte: dt(to) } } });
   const sales = await prisma.adDaySku.findMany({ where: { date: { gte: dt(from), lte: dt(to) } }, select: { date: true, sku: true, revenue: true } });
