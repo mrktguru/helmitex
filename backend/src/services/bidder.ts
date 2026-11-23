@@ -188,10 +188,14 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
   const d3 = await dailyAgg(campaignId, ymd(new Date(msk.getTime() - 3 * DAY)), today);
   const d2 = await dailyAgg(campaignId, ymd(new Date(msk.getTime() - 2 * DAY)), today);
   const conv28 = d28.carts >= 60 ? d28.orders / d28.carts : null;
+  // цель по корзине — по конверсии за 14 дней (28 дней захватывают акции и всплески трафика с другой конверсией)
+  const d14 = await dailyAgg(campaignId, ymd(new Date(msk.getTime() - 14 * DAY)), today);
+  const conv14 = d14.carts >= 60 ? d14.orders / d14.carts : null;
+  const convT = conv14 ?? conv28;
   const conv3 = d3.carts >= 30 ? d3.orders / d3.carts : null;
   const drift = conv28 && conv3 != null ? conv3 / conv28 : null;
   const freeze = drift != null && drift < 0.67;
-  Object.assign(metrics, { conv28: conv28 && round(conv28, 3), conv3: conv3 != null ? round(conv3, 3) : null, drift: drift && round(drift, 2), freeze });
+  Object.assign(metrics, { conv28: conv28 && round(conv28, 3), conv14: conv14 && round(conv14, 3), conv3: conv3 != null ? round(conv3, 3) : null, drift: drift && round(drift, 2), freeze });
 
   // 2. Окно внутри дня: 6 ч, при малом числе корзин — 12 или 24 ч
   const rows = await prisma.adIntraday.findMany({ where: { campaignId, at: { gte: new Date(now.getTime() - 50 * 3600_000) } }, orderBy: { at: 'asc' } });
@@ -205,9 +209,9 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
 
   // 3. Отклонение от цели (r > 1 — дорого, r < 1 — дёшево)
   let r: number | null = null;
-  const tCart = cfg.targetCpo * (conv28 ?? 0.4);
+  const tCart = cfg.targetCpo * (convT ?? 0.4);
   if (cfg.goal === 'CART' && !freeze) {
-    if (w.carts >= 10) { r = (w.spend / w.carts) / tCart; reasons.push(`корзина ${fmt(w.spend / w.carts)} ₽ за ${W} ч при цели ${fmt(tCart)} ₽ (заказ ${fmt(cfg.targetCpo)} ₽ × конверсия ${fmt((conv28 ?? 0.4) * 100)}%)`); }
+    if (w.carts >= 10) { r = (w.spend / w.carts) / tCart; reasons.push(`корзина ${fmt(w.spend / w.carts)} ₽ за ${W} ч при цели ${fmt(tCart)} ₽ (заказ ${fmt(cfg.targetCpo)} ₽ × конверсия ${fmt((convT ?? 0.4) * 100)}% за ${conv14 != null ? 14 : 28} дн.)`); }
   } else if (cfg.goal === 'DRR') {
     if (d2.ordersMoney > 0) { r = (d2.spend / d2.ordersMoney) / cfg.targetDrr; reasons.push(`ДРР ${fmt(d2.spend / d2.ordersMoney * 100)}% за 2 дня при цели ${fmt(cfg.targetDrr * 100)}%`); }
   } else {
