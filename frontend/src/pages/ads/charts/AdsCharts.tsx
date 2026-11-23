@@ -49,7 +49,7 @@ export default function AdsCharts({ sku, from, to, version }: { sku: string; fro
     );
   }
   return (
-    <div className={loading ? 'opacity-60 transition-opacity space-y-4' : 'space-y-4'}>
+    <div className={loading ? 'opacity-60 transition-opacity space-y-6' : 'space-y-6'}>
       {error && <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{error}</p>}
       <Dynamics d={data} />
       <Clusters d={data} sku={sku} onChanged={() => load(true)} />
@@ -68,21 +68,21 @@ function Dynamics({ d }: { d: Charts }) {
   const multi = camps.length > 1;
 
   const panels: PanelSpec[] = [
-    { title: `Заказы, шт (без отмен) · FBO${hasFbs ? ' + FBS' : ''}`, short: 'Заказы, шт', h: 140,
+    { title: `Заказы, шт (без отмен) · FBO${hasFbs ? ' + FBS' : ''}`, short: 'Заказы, шт', h: 190,
       stack: [{ values: s.map((x) => x.fbo), color: C.fbo }, { values: s.map((x) => x.fbs), color: C.fbs }] },
-    { title: 'Показы органические, шт', short: 'Показы орг., шт', h: 120, lines: [{ values: s.map((x) => x.orgViews), color: C.org }] },
-    { title: 'Добавления в корзину органические, шт', short: 'Корзины орг., шт', h: 100, stack: [{ values: s.map((x) => x.orgCart), color: C.org }] },
-    { title: 'Показы по рекламе, шт', short: 'Показы рекл., шт', h: 120, lines: [{ values: s.map((x) => x.adViews), color: C.ad }] },
-    { title: 'Добавления в корзину по рекламе, шт', short: 'Корзины рекл., шт', h: 100, stack: [{ values: s.map((x) => x.adCart), color: C.ad }] },
-    { title: multi ? 'Цена клика, ₽ · средняя по всем кампаниям (расход ÷ клики) и по каждой' : 'Цена клика, ₽', short: 'Цена клика, ₽', h: 130, zero: false,
+    { title: 'Показы органические, шт', short: 'Показы орг., шт', h: 150, lines: [{ values: s.map((x) => x.orgViews), color: C.org }] },
+    { title: 'Добавления в корзину органические, шт', short: 'Корзины орг., шт', h: 140, stack: [{ values: s.map((x) => x.orgCart), color: C.org }] },
+    { title: 'Показы по рекламе, шт', short: 'Показы рекл., шт', h: 150, lines: [{ values: s.map((x) => x.adViews), color: C.ad }] },
+    { title: 'Добавления в корзину по рекламе, шт', short: 'Корзины рекл., шт', h: 140, stack: [{ values: s.map((x) => x.adCart), color: C.ad }] },
+    { title: multi ? 'Цена клика, ₽ · средняя по всем кампаниям (расход ÷ клики) и по каждой' : 'Цена клика, ₽', short: 'Цена клика, ₽', h: 160, zero: false,
       lines: [
         ...(multi ? camps.map((c, k) => ({ values: s.map((x) => x.cpcBy[c.id] ?? null), color: CAMP_COLORS[k], width: 1.3, dash: '5 3', dots: false })) : []),
         { values: s.map((x) => x.cpc), color: C.fg2, width: 2 },
       ] },
-    { title: 'СПП, % (линия, левая шкала) · цена для покупателя, ₽ (столбцы, правая шкала)', short: 'СПП % · цена покупателя ₽', h: 140, zero: false, unit: '%',
+    { title: 'СПП, % (линия, левая шкала) · цена для покупателя, ₽ (столбцы, правая шкала)', short: 'СПП % · цена покупателя ₽', h: 170, zero: false, unit: '%',
       lines: [{ values: s.map((x) => x.spp), color: C.fg2, bridge: true }],
       right: { bars: { values: s.map((x) => x.buyerPrice), color: C.fbo }, unit: '₽' } },
-    { title: 'Локальные заказы, % (скользящее за 5 дней)', short: 'Локальные, %', h: 90, range: [0, 100], unit: '%',
+    { title: 'Локальные заказы, % (скользящее за 5 дней)', short: 'Локальные, %', h: 120, range: [0, 100], unit: '%',
       lines: [{ values: s.map((x) => x.local), color: C.fbo }] },
   ];
 
@@ -107,16 +107,16 @@ function Dynamics({ d }: { d: Charts }) {
   };
 
   return (
-    <section className="bg-white rounded-xl border border-slate-200 px-4 py-3">
+    <section className="bg-white rounded-xl border border-slate-200 px-3 sm:px-4 py-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
-        <h2 className="font-semibold">Динамика по дням</h2>
+        <h2 className="font-semibold">Динамика по дням <span className="font-normal text-sm text-slate-500">· сегодня слева</span></h2>
         <Legend items={[
           { color: C.fbo, label: 'FBO' }, ...(hasFbs ? [{ color: C.fbs, label: 'FBS' }] : []),
           { color: C.org, label: 'органика' }, { color: C.ad, label: 'реклама' },
           ...(multi ? camps.map((c, k) => ({ color: CAMP_COLORS[k], label: c.title, kind: 'dash' as const })) : []),
         ]} />
       </div>
-      <MultiPanel dates={dates} panels={panels} tooltip={tip} today={d.today} gap={18} />
+      <MultiPanel dates={dates} panels={panels} tooltip={tip} today={d.today} gap={36} />
       <p className="mt-1 text-[11px] text-slate-500 leading-4">
         Органика = всего по аналитике Ozon − реклама (может быть занижена: Ozon засчитывает рекламе заказы и корзины несколько дней после клика).
         СПП — скидка за счёт Ozon от цены продавца, по начислениям дня: FBO попадает в них после выкупа, пустые дни соединены пунктиром.
@@ -142,7 +142,7 @@ function Clusters({ d, sku, onChanged }: { d: Charts; sku: string; onChanged: ()
   }
 
   return (
-    <section className="bg-white rounded-xl border border-slate-200 px-4 py-3">
+    <section className="bg-white rounded-xl border border-slate-200 px-3 sm:px-4 py-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
         <h2 className="font-semibold">Кластеры: заказы покупателей и остаток FBO</h2>
         <Legend items={[
@@ -161,7 +161,7 @@ function Clusters({ d, sku, onChanged }: { d: Charts; sku: string; onChanged: ()
         {st.manual && <button disabled={busy} onClick={() => setAnchor(null)} className="text-brand-700 hover:underline">определять автоматически{st.auto ? ` (${dm(st.auto)})` : ''}</button>}
       </div>
       {list.length === 0 ? <p className="text-sm text-slate-500 py-4">Нет отправлений за период.</p> : (
-        <div className="grid gap-x-6 gap-y-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(380px, 100%), 1fr))' }}>
+        <div className="grid gap-x-8 gap-y-6" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(560px, 100%), 1fr))' }}>
           {shown.map((c) => <ClusterChart key={c.name} c={c} dates={dates} today={d.today} />)}
         </div>
       )}
@@ -179,7 +179,7 @@ function Clusters({ d, sku, onChanged }: { d: Charts; sku: string; onChanged: ()
 
 function ClusterChart({ c, dates, today }: { c: Cluster; dates: string[]; today: string }) {
   const panel: PanelSpec = {
-    title: c.name, h: 110,
+    title: c.name, h: 150,
     stack: [{ values: c.days.map((x) => x.own), color: C.fbo }, { values: c.days.map((x) => x.other), color: C.fbs }],
     right: { area: { values: c.days.map((x) => x.stock), color: C.stock }, unit: 'шт' },
     band: c.days.map((x) => x.stock === 0),
@@ -223,7 +223,7 @@ function Flows({ d }: { d: Charts }) {
   const total = rows.reduce((t, r) => t + r.total, 0);
   if (!total) return null;
   return (
-    <section className="bg-white rounded-xl border border-slate-200 px-4 py-3">
+    <section className="bg-white rounded-xl border border-slate-200 px-3 sm:px-4 py-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
         <h2 className="font-semibold">Куда и откуда отгружали <span className="font-normal text-sm text-slate-500">· {total} шт без отмен</span></h2>
         <Legend items={[{ color: C.fbo, label: 'со склада своего кластера' }, { color: C.fbs, label: 'привезено из другого' }]} />

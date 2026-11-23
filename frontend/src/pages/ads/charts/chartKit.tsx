@@ -70,7 +70,7 @@ function linePath(vals: (number | null)[], X: (i: number) => number, Y: (v: numb
   return d;
 }
 
-export function MultiPanel({ dates, panels, tooltip, today, gap = 16 }: {
+export function MultiPanel({ dates, panels, tooltip, today, gap = 30 }: {
   dates: string[]; panels: PanelSpec[]; tooltip: (i: number, panel: number) => ReactNode; today?: string; gap?: number;
 }) {
   const [ref, W] = useChartWidth();
@@ -78,28 +78,30 @@ export function MultiPanel({ dates, panels, tooltip, today, gap = 16 }: {
   const svgRef = useRef<SVGSVGElement>(null);
   const narrow = W < 640;
   const N = Math.max(1, dates.length);
-  const L = 44;
-  const R = panels.some((p) => p.right) ? 58 : 14;
+  const L = 50;
+  const R = panels.some((p) => p.right) ? 62 : 10;
   const pw = W - L - R;
   const step = pw / N;
-  const X = (i: number) => L + i * step + step / 2;
-  const bw = Math.max(1.5, Math.min(step - 3, step * 0.78));
+  // свежие дни слева: день i (по возрастанию дат) — в ячейке N−1−i
+  const cell = (i: number) => L + (N - 1 - i) * step; // левый край ячейки дня
+  const X = (i: number) => cell(i) + step / 2;
+  const bw = Math.max(1.5, Math.min(step - 3, step * 0.74));
 
   // раскладка панелей
   let y = 0;
   const lay = panels.map((p) => {
-    const titleH = 20 + (p.marks?.length ? 14 : 0);
+    const titleH = 24 + (p.marks?.length ? 14 : 0);
     const top = y + titleH; const bot = top + p.h;
     y = bot + gap;
     return { top, bot, titleTop: top - titleH };
   });
   const firstTop = lay[0]?.top ?? 0;
   const lastBot = lay[lay.length - 1]?.bot ?? 0;
-  const H = lastBot + 40;
+  const H = lastBot + 42;
 
   const mondays = dates.map((d, i) => (i > 0 && dow(d) === 1 ? i : -1)).filter((i) => i >= 0);
   const showDate = (i: number) => {
-    if (i === dates.length - 1) return !narrow || step > 20;
+    if (i === dates.length - 1) return true;
     const d = dow(dates[i]);
     if (narrow || step < 9) return d === 1 && (step >= 5 || isoWeek(dates[i]) % 2 === 0);
     return d === 1 || d === 4;
@@ -116,7 +118,7 @@ export function MultiPanel({ dates, panels, tooltip, today, gap = 16 }: {
     const rect = svg.getBoundingClientRect();
     const k = svg.viewBox.baseVal.width / rect.width;
     const sx = (e.clientX - rect.left) * k; const sy = (e.clientY - rect.top) * k;
-    const i = Math.min(N - 1, Math.max(0, Math.floor((sx - L) / step)));
+    const i = N - 1 - Math.min(N - 1, Math.max(0, Math.floor((sx - L) / step)));
     let p = lay.findIndex((l) => sy <= l.bot + gap / 2);
     if (p < 0) p = lay.length - 1;
     const left = X(i) / k;
@@ -127,7 +129,7 @@ export function MultiPanel({ dates, panels, tooltip, today, gap = 16 }: {
     <div ref={ref} className="relative w-full select-none">
       <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%" style={{ height: 'auto', overflow: 'visible', display: 'block' }}>
         {/* разделители недель */}
-        {mondays.map((i) => <line key={`w${i}`} x1={L + i * step} x2={L + i * step} y1={firstTop} y2={lastBot} stroke={C.muted} strokeOpacity={0.35} />)}
+        {mondays.map((i) => <line key={`w${i}`} x1={cell(i) + step} x2={cell(i) + step} y1={firstTop} y2={lastBot} stroke={C.muted} strokeOpacity={0.35} />)}
         {panels.map((p, pi) => {
           const { top, bot, titleTop } = lay[pi];
           // левая шкала
@@ -157,12 +159,13 @@ export function MultiPanel({ dates, panels, tooltip, today, gap = 16 }: {
           const dim = (i: number) => (today && dates[i] === today ? 0.45 : 1);
           return (
             <g key={pi}>
-              <text x={L} y={titleTop + 13} fontSize={12} fontWeight={600} fill="#334155" className="font-ui">{narrow && p.short ? p.short : p.title}</text>
-              {p.band?.map((b, i) => b && <rect key={`b${i}`} x={L + i * step} y={top} width={step} height={p.h} fill={C.band} />)}
+              {pi > 0 && <line x1={0} x2={W} y1={titleTop - gap / 2} y2={titleTop - gap / 2} stroke="#eef0f3" />}
+              <text x={L} y={titleTop + 14} fontSize={13} fontWeight={600} fill="#1e293b" className="font-ui">{narrow && p.short ? p.short : p.title}</text>
+              {p.band?.map((b, i) => b && <rect key={`b${i}`} x={cell(i)} y={top} width={step} height={p.h} fill={C.band} />)}
               {ticks.map((v) => (
                 <g key={`t${v}`}>
                   <line x1={L} x2={W - R} y1={Y(v)} y2={Y(v)} stroke={C.line} />
-                  <text x={L - 6} y={Y(v) + 3.5} fontSize={11} textAnchor="end" fill={C.muted} className="font-mono">{fmt(v, 1)}{p.unit ?? ''}</text>
+                  <text x={L - 6} y={Y(v) + 3.5} fontSize={11} textAnchor="end" fill="#64748b" className="font-mono">{fmt(v, 1)}{p.unit ?? ''}</text>
                 </g>
               ))}
               {YR && rTicks.map((v) => <text key={`r${v}`} x={W - R + 6} y={YR!(v) + 3.5} fontSize={11} fill={C.muted} className="font-mono">{fmt(v)} {p.right!.unit}</text>)}
@@ -174,8 +177,8 @@ export function MultiPanel({ dates, panels, tooltip, today, gap = 16 }: {
                 const a = p.right!.area!; const segs: number[][] = [];
                 a.values.forEach((v, i) => { if (v == null) return; const s = segs[segs.length - 1]; if (s && s[s.length - 1] === i - 1) s.push(i); else segs.push([i]); });
                 return segs.map((s, k) => {
-                  const xs = s.map((i) => [i === s[0] ? L + i * step : X(i), YR!(a.values[i]!)] as const);
-                  const end = L + (s[s.length - 1] + 1) * step;
+                  const xs = s.map((i) => [i === s[0] ? cell(i) + step : X(i), YR!(a.values[i]!)] as const);
+                  const end = cell(s[s.length - 1]);
                   const line = xs.map(([x, yy], j) => `${j ? 'L' : 'M'}${x.toFixed(1)},${yy.toFixed(1)}`).join('') + `L${end.toFixed(1)},${xs[xs.length - 1][1].toFixed(1)}`;
                   return (
                     <g key={`a${k}`}>
@@ -200,16 +203,17 @@ export function MultiPanel({ dates, panels, tooltip, today, gap = 16 }: {
               {(p.lines ?? []).map((l, li) => (
                 <g key={`l${li}`}>
                   {l.bridge && <path d={linePath(l.values, X, Y, true)} fill="none" stroke={l.color} strokeWidth={1.2} strokeDasharray="4 4" opacity={0.7} />}
-                  <path d={linePath(l.values, X, Y)} fill="none" stroke={l.color} strokeWidth={l.width ?? 2} strokeDasharray={l.dash} strokeLinejoin="round" />
-                  {(l.dots ?? true) && step >= 6 && l.values.map((v, i) => v != null && <circle key={i} cx={X(i)} cy={Y(v)} r={l.width && l.width < 2 ? 1.8 : 2.5} fill={l.color} opacity={dim(i)} />)}
+                  <path d={linePath(l.values, X, Y)} fill="none" stroke={l.color} strokeWidth={l.width ?? 2.2} strokeDasharray={l.dash} strokeLinejoin="round" />
+                  {(l.dots ?? true) && step >= 6 && l.values.map((v, i) => v != null && <circle key={i} cx={X(i)} cy={Y(v)} r={l.width && l.width < 2 ? 1.8 : 3} fill={l.color} opacity={dim(i)} />)}
                 </g>
               ))}
               {(() => {
                 // подпись числа — только если не налезает на предыдущую
                 let lastEnd = -Infinity;
-                return p.marks?.map((m, k) => {
+                const ms = [...(p.marks ?? [])].sort((a, b) => X(a.i) - X(b.i));
+                return ms.map((m, k) => {
                   const x = X(m.i); const tw = m.text.length * 6.2 + 4;
-                  const next = p.marks![k + 1] ? X(p.marks![k + 1].i) - 5 : W;
+                  const next = ms[k + 1] ? X(ms[k + 1].i) - 5 : W;
                   const label = x + 6 >= lastEnd && x + 6 + tw <= next;
                   if (label) lastEnd = x + 7 + tw;
                   return (
@@ -225,7 +229,15 @@ export function MultiPanel({ dates, panels, tooltip, today, gap = 16 }: {
           );
         })}
         {/* ось времени */}
-        {dates.map((d, i) => showDate(i) && <text key={`d${i}`} x={X(i)} y={lastBot + 15} fontSize={11} textAnchor="middle" fill={C.muted} className="font-mono">{dm(d)}</text>)}
+        {(() => {
+          // слева направо (от свежих дней), подпись пропускается, если налезает на предыдущую
+          let lastX = -Infinity;
+          return dates.map((_, k) => dates.length - 1 - k).filter((i) => showDate(i)).map((i) => {
+            if (X(i) - lastX < 40) return null;
+            lastX = X(i);
+            return <text key={`d${i}`} x={X(i)} y={lastBot + 15} fontSize={11} textAnchor="middle" fill={C.muted} className="font-mono">{dm(dates[i])}</text>;
+          });
+        })()}
         {weeks.map((w) => (w.b - w.a + 1) * step > (narrow ? 34 : 50) && (
           <text key={`wk${w.a}`} x={(X(w.a) + X(w.b)) / 2} y={lastBot + 31} fontSize={11} textAnchor="middle" fill="#94a3b8" className="font-ui">{narrow ? `н. ${w.w}` : `нед. ${w.w}`}</text>
         ))}
