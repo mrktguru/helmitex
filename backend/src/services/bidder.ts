@@ -34,6 +34,8 @@ const fmt = (v: number) => v.toLocaleString('ru-RU', { maximumFractionDigits: 1 
 
 interface State {
   baseBid?: number; lastChangeAt?: string; lastBudgetAt?: string;
+  lastM?: number; // фактическая ставка ÷ базовая после прошлого запуска — база выводится из ставки в Ozon, не копит расхождение
+  floor?: { bid: number; at: string; tried: number }; // Ozon не принял ставку ниже — держим не ниже bid 3 дня
   day?: string; changes?: number;
   pending?: { at: string; prevBid: number; prevBase: number; viewsBefore: number; shareBefore: number };
   lastLogAt?: string; lastReason?: string;
@@ -42,6 +44,30 @@ interface State {
 
 export interface Decision {
   campaignId: string; action: string; from?: number; to?: number; reasons: string[]; metrics: Record<string, unknown>; applied: boolean;
+}
+
+const FLOOR_MS = 3 * DAY;
+const floorOf = (st: State, now: Date) => (st.floor && now.getTime() - new Date(st.floor.at).getTime() < FLOOR_MS ? st.floor.bid : null);
+
+/** Ставка не ниже той, которую Ozon последний раз отказался снижать */
+function applyFloor(st: State, now: Date, target: number, reasons: string[]) {
+  const fl = floorOf(st, now);
+  if (fl != null && target < fl) { reasons.push(`ниже ${fmt(fl)} ₽ Ozon ставку не принимает — держу ${fmt(fl)} ₽ (проверю снова через 3 дня после отказа)`); return fl; }
+  return target;
+}
+
+/** Применить ставку ко всем товарам кампании. Ozon отклонил («не входит в диапазон») — запоминаем порог, false. */
+async function applyBid(campaignId: string, c: { products: { sku: string; bid: number }[] }, curBid: number, target: number, st: State, now: Date, reasons: string[]): Promise<boolean> {
+  try {
+    for (const p of c.products) await setCpcBid(campaignId, p.sku, roundBid(p.bid * target / curBid), ACTOR);
+    return true;
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (!/диапазон/.test(msg)) throw e;
+    if (target < curBid) st.floor = { bid: curBid, at: now.toISOString(), tried: target };
+    reasons.push(`Ozon не принял ставку ${fmt(target)} ₽ (вне допустимого диапазона) — оставляю ${fmt(curBid)} ₽${target < curBid ? ', ниже не опускаю 3 дня' : ''}`);
+    return false;
+  }
 }
 
 // Остатки на складах Ozon (FBO) по SKU — кэш на час
@@ -149,7 +175,8 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
   if (hour < L.hourFrom || hour >= L.hourTo) { reasons.push(`вне рабочих часов ${L.hourFrom}:00–${L.hourTo}:00`); return done('HOLD'); }
 
   const curBid = c.products.reduce((t, p) => t + p.bid, 0) / c.products.length;
-  const base = st.baseBid ?? curBid;
+  // база = фактическая ставка без модификаторов прошлого запуска (ручные изменения в кабинете подхватываются сами)
+  const base = curBid / (st.lastM && st.lastM > 0 ? st.lastM : 1);
   metrics.bid = round(curBid);
   if (cfg.goal === 'BOOST') {
     const B: BoostCfg = { ...DEFAULT_BOOST, ...(cfg.mods as any)?.boost };
@@ -271,10 +298,13 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
   const maxStep = curBid * L.maxStepPct / 100;
   target = Math.min(curBid + maxStep, Math.max(curBid - maxStep, target));
   target = roundBid(target);
+  target = applyFloor(st, now, target, reasons);
   metrics.target = target;
+  metrics.base = round(newBase);
 
   if (st.day !== today) { st.day = today; st.changes = 0; }
   st.baseBid = newBase;
+  st.lastM = curBid / newBase; // пока ставка не изменена
 
   // 7. Рост бюджета: показатели отличные, а бюджет упирается
   let budgetAction: Decision | null = null;
@@ -294,7 +324,8 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
     const up = target > curBid;
     if (up && freeze) { reasons.push('повышение заблокировано перестраховкой'); return done(budgetAction ? 'BUDGET_UP' : 'HOLD', budgetAction ? { from: budgetAction.from, to: budgetAction.to, applied: budgetAction.applied } : {}); }
     if (!dry) {
-      for (const p of c.products) await setCpcBid(campaignId, p.sku, roundBid(p.bid * target / curBid), ACTOR);
+      if (!(await applyBid(campaignId, c, curBid, target, st, now, reasons))) return done('HOLD', { from: curBid, to: curBid });
+      st.lastM = target / newBase;
       st.lastChangeAt = now.toISOString(); st.changes = (st.changes ?? 0) + 1;
       if (up && mods.elastic) {
         const hb = win(2);
@@ -516,7 +547,11 @@ async function runBoost(x: BoostCtx): Promise<Decision> {
       if (keep != null && keep < B.keepOrganicPct / 100) {
         bs.supportBid = bs.decayFrom ?? curBid; target = bs.supportBid;
         setPhase('SUPPORT', `органика ${pct(keep)} уровня удержания — ставка на шаг выше, поддерживающая ${fmt(bs.supportBid)} ₽`);
-      } else if (posWorse) reasons.push(`${label()}: позиция ${fmt(pos!)} хуже цели ${B.targetPosition} — снижение на паузе`);
+      } else if (posWorse) {
+        // снижать дальше нельзя (позиция хуже цели) — снижение закончено: поддержка с плановой новой волной и реакцией на органику/позицию
+        bs.supportBid = curBid; target = curBid;
+        setPhase('SUPPORT', `позиция ${fmt(pos!)} хуже цели ${B.targetPosition} — снижение закончено, поддерживающая ставка ${fmt(curBid)} ₽`);
+      }
       else if (curBid <= L.minBid) { bs.supportBid = curBid; setPhase('SUPPORT', `дошли до минимальной ставки ${fmt(L.minBid)} ₽, органика держится`); }
       else {
         const k = (B.decayPct / 100) * (posGood ? 1.5 : 1);
@@ -557,6 +592,7 @@ async function runBoost(x: BoostCtx): Promise<Decision> {
   if (stock == null || stock >= 5) bs.stockCut = false;
   if (noRaise.length) target = Math.min(target, curBid);
   target = roundBid(Math.min(B.maxBid, Math.max(L.minBid, target)));
+  target = applyFloor(st, now, target, reasons);
 
   Object.assign(metrics, {
     phase: bs.phase, wave: bs.wave, peakBid: bs.peakBid ?? null, supportBid: bs.supportBid ?? null, target,
@@ -568,7 +604,7 @@ async function runBoost(x: BoostCtx): Promise<Decision> {
   const minDelta = Math.max(0.5, curBid * 0.02);
   if (Math.abs(target - curBid) >= minDelta) {
     if (!dry) {
-      for (const p of c.products) await setCpcBid(campaignId, p.sku, roundBid(p.bid * target / curBid), ACTOR);
+      if (!(await applyBid(campaignId, c, curBid, target, st, now, reasons))) return done('HOLD', { from: curBid, to: curBid });
       bs.step = { at: now.toISOString(), from: curBid, to: target, before: rate(t - 4 * 3600_000, t) };
       st.lastChangeAt = now.toISOString();
     }
