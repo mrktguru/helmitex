@@ -337,6 +337,7 @@ export const api = {
     request<any>(`/ads/report/${sku}?${new URLSearchParams({ from, to, ...(refresh ? { refresh: '1' } : {}) })}`),
   adsCharts: (sku: string, from: string, to: string, refresh = false) =>
     request<any>(`/ads/charts/${sku}?${new URLSearchParams({ from, to, ...(refresh ? { refresh: '1' } : {}) })}`),
+  adsCartLag: (sku: string, days: number) => request<any>(`/ads/cart-lag/${sku}?days=${days}`),
   adsStockAnchor: (sku: string, date: string | null) => request<{ ok: true }>(`/ads/stock-anchor/${sku}`, { method: 'PUT', body: JSON.stringify({ date }) }),
   adsCampaignState: (id: string, on: boolean) => request<{ ok: true }>(`/ads/campaigns/${id}/state`, { method: 'POST', body: JSON.stringify({ on }) }),
   adsCampaignBid: (id: string, sku: string, bid: number) => request<{ ok: true }>(`/ads/campaigns/${id}/bid`, { method: 'PUT', body: JSON.stringify({ sku, bid }) }),

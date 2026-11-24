@@ -24,6 +24,7 @@ import StockQuantDetail from './pages/stock/StockQuantDetail';
 import StockFboList from './pages/stock/StockFboList';
 import StockFbo from './pages/stock/StockFbo';
 import AdsAnalytics from './pages/ads/AdsAnalytics';
+import DeferredCarts from './pages/ads/DeferredCarts';
 import StockMarking from './pages/stock/StockMarking';
 import StockMarkingItem from './pages/stock/StockMarkingItem';
 import WbSupplies from './pages/stock/WbSupplies';
@@ -66,6 +67,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="fbo" element={<StockFboList />} />
             <Route path="fbo/:id" element={<StockFbo />} />
             <Route path="ads" element={<AdsAnalytics />} />
+            <Route path="ads-carts" element={<DeferredCarts />} />
             <Route path="catalog" element={<StockCatalog />} />
             <Route path="catalog/:id" element={<StockItemCard />} />
             {/* Старые адреса */}

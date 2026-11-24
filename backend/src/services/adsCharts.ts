@@ -31,7 +31,7 @@ async function fetchPostings(scheme: 'FBO' | 'FBS', from: string, to: string) {
   // границы дней по Москве
   const since = new Date(dt(from).getTime() - 3 * 3600_000).toISOString();
   const until = new Date(dt(to).getTime() + DAY - 3 * 3600_000 - 1000).toISOString();
-  const out: { postingNumber: string; sku: string; scheme: string; status: string; orderDay: string; qty: number; price: number; clusterFrom: string | null; clusterTo: string | null; warehouse: string | null }[] = [];
+  const out: { postingNumber: string; sku: string; scheme: string; status: string; orderDay: string; orderAt: Date; qty: number; price: number; clusterFrom: string | null; clusterTo: string | null; warehouse: string | null }[] = [];
   let cursor = '';
   for (let page = 0; page < 1000; page++) {
     const r = await seller(path, { dir: 'ASC', filter: { since, to: until }, limit: 100, ...(cursor ? { cursor } : {}), with: { analytics_data: true, financial_data: true } });
@@ -46,7 +46,7 @@ async function fetchPostings(scheme: 'FBO' | 'FBS', from: string, to: string) {
         const prev = byKey.get(sku);
         if (prev) { prev.qty += it.quantity ?? 1; continue; }
         byKey.set(sku, {
-          postingNumber: p.posting_number, sku, scheme, status: p.status ?? '', orderDay: mskDay(at),
+          postingNumber: p.posting_number, sku, scheme, status: p.status ?? '', orderDay: mskDay(at), orderAt: new Date(at),
           qty: it.quantity ?? 1, price: num(it.price?.amount ?? it.price),
           clusterFrom: fin.cluster_from || null, clusterTo: fin.cluster_to || null,
           warehouse: p.analytics_data?.warehouse_name ?? p.analytics_data?.warehouse ?? p.delivery_method?.warehouse ?? null,

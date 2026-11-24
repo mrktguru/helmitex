@@ -22,7 +22,13 @@ const NAV: NavItem[] = [
   { to: '/stock/fbo', label: 'Отгрузки FBO', icon: '⇪', match: ['/stock/fbo'] },
   { to: '/stock/wb', label: 'Отправки WB FBS', icon: '⇡', match: ['/stock/wb'] },
   { to: '/stock/ozon-fbs', label: 'Отправки Ozon FBS', icon: '⇡', match: ['/stock/ozon-fbs'] },
-  { to: '/stock/ads', label: 'Аналитика рекламы', icon: '◔', match: ['/stock/ads'] },
+  {
+    to: '/stock/ads', label: 'Аналитика рекламы', icon: '◔', match: ['/stock/ads', '/stock/ads-carts'],
+    children: [
+      { to: '/stock/ads', label: 'Товары и кампании', match: ['/stock/ads'] },
+      { to: '/stock/ads-carts', label: 'Отложенные корзины', match: ['/stock/ads-carts'] },
+    ],
+  },
   { to: '/stock/catalog', label: 'Справочники', icon: '☰', match: ['/stock/catalog'] },
 ];
 

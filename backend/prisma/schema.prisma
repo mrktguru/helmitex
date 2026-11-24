@@ -254,15 +254,15 @@ model StockMove {
 }
 
 model Recipe {
-  id        String       @id @default(uuid())
-  name      String       @unique
-  items     Item[]       @relation("ItemRecipe") // полуфабрикаты, которые замешиваются по этой рецептуре
-  stages    Json? // { "1": "Вода и диспергаторы · мин. обороты, 3 мин", … }
-  qc        String? // нормы ОТК текстом
+  id              String       @id @default(uuid())
+  name            String       @unique
+  items           Item[]       @relation("ItemRecipe") // полуфабрикаты, которые замешиваются по этой рецептуре
+  stages          Json? // { "1": "Вода и диспергаторы · мин. обороты, 3 мин", … }
+  qc              String? // нормы ОТК текстом
   shelfLifeMonths Int? // срок годности полуфабриката от даты замеса — подставляется в замес
-  comment   String?
-  updatedAt DateTime     @updatedAt
-  lines     RecipeLine[]
+  comment         String?
+  updatedAt       DateTime     @updatedAt
+  lines           RecipeLine[]
 }
 
 model RecipeLine {
@@ -513,12 +513,13 @@ model OzonPosting {
   scheme        String // FBO | FBS
   status        String
   orderDay      String // день заказа по Москве (in_process_at, иначе created_at), YYYY-MM-DD
+  orderAt       DateTime? // момент заказа (in_process_at, иначе created_at) — для почасового анализа
   qty           Int
   price         Float
   clusterFrom   String? // кластер склада отгрузки
   clusterTo     String? // кластер покупателя
   warehouse     String?
-  syncedAt      DateTime @updatedAt
+  syncedAt      DateTime  @updatedAt
 
   @@id([postingNumber, sku])
   @@index([sku, orderDay])
@@ -540,6 +541,20 @@ model OzonSupply {
 
 // Снимок рекламы каждые 30 минут: накопленные за текущий день (МСК) показатели кампании.
 // Разница между соседними снимками даёт статистику по получасам — Ozon по часам её не отдаёт.
+// Снимки аналитики продавца по SKU (все источники, не только реклама) — каждые 30 минут за последние 4 дня:
+// показывают, как корзины и заказы набираются в течение дня и как Ozon «дозревает» данные прошлых дней
+model AdIntradaySku {
+  at     DateTime // момент снимка
+  day    DateTime @db.Date // день данных (МСК)
+  sku    String
+  views  Int
+  toCart Int
+  orders Int
+
+  @@id([at, day, sku])
+  @@index([sku, day])
+}
+
 model AdIntraday {
   at           DateTime // момент снимка
   day          DateTime @db.Date // день по Москве

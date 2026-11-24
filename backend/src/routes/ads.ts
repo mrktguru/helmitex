@@ -10,6 +10,7 @@ import {
 } from '../services/ads';
 import { syncStatus } from '../services/syncStatus';
 import { getCharts, setStockAnchor } from '../services/adsCharts';
+import { getCartLag } from '../services/cartLag';
 import { DEFAULT_BOOST, DEFAULT_LIMITS, DEFAULT_MODS, getBidder, runBidder, saveBidder } from '../services/bidder';
 
 const router = Router();
@@ -61,6 +62,12 @@ router.get('/report/:sku', h(async (req, res) => {
 }));
 
 // Графики: заказы FBO/FBS, органика и реклама, цена клика, СПП, локальные заказы, кластеры и остатки
+// Отложенные корзины: лаг корзина → заказ тремя способами (?days=60…365, по умолчанию 180)
+router.get('/cart-lag/:sku', h(async (req, res) => {
+  const days = Math.min(365, Math.max(60, Number(req.query.days) || 180));
+  res.json(await getCartLag(z.string().regex(/^\d+$/).parse(req.params.sku), days));
+}));
+
 router.get('/charts/:sku', h(async (req, res) => {
   const p = period(req.query);
   res.json(await getCharts(req.params.sku, p.from, p.to, p.refresh));

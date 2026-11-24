@@ -828,6 +828,25 @@ export async function snapshotIntraday(): Promise<number> {
   return saved;
 }
 
+// Снимок аналитики продавца по SKU за последние 4 дня (сегодня + 3 «дозревающих»): корзины и заказы из всех источников
+export async function snapshotSellerIntraday(): Promise<number> {
+  if (!ozonConfigured()) return 0;
+  const to = todayMsk();
+  const from = ymd(new Date(dt(to).getTime() - 3 * DAY));
+  const at = new Date();
+  const rows: { at: Date; day: Date; sku: string; views: number; toCart: number; orders: number }[] = [];
+  for (let offset = 0; offset < 20_000; offset += 1000) {
+    const r = await seller('/v1/analytics/data', { date_from: from, date_to: to, metrics: ['hits_view', 'hits_tocart', 'ordered_units'], dimension: ['sku', 'day'], limit: 1000, offset });
+    const data = r.result?.data ?? [];
+    for (const x of data) {
+      rows.push({ at, day: dt(x.dimensions[1].id), sku: String(x.dimensions[0].id), views: Math.round(x.metrics[0]), toCart: Math.round(x.metrics[1]), orders: Math.round(x.metrics[2]) });
+    }
+    if (data.length < 1000) break;
+  }
+  if (rows.length) await prisma.adIntradaySku.createMany({ data: rows, skipDuplicates: true });
+  return rows.length;
+}
+
 // Прирост между соседними снимками: снимки хранят накопленное с полуночи (МСК)
 export interface IntradayStep { at: Date; views: number; clicks: number; toCart: number; orders: number; ordersMoney: number; spend: number }
 export function increments(rows: { at: Date; day: Date; views: number; clicks: number; toCart: number; orders: number; ordersMoney: number; spend: number }[]): IntradayStep[] {
@@ -879,7 +898,11 @@ export function startAdsSync(afterSnapshot?: () => Promise<void>) {
   setTimeout(run, 60_000);
   setInterval(run, 3 * 3600_000);
 
-  const snap = () => track('ads-intraday', async () => { await snapshotIntraday(); await afterSnapshot?.(); }).catch((e) => console.warn('[ads intraday]', e));
+  const snap = () => track('ads-intraday', async () => {
+    await snapshotIntraday();
+    await snapshotSellerIntraday().catch((e) => console.warn('[ads intraday sku]', (e as Error).message));
+    await afterSnapshot?.();
+  }).catch((e) => console.warn('[ads intraday]', e));
   const toNext = 30 * 60_000 - (Date.now() % (30 * 60_000));
   setTimeout(() => { snap(); setInterval(snap, 30 * 60_000); }, toNext);
 }
