@@ -173,6 +173,38 @@ export async function getCartLag(sku: string, days: number) {
   // с базой: часть рекламных заказов Ozon приписывает кликам старше окна или без рекламной корзины
   const ad = adCart.some((v) => v) ? fitLag(adOrdFit, adCart, L2, 'const') : null;
 
+  // 2а. Органика: все заказы/корзины минус рекламные — своя модель (база по дню недели)
+  const orgCart = cart.map((v, i) => (v == null || adCart[i] == null ? null : Math.max(0, v - adCart[i]!)));
+  const orgOrd = ord.map((v, i) => (v == null || adOrd[i] == null ? null : Math.max(0, v - adOrd[i]!)));
+  const org = orgCart.some((v) => v) ? fitLag(orgOrd.map((v, i) => (dates[i] < from || dates[i] >= mature ? null : v)), orgCart, L1, 'dow', dow) : null;
+
+  // Конверсия корзина → заказ по дню корзин с поправкой на лаг: фактические заказы дня t раскладываются
+  // по дням корзин t−i пропорционально вкладу модели k·wᵢ·x(t−i) (база — отдельная доля, корзинам не идёт).
+  // Для свежих дней пришла только часть заказов — досчитываем делением на накопленную долю лага.
+  const cohortOf = (fit: LagFit | null, y: (number | null)[], x: (number | null)[], L: number, baseAt: (t: number) => number) => {
+    const att: (number | null)[] = dates.map(() => null);
+    if (!fit) return { att, cum: att };
+    const acc = dates.map(() => 0);
+    for (let t = 0; t < dates.length; t++) {
+      if (y[t] == null) continue;
+      const c: number[] = [];
+      let den = baseAt(t);
+      for (let i = 0; i <= L; i++) { const v = t - i >= 0 ? x[t - i] : null; const ci = v == null ? 0 : fit.k * fit.w[i] * v; c.push(ci); den += ci; }
+      if (den <= 0) continue;
+      const sc = y[t]! / den;
+      for (let i = 0; i <= L; i++) if (c[i] && t - i >= 0) acc[t - i] += sc * c[i];
+    }
+    const cum: (number | null)[] = dates.map((_, D) => { const age = dates.length - 1 - D; return r3(fit.w.slice(0, Math.min(age, L) + 1).reduce((s, v) => s + v, 0)); });
+    for (let D = 0; D < dates.length; D++) {
+      if (x[D] == null) continue;
+      att[D] = cum[D]! > 0.05 ? r2(acc[D] / cum[D]!) : null;
+    }
+    return { att, cum };
+  };
+  const cohAll = cohortOf(total, ord, cart, L1, (t) => (total ? total.base[dow[t]] : 0));
+  const cohAd = cohortOf(ad, adOrd, adCart, L2, () => (ad?.base[0] ?? 0));
+  const cohOrg = cohortOf(org, orgOrd, orgCart, L1, (t) => (org ? org.base[dow[t]] : 0));
+
   // 2б. Хвосты остановленных кампаний
   const tails = await stopTails(sku);
 
@@ -192,6 +224,9 @@ export async function getCartLag(sku: string, days: number) {
       date: d, orders: ord[t], carts: cart[t], adCarts: adCart[t], adOrders: adOrd[t], adClicks: adClicks[t],
       base: total ? r2(total.base[dow[t]]) : null, fromSame: total && complete ? r2(same) : null, fromPrev: total && complete ? r2(prev) : null,
       fitted: total && complete ? r2(total.base[dow[t]] + same + prev) : null, fresh: d >= mature,
+      orgCarts: orgCart[t], orgOrders: orgOrd[t],
+      coh: { all: cohAll.att[t], ad: cohAd.att[t], org: cohOrg.att[t] }, // заказы от корзин этого дня (досчитано по лагу)
+      cohCum: { all: cohAll.cum[t], ad: cohAd.cum[t], org: cohOrg.cum[t] }, // какая доля этих заказов уже пришла
     };
   });
 
@@ -216,6 +251,7 @@ export async function getCartLag(sku: string, days: number) {
     sku, from, to: last, today, matureFrom: mature,
     total: total && { ...total, ...lagStats(total.w) },
     ad: ad && { ...ad, ...lagStats(ad.w) },
+    org: org && { ...org, ...lagStats(org.w) },
     tails,
     series: parts,
     pending: { total: pendingOf(total, cart, L1), ad: pendingOf(ad, adCart, L2) },

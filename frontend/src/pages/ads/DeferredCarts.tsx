@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../api/client';
 import { PageHeader } from '../stock/StockLayout';
-import { AD, addDays, fmt, longDate, pct, weekday } from './util';
+import { AD, ORG, addDays, fmt, longDate, pct, weekday } from './util';
 import { C, Legend, MultiPanel, PanelSpec, niceStep, useChartWidth } from './charts/chartKit';
 
 // «Отложенные корзины» (рабочий инструмент, позже переедет в «Аналитику рекламы»):
@@ -17,9 +17,11 @@ interface Fit { k: number; w: number[]; p0: number; r: number; base: number[]; r
 interface Pend { days: { date: string; carts: number; expected: number; arrived: number; pending: number }[]; pending: number }
 interface Lag {
   sku: string; from: string; to: string; today: string; matureFrom: string;
-  total: Fit | null; ad: Fit | null;
+  total: Fit | null; ad: Fit | null; org: Fit | null;
   tails: { events: { campaignId: string; stop: string; avgClicks: number; avgOrders: number; tail: number[] }[]; curve: { day: number; share: number | null; events: number }[] };
-  series: { date: string; orders: number | null; carts: number | null; adCarts: number | null; adOrders: number | null; adClicks: number | null; base: number | null; fromSame: number | null; fromPrev: number | null; fitted: number | null; fresh: boolean }[];
+  series: { date: string; orders: number | null; carts: number | null; adCarts: number | null; adOrders: number | null; adClicks: number | null; base: number | null; fromSame: number | null; fromPrev: number | null; fitted: number | null; fresh: boolean;
+    orgCarts: number | null; orgOrders: number | null;
+    coh: { all: number | null; ad: number | null; org: number | null }; cohCum: { all: number | null; ad: number | null; org: number | null } }[];
   pending: { total: Pend | null; ad: Pend | null };
   hourly: {
     collectedDays: number; collectingSince: string | null; campaigns: string[]; ad: Fit | null; postingsWithTime: number;
@@ -81,6 +83,7 @@ export default function DeferredCarts() {
           <Methods d={data} />
           <CumulativeChart d={data} />
           <Composition d={data} />
+          <Conversion d={data} />
           <Pending d={data} />
           <Hourly d={data} />
           <Tails d={data} />
@@ -290,6 +293,65 @@ function Composition({ d }: { d: Lag }) {
             {x.fromSame != null && <div>из корзин дня {fmt(x.fromSame)} · из прошлых {fmt(x.fromPrev)} · база {fmt(x.base)}</div>}
             <div>Корзин: {fmt(x.carts)}{x.fresh && ' (в модель не входит)'}</div>
             {x.adCarts != null && <div>Реклама: корзин {fmt(x.adCarts)}, заказов {fmt(x.adOrders)}</div>}
+          </>
+        );
+      }} />
+    </Card>
+  );
+}
+
+// ───────────── Конверсия корзина → заказ ─────────────
+
+const WIN = 7;
+const RIPE = 0.9; // день корзин считаем дозревшим, когда по модели пришло ≥ 90% его заказов
+
+function Conversion({ d }: { d: Lag }) {
+  const s = useMemo(() => d.series.slice(-90), [d]);
+  const off = d.series.length - s.length;
+  const dates = s.map((x) => x.date);
+  // за 7 дней корзин: заказы от этих корзин (досчитано по лагу) ÷ сами корзины
+  const roll = (k: 'org' | 'ad') => s.map((_, j) => {
+    let o = 0; let c = 0; let n = 0;
+    for (let q = off + j - WIN + 1; q <= off + j; q++) {
+      const x = d.series[q]; const carts = k === 'ad' ? x?.adCarts : x?.orgCarts;
+      if (!x || x.coh[k] == null || carts == null) continue;
+      o += x.coh[k]!; c += carts; n++;
+    }
+    return n >= WIN - 2 && c > 0 ? (o / c) * 100 : null;
+  });
+  const ripe = (k: 'org' | 'ad') => s.map((x) => (x.cohCum[k] ?? 0) >= RIPE);
+  const split = (v: (number | null)[], ok: boolean[]) => {
+    const last = ok.lastIndexOf(true);
+    return [v.map((y, i) => (i <= last ? y : null)), v.map((y, i) => (i >= last ? y : null))];
+  };
+  const org = roll('org'); const ad = roll('ad');
+  const [orgR, orgF] = split(org, ripe('org')); const [adR, adF] = split(ad, ripe('ad'));
+  if (!d.org && !d.ad) return null;
+  const panels: PanelSpec[] = [
+    { title: `Заказов на 100 корзин, окно ${WIN} дней корзин (пунктир — свежие дни, заказы от них досчитаны по лагу)`, short: 'Конверсия корзин', h: 200, unit: '%',
+      lines: [
+        { values: orgR, color: ORG, width: 2 }, { values: orgF, color: ORG, width: 2, dash: '4 3' },
+        { values: adR, color: AD, width: 2 }, { values: adF, color: AD, width: 2, dash: '4 3' },
+      ] },
+    { title: 'Добавления в корзину: органика · реклама', short: 'Корзины', h: 110,
+      stack: [{ values: s.map((x) => x.orgCarts), color: ORG }, { values: s.map((x) => x.adCarts), color: AD }] },
+  ];
+  const k100 = (f: Fit | null) => (f ? fmt(f.k * 100, 1) : '—');
+  return (
+    <Card title="Конверсия корзина → заказ: органика и реклама"
+      hint={<>Заказ относится к дню, когда товар положили в корзину, а не к дню заказа: заказы каждого дня раскладываются по прошлым дням корзин по модели лага (органика — своя модель на «всё минус реклама», реклама — модель 2). Поэтому всплеск корзин не даёт ложного провала конверсии. В среднем по модели: органика <b>{k100(d.org)}</b>, реклама <b>{k100(d.ad)}</b> заказов на 100 корзин.</>}
+      legend={<Legend items={[{ color: ORG, label: 'органика', kind: 'line' }, { color: AD, label: 'реклама', kind: 'line' }, { color: C.muted, label: 'ещё дозревает', kind: 'dash' }]} />}>
+      <MultiPanel dates={dates} panels={panels} tooltip={(i) => {
+        const x = s[i];
+        const one = (k: 'org' | 'ad', name: string, carts: number | null, v: number | null) => (
+          <div>{name}: <b>{v == null ? '—' : `${fmt(v, 1)}%`}</b> за {WIN} дн. · в этот день корзин {fmt(carts)} → заказов {fmt(x.coh[k], 1)}
+            {(x.cohCum[k] ?? 1) < RIPE && <span className="text-slate-500"> (пришло ≈{pct(x.cohCum[k], 0)}, остальное досчитано)</span>}</div>
+        );
+        return (
+          <>
+            {head(x.date)}
+            {one('org', 'Органика', x.orgCarts, org[i])}
+            {one('ad', 'Реклама', x.adCarts, ad[i])}
           </>
         );
       }} />
