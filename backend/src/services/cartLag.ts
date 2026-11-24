@@ -18,7 +18,7 @@ const dt = (s: string) => new Date(s + 'T00:00:00Z');
 const addDays = (s: string, n: number) => ymd(new Date(dt(s).getTime() + n * DAY));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
-const MATURE_DAYS = 3; // аналитика Ozon дозаполняет корзины ~3 дня — свежие дни в подбор модели не берём
+const MATURE_DAYS = 1; // последний полный день в подбор не берём: Ozon может досчитать его задним числом (проверяется снимками)
 
 // ───────────── Подбор распределения лага ─────────────
 
@@ -151,7 +151,7 @@ export async function getCartLag(sku: string, days: number) {
   const cart: (number | null)[] = dates.map(() => null);
   const ord: (number | null)[] = dates.map(() => null);
   for (const r of skuDays) { const i = idx.get(ymd(r.date)); if (i != null) { cart[i] = r.toCart; ord[i] = r.orders; } }
-  const mature = addDays(last, -MATURE_DAYS + 1); // дни ≥ mature ещё дозаполняются
+  const mature = addDays(last, -MATURE_DAYS + 1); // дни ≥ mature — без подбора модели
   const ordFit = ord.map((v, i) => (dates[i] < from || dates[i] >= mature ? null : v));
   const dow = dates.map((d) => dt(d).getUTCDay());
   const L1 = 14;

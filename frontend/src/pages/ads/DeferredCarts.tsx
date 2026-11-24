@@ -147,7 +147,7 @@ function Methods({ d }: { d: Lag }) {
   ];
   return (
     <Card title="Три способа оценки"
-      hint={<>«В день корзины» — доля заказов, пришедших в тот же день (для почасового способа — в первые 24 часа). Надёжность — насколько модель объясняет колебания заказов (R²): высокая ≥ 0,7, средняя ≥ 0,4. Модель 1 строится без последних {3} дней: Ozon дозаполняет корзины в аналитике ещё ~3 дня.</>}>
+      hint={<>«В день корзины» — доля заказов, пришедших в тот же день (для почасового способа — в первые 24 часа). Надёжность — насколько модель объясняет колебания заказов (R²): высокая ≥ 0,7, средняя ≥ 0,4. Модель 1 строится без вчерашнего дня — на случай, если Ozon досчитывает его задним числом (проверка — график «Досчитывает ли Ozon корзины» ниже). Дни распродаж с всплесками корзин без заказов снижают надёжность модели 1.</>}>
       <div className="overflow-x-auto">
         <table className="w-full text-sm tabular-nums">
           <thead>
@@ -274,7 +274,7 @@ function Composition({ d }: { d: Lag }) {
     { title: 'Заказы дня по модели 1: база (без корзин) · из корзин этого дня · из корзин прошлых дней; линия — факт', short: 'Заказы: модель и факт', h: 200,
       stack: [{ values: s.map((x) => x.base), color: BASE }, { values: s.map((x) => x.fromSame), color: ALL }, { values: s.map((x) => x.fromPrev), color: ALL, opacity: 0.45 }],
       lines: [{ values: s.map((x) => x.orders), color: INK, width: 1.6 }] },
-    { title: 'Добавления в корзину, все источники (бледные — Ozon ещё дозаполняет)', short: 'Корзины', h: 120,
+    { title: 'Добавления в корзину, все источники (бледный — вчера, в модель не входит)', short: 'Корзины', h: 120,
       stack: [{ values: s.map((x) => (x.fresh ? null : x.carts)), color: ALL }, { values: s.map((x) => (x.fresh ? x.carts : null)), color: ALL, opacity: 0.35 }] },
   ];
   return (
@@ -288,7 +288,7 @@ function Composition({ d }: { d: Lag }) {
             {head(x.date)}
             <div>Заказов факт: <b>{fmt(x.orders)}</b>{x.fitted != null && <> · модель {fmt(x.fitted)}</>}</div>
             {x.fromSame != null && <div>из корзин дня {fmt(x.fromSame)} · из прошлых {fmt(x.fromPrev)} · база {fmt(x.base)}</div>}
-            <div>Корзин: {fmt(x.carts)}{x.fresh && ' (ещё дозаполняется)'}</div>
+            <div>Корзин: {fmt(x.carts)}{x.fresh && ' (в модель не входит)'}</div>
             {x.adCarts != null && <div>Реклама: корзин {fmt(x.adCarts)}, заказов {fmt(x.adOrders)}</div>}
           </>
         );
@@ -311,7 +311,7 @@ function Pending({ d }: { d: Lag }) {
     stack: [{ values: pick(a, 'arrived'), color: AD }, { values: pick(a, 'pending'), color: AD, opacity: 0.35 }] });
   return (
     <Card title="Отложенные корзины: сколько заказов ещё в пути"
-      hint={<>По каждому дню корзин: сколько заказов модель ждёт от них всего, сколько уже должно было прийти к {longDate(d.to)} и сколько ещё придёт. Корзины последних 3 дней Ozon ещё дозаполняет — по «всем корзинам» ожидание за них занижено.</>}
+      hint={<>По каждому дню корзин: сколько заказов модель ждёт от них всего, сколько уже должно было прийти к {longDate(d.to)} и сколько ещё придёт.</>}
       legend={<Legend items={[{ color: ALL, label: 'уже пришли' }, { color: 'rgba(42,120,214,.35)', label: 'ещё придут' }]} />}>
       <MultiPanel dates={dates} panels={panels} tooltip={(i, p) => {
         const src = p === 0 && t ? t : a!;
@@ -377,8 +377,8 @@ function Hourly({ d }: { d: Lag }) {
         ) : <p className="text-sm text-slate-500">Мало данных: нужны снимки рекламы кампаний, где этот товар — единственный.</p>}
       </Card>
 
-      <Card title="Как Ozon дозаполняет корзины в аналитике"
-        hint="Какая доля итоговых корзин и заказов дня видна в аналитике продавца через N часов после начала дня. Важно для свежих дней: пока корзины не дозрели, модель 1 занижает ожидание.">
+      <Card title="Досчитывает ли Ozon корзины задним числом"
+        hint="Какая доля итоговых корзин и заказов дня видна в аналитике продавца через N часов после начала дня. Если к концу дня видно ~100%, Ozon задним числом не досчитывает и вчерашний день можно включать в модель.">
         {m.days ? (
           <CatChart cats={m.points.map((p) => `${p.hours} ч`)} series={[{ label: 'Корзины', color: ALL, values: m.points.map((p) => p.carts), kind: 'line' }, { label: 'Заказы', color: INK, values: m.points.map((p) => p.orders), kind: 'line' }]} percent h={160}
             tip={(i) => <><div className="font-ui font-semibold text-slate-900 mb-0.5">Через {m.points[i].hours} ч от начала дня</div><div>Корзины: {pct(m.points[i].carts, 0)}</div><div>Заказы: {pct(m.points[i].orders, 0)}</div></>} />
