@@ -274,10 +274,14 @@ export async function getCharts(sku: string, from: string, to: string, force = f
     let n5 = 0; let l5 = 0;
     for (let k = 0; k < 5; k++) { const x = ordersByDay.get(addDays(d, -k)); if (x) { n5 += x.fbo + x.fbs; l5 += x.loc; } }
     const cpcBy: Record<string, number | null> = {};
+    // по кампаниям: расход, клики, корзины, заказы (атрибуция Ozon)
+    const by: Record<string, { spend: number; clicks: number; views: number; carts: number; orders: number }> = {};
     for (const c of campaigns) {
       const x = cs.filter((r) => r.campaignId === c.id);
       const cl = x.reduce((t, r) => t + r.clicks, 0);
-      cpcBy[c.id] = cl > 0 ? r1(x.reduce((t, r) => t + r.spend, 0) / cl) : null;
+      const sp = x.reduce((t, r) => t + r.spend, 0);
+      cpcBy[c.id] = cl > 0 ? r1(sp / cl) : null;
+      if (sp > 0 || cl > 0) by[c.id] = { spend: Math.round(sp), clicks: cl, views: x.reduce((t, r) => t + r.views, 0), carts: x.reduce((t, r) => t + r.toCart, 0), orders: x.reduce((t, r) => t + r.orders, 0) };
     }
     const adViews = sum('views'); const adCart = sum('toCart'); const adClicks = sum('clicks'); const spend = sum('spend');
     const sale = s?.accrSale ?? 0; const buyer = s?.accrBuyer ?? 0; const q = s?.accrQty ?? 0;
@@ -290,7 +294,8 @@ export async function getCharts(sku: string, from: string, to: string, force = f
       adViews, adClicks, adCart, adOrders: sum('orders'),
       orgViews: Math.max(0, (s?.views ?? 0) - adViews),
       orgCart: Math.max(0, (s?.toCart ?? 0) - adCart),
-      spend: Math.round(spend),
+      spend: Math.round(spend), by,
+      revenue: Math.round(s?.revenue ?? 0), // заказано, ₽ (аналитика Ozon)
       // оплата за заказ — списания из начислений, распределённые по выручке товаров
       spendCpo: Math.round((cpoBy.get(`${d}|sel`) ?? 0) + (cpoBy.get(`${d}|all`) ?? 0)),
       cpc: adClicks > 0 ? r1(spend / adClicks) : null, cpcBy,
