@@ -11,7 +11,9 @@ const DAY = 86_400_000, MSK = 3 * 3600_000;
 const ACTOR = { email: 'Биддер' };
 
 export const DEFAULT_MODS = { hours: true, pace: true, stock: true, elastic: true, organic: false, budgetUp: true };
-export const DEFAULT_LIMITS = { minBid: 5, maxBid: 60, maxStepPct: 15, cooldownMin: 120, minClicks: 50, maxChangesPerDay: 6, stopLossRub: 3000, hourFrom: 0, hourTo: 24 };
+// Решение по цене корзины — когда после прошлого изменения набралось minCarts корзин или minClicks кликов, но не раньше cooldownMin.
+// Защитные реакции (стоп, темп бюджета, склад, часы, откат) — на каждом замере, без этих условий и без лимита в сутки.
+export const DEFAULT_LIMITS = { minBid: 5, maxBid: 60, maxStepPct: 15, cooldownMin: 30, minClicks: 50, minCarts: 15, maxChangesPerDay: 16, stopLossRub: 3000, hourFrom: 0, hourTo: 24 };
 type Mods = typeof DEFAULT_MODS;
 type Limits = typeof DEFAULT_LIMITS;
 
@@ -34,7 +36,7 @@ const fmt = (v: number) => v.toLocaleString('ru-RU', { maximumFractionDigits: 1 
 
 interface State {
   baseBid?: number; lastChangeAt?: string; lastBudgetAt?: string;
-  lastM?: number; // фактическая ставка ÷ базовая после прошлого запуска — база выводится из ставки в Ozon, не копит расхождение
+  lastM?: number; lastHm?: number; // lastHm — множитель часов на прошлом запуске (смена часа — защитная правка) // фактическая ставка ÷ базовая после прошлого запуска — база выводится из ставки в Ozon, не копит расхождение
   floor?: { bid: number; at: string; tried: number }; // Ozon не принял ставку ниже — держим не ниже bid 3 дня
   day?: string; changes?: number;
   pending?: { at: string; prevBid: number; prevBase: number; viewsBefore: number; shareBefore: number };
@@ -202,16 +204,23 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
   const inc = increments(rows);
   const win = (h: number, toMs = now.getTime()) => inc.filter((x) => x.at.getTime() > toMs - h * 3600_000 && x.at.getTime() <= toMs)
     .reduce((t, x) => ({ views: t.views + x.views, clicks: t.clicks + x.clicks, carts: t.carts + x.toCart, orders: t.orders + x.orders, spend: t.spend + x.spend }), { views: 0, clicks: 0, carts: 0, orders: 0, spend: 0 });
-  let W = 6, w = win(6);
-  if (w.carts < 25) { W = 12; w = win(12); }
-  if (w.carts < 25) { W = 24; w = win(24); }
-  Object.assign(metrics, { window: W, views: w.views, clicks: w.clicks, carts: w.carts, spend: round(w.spend) });
+  // данные после прошлого изменения ставки — по ним судим о новой ставке, если их достаточно
+  const changedAt = st.lastChangeAt ? new Date(st.lastChangeAt).getTime() : 0;
+  const since = changedAt ? win((now.getTime() - changedAt) / 3600_000) : null;
+  const enough = !since || since.carts >= L.minCarts || since.clicks >= L.minClicks;
+  let W = 6, w = win(6), wLabel = '6 ч';
+  if (since && since.carts >= L.minCarts) { w = since; W = round((now.getTime() - changedAt) / 3600_000, 1); wLabel = `${fmt(W)} ч после изменения`; }
+  else {
+    if (w.carts < 25) { W = 12; w = win(12); wLabel = '12 ч'; }
+    if (w.carts < 25) { W = 24; w = win(24); wLabel = '24 ч'; }
+  }
+  Object.assign(metrics, { window: W, views: w.views, clicks: w.clicks, carts: w.carts, spend: round(w.spend), sinceCarts: since?.carts ?? null, sinceClicks: since?.clicks ?? null });
 
   // 3. Отклонение от цели (r > 1 — дорого, r < 1 — дёшево)
   let r: number | null = null;
   const tCart = cfg.targetCpo * (convT ?? 0.4);
   if (cfg.goal === 'CART' && !freeze) {
-    if (w.carts >= 10) { r = (w.spend / w.carts) / tCart; reasons.push(`корзина ${fmt(w.spend / w.carts)} ₽ за ${W} ч при цели ${fmt(tCart)} ₽ (заказ ${fmt(cfg.targetCpo)} ₽ × конверсия ${fmt((convT ?? 0.4) * 100)}% за ${conv14 != null ? 14 : 28} дн.)`); }
+    if (w.carts >= 10) { r = (w.spend / w.carts) / tCart; reasons.push(`корзина ${fmt(w.spend / w.carts)} ₽ за ${wLabel} при цели ${fmt(tCart)} ₽ (заказ ${fmt(cfg.targetCpo)} ₽ × конверсия ${fmt((convT ?? 0.4) * 100)}% за ${conv14 != null ? 14 : 28} дн.)`); }
   } else if (cfg.goal === 'DRR') {
     if (d2.ordersMoney > 0) { r = (d2.spend / d2.ordersMoney) / cfg.targetDrr; reasons.push(`ДРР ${fmt(d2.spend / d2.ordersMoney * 100)}% за 2 дня при цели ${fmt(cfg.targetDrr * 100)}%`); }
   } else {
@@ -231,13 +240,14 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
   const stopLoss = w3.spend >= L.stopLossRub && w3.carts === 0;
   if (stopLoss) { adj = -L.maxStepPct / 100; reasons.push(`стоп: ${fmt(w3.spend)} ₽ за 3 ч без корзин`); }
 
-  // обучение кампании: после изменения ждём паузу и минимум кликов
-  const sinceChange = st.lastChangeAt ? inc.filter((x) => x.at > new Date(st.lastChangeAt!)).reduce((t, x) => t + x.clicks, 0) : Infinity;
-  const coolLeft = st.lastChangeAt ? L.cooldownMin - (now.getTime() - new Date(st.lastChangeAt).getTime()) / 60_000 : 0;
-  if (adj !== 0 && !stopLoss && (coolLeft > 0 || sinceChange < L.minClicks)) {
-    reasons.push(coolLeft > 0 ? `пауза после изменения: ещё ${Math.ceil(coolLeft)} мин` : `обучение: ${sinceChange} из ${L.minClicks} кликов после изменения`);
-    adj = 0;
-  }
+  // после изменения: решение по цене корзины — когда набралось достаточно данных (корзин или кликов), но не раньше паузы
+  const coolLeft = changedAt ? L.cooldownMin - (now.getTime() - changedAt) / 60_000 : 0;
+  const waitTxt = coolLeft > 0 ? `пауза после изменения: ещё ${Math.ceil(coolLeft)} мин`
+    : `набираю данные после изменения: ${since?.carts ?? 0} из ${L.minCarts} корзин или ${since?.clicks ?? 0} из ${L.minClicks} кликов`;
+  const gated = coolLeft > 0 || !enough;
+  if (adj !== 0 && !stopLoss && gated) { reasons.push(waitTxt); adj = 0; }
+  let urgent = stopLoss; // защитные правки — без ожидания данных и лимита в сутки
+  let hourUp = false; let paceBrake = false;
   let newBase = base * (1 + adj);
 
   // 4. Проверка отклика показов на прошлое повышение
@@ -249,7 +259,7 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
     const rateBefore = p.viewsBefore / Math.max(p.shareBefore, 1e-6), rateAfter = after.views / Math.max(shareAfter, 1e-6);
     const gain = rateBefore > 0 ? rateAfter / rateBefore - 1 : null;
     metrics.elasticGain = gain != null ? round(gain, 3) : null;
-    if (gain != null && gain < 0.03) { newBase = p.prevBase; reasons.push(`после повышения ${fmt(p.prevBid)} → показы ${gain >= 0 ? '+' : ''}${fmt(gain * 100)}% (с поправкой на время суток) — возвращаю ставку`); }
+    if (gain != null && gain < 0.03) { newBase = p.prevBase; reasons.push(`после повышения ${fmt(p.prevBid)} → показы ${gain >= 0 ? '+' : ''}${fmt(gain * 100)}% (с поправкой на время суток) — возвращаю ставку`); urgent = true; }
     else if (gain != null) reasons.push(`повышение дало показы +${fmt(gain * 100)}% — оставляю`);
     st.pending = undefined;
   }
@@ -258,6 +268,9 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
   let m = 1;
   if (mods.hours) {
     const hm = hour < 7 ? 0.75 : hour >= 17 && hour < 23 ? 1.1 : 1;
+    if (st.lastHm != null && st.lastHm !== hm) urgent = true; // смена часового режима
+    hourUp = st.lastHm != null && hm > st.lastHm;
+    st.lastHm = hm;
     if (hm !== 1) { m *= hm; reasons.push(`часы: ×${hm.toLocaleString('ru-RU')}`); }
   }
   let paceRatio: number | null = null;
@@ -268,8 +281,8 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
     paceRatio = hour >= 2 && expected > 0 ? spentToday / expected : null;
     Object.assign(metrics, { dayBudget: round(dayBudget), spentToday: round(spentToday), pace: paceRatio && round(paceRatio, 2) });
     if (mods.pace && paceRatio != null) {
-      if (paceRatio > 1.15) { m *= 0.9; reasons.push(`темп: потрачено ${fmt(spentToday)} ₽ при плане ${fmt(expected)} ₽ — притормаживаю`); }
-      else if (paceRatio < 0.8 && (r == null || r < 1)) { m *= 1.05; reasons.push(`темп: бюджет недотрачен (${fmt(paceRatio * 100)}% плана)`); }
+      if (paceRatio > 1.15) { m *= 0.9; urgent = true; paceBrake = true; reasons.push(`темп: потрачено ${fmt(spentToday)} ₽ при плане ${fmt(expected)} ₽ — притормаживаю`); }
+      else if (paceRatio < 0.8 && (r == null || r < 1)) { m *= 1.05; urgent = true; reasons.push(`темп: бюджет недотрачен (${fmt(paceRatio * 100)}% плана)`); }
     }
   }
   if (mods.stock) {
@@ -277,8 +290,8 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
       const minDays = await stockDays(c.products.map((p) => p.sku), msk, today);
       if (minDays != null) {
         metrics.stockDays = round(minDays, 1);
-        if (minDays < 2) { m *= 0.7; reasons.push(`склад Ozon: запаса на ${fmt(minDays)} дн. — ставка ×0,7 (заказы уходят на FBS)`); }
-        else if (minDays < 5) { m *= 0.85; reasons.push(`склад Ozon: запаса на ${fmt(minDays)} дн. — ставка ×0,85`); }
+        if (minDays < 2) { m *= 0.7; urgent = true; reasons.push(`склад Ozon: запаса на ${fmt(minDays)} дн. — ставка ×0,7 (заказы уходят на FBS)`); }
+        else if (minDays < 5) { m *= 0.85; urgent = true; reasons.push(`склад Ozon: запаса на ${fmt(minDays)} дн. — ставка ×0,85`); }
       }
     } catch (e) { metrics.stockError = (e as Error).message.slice(0, 120); }
   }
@@ -302,6 +315,17 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
   const maxStep = curBid * L.maxStepPct / 100;
   target = Math.min(curBid + maxStep, Math.max(curBid - maxStep, target));
   target = roundBid(target);
+  // не идти против сигнала: корзина дороже цели или бюджет уходит быстрее плана — не повышаем
+  // (кроме конца ночного режима: возврат к дневной ставке)
+  if (adj < 0 && target >= curBid && !hourUp) {
+    // база выше фактической ставки (её придерживали модификаторы) — снижаем от фактической и переносим базу
+    target = roundBid(Math.max(L.minBid, curBid * (1 + adj)));
+    newBase = target / m; st.baseBid = newBase;
+    reasons.push(`снижаю от текущей ставки на ${fmt(-adj * 100)}%`);
+  } else if (target > curBid && !hourUp && ((r != null && r > 1) || paceBrake || stopLoss)) {
+    reasons.push(r != null && r > 1 ? 'корзина дороже цели — не повышаю' : 'бюджет тратится быстрее плана — не повышаю');
+    target = curBid;
+  }
   target = applyFloor(st, now, target, reasons);
   metrics.target = target;
   metrics.base = round(newBase);
@@ -324,14 +348,14 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
   }
 
   const minDelta = Math.max(0.5, curBid * 0.02);
-  // пауза после изменения — для любой правки (модификаторы и ограничение шага тоже), кроме стоп-лосса:
-  // иначе ставка «догоняет» цель шагами каждые 30 минут
-  if (Math.abs(target - curBid) >= minDelta && coolLeft > 0 && !stopLoss) {
-    if (!reasons.some((x) => x.startsWith('пауза после изменения'))) reasons.push(`пауза после изменения: ещё ${Math.ceil(coolLeft)} мин — следующий шаг к ${fmt(target)} ₽ после неё`);
+  metrics.urgent = urgent;
+  // обычная правка ждёт данных после прошлого изменения; защитная (стоп, темп, склад, часы, откат) — нет
+  if (Math.abs(target - curBid) >= minDelta && gated && !urgent) {
+    if (!reasons.includes(waitTxt)) reasons.push(`${waitTxt} — следующий шаг к ${fmt(target)} ₽ после этого`);
     if (budgetAction) return done('BUDGET_UP', { from: budgetAction.from, to: budgetAction.to, applied: budgetAction.applied });
     return done('HOLD', { from: curBid, to: curBid });
   }
-  if (Math.abs(target - curBid) >= minDelta && (st.changes ?? 0) < L.maxChangesPerDay) {
+  if (Math.abs(target - curBid) >= minDelta && (urgent || (st.changes ?? 0) < L.maxChangesPerDay)) {
     const up = target > curBid;
     if (up && freeze) { reasons.push('повышение заблокировано перестраховкой'); return done(budgetAction ? 'BUDGET_UP' : 'HOLD', budgetAction ? { from: budgetAction.from, to: budgetAction.to, applied: budgetAction.applied } : {}); }
     if (!dry) {

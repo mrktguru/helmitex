@@ -132,7 +132,7 @@ router.get('/bidder/:id', h(async (req, res) => { res.json(await getBidder(id.pa
 const modsSchema = z.object({ hours: z.boolean(), pace: z.boolean(), stock: z.boolean(), elastic: z.boolean(), organic: z.boolean(), budgetUp: z.boolean() }).partial();
 const limitsSchema = z.object({
   minBid: z.number().min(1).max(1000), maxBid: z.number().min(1).max(5000), maxStepPct: z.number().min(1).max(50),
-  cooldownMin: z.number().min(30).max(1440), minClicks: z.number().min(0).max(5000), maxChangesPerDay: z.number().int().min(1).max(48),
+  cooldownMin: z.number().min(30).max(1440), minClicks: z.number().min(0).max(5000), minCarts: z.number().min(0).max(1000), maxChangesPerDay: z.number().int().min(1).max(48),
   stopLossRub: z.number().min(100).max(1_000_000), hourFrom: z.number().min(0).max(23), hourTo: z.number().min(1).max(24),
 }).partial();
 const boostSchema = z.object({

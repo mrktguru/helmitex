@@ -35,7 +35,8 @@ const MODS: { k: string; l: string; d: string }[] = [
 ];
 const LIMITS: { k: string; l: string; suf: string }[] = [
   { k: 'minBid', l: 'Мин. ставка', suf: '₽' }, { k: 'maxBid', l: 'Макс. ставка', suf: '₽' }, { k: 'maxStepPct', l: 'Шаг за раз, не больше', suf: '%' },
-  { k: 'cooldownMin', l: 'Пауза после изменения', suf: 'мин' }, { k: 'minClicks', l: 'Кликов после изменения', suf: '' }, { k: 'maxChangesPerDay', l: 'Изменений в сутки', suf: '' },
+  { k: 'minCarts', l: 'Решать после: корзин', suf: '' }, { k: 'minClicks', l: 'или кликов', suf: '' }, { k: 'cooldownMin', l: 'но не раньше чем через', suf: 'мин' },
+  { k: 'maxChangesPerDay', l: 'Изменений в сутки, не больше', suf: '' },
   { k: 'stopLossRub', l: 'Стоп: расход за 3 ч без корзин', suf: '₽' }, { k: 'hourFrom', l: 'Работать с', suf: 'ч' }, { k: 'hourTo', l: 'Работать до', suf: 'ч' },
 ];
 const ACTION: Record<string, [string, string]> = {
@@ -191,7 +192,7 @@ function BidderPanel({ c, suggestCpo, onChanged }: { c: any; suggestCpo: number 
             </div>
             <p className="text-xs text-slate-500 mt-2">{boost
               ? 'В раскрутке действуют мин. ставка и стоп по расходу без корзин; потолок ставки, паузы и шаги — в настройках раскрутки. Склад (запас < 5 дн. — без повышений, < 2 дн. — ×0,7) и падение конверсии корзины в заказ на треть проверяются всегда.'
-              : 'После каждого изменения ставки биддер ждёт паузу и нужное число кликов — кампании Ozon нужно время, чтобы перестроиться под новую ставку.'}</p>
+              : 'Цену корзины биддер оценивает по данным после прошлого изменения ставки: как только набралось нужное число корзин или кликов (но не раньше паузы), решает снова. Большие кампании так меняются каждые 1–2 часа, маленькие — реже. Защитные правки — стоп по расходу без корзин, темп бюджета, склад, смена часового режима, откат повышения — делаются на ближайшем замере (раз в 30 минут) и в лимит изменений не входят.'}</p>
           </fieldset>
           <div className="flex flex-wrap items-center gap-2">
             <button disabled={busy} onClick={() => save(cfg.enabled)} className="bg-brand-600 hover:bg-brand-700 active:scale-[0.97] transition-transform disabled:opacity-50 text-white px-4 h-9 rounded-lg text-sm font-medium">Сохранить{dirty ? ' изменения' : ''}</button>
