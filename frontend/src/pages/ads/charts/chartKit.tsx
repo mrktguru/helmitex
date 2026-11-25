@@ -70,11 +70,15 @@ function linePath(vals: (number | null)[], X: (i: number) => number, Y: (v: numb
   return d;
 }
 
-export function MultiPanel({ dates, panels, tooltip, today, gap = 30 }: {
+export function MultiPanel({ dates, panels, tooltip, today, gap = 30, card }: {
   dates: string[]; panels: PanelSpec[]; tooltip: (i: number, panel: number) => ReactNode; today?: string; gap?: number;
+  card?: number; // подсказка — готовая карточка этой ширины: без своей рамки, рядом с курсором по вертикали, не выходит за график
 }) {
   const [ref, W] = useChartWidth();
-  const [hover, setHover] = useState<{ i: number; p: number; left: number; flip: boolean } | null>(null);
+  const [hover, setHover] = useState<{ i: number; p: number; left: number; y: number; flip: boolean } | null>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
+  const [tipH, setTipH] = useState(0);
+  useLayoutEffect(() => { if (tipRef.current) setTipH(tipRef.current.offsetHeight); }, [hover?.i, hover?.p, !!hover]);
   const svgRef = useRef<SVGSVGElement>(null);
   const narrow = W < 640;
   const N = Math.max(1, dates.length);
@@ -122,7 +126,8 @@ export function MultiPanel({ dates, panels, tooltip, today, gap = 30 }: {
     let p = lay.findIndex((l) => sy <= l.bot + gap / 2);
     if (p < 0) p = lay.length - 1;
     const left = X(i) / k;
-    setHover({ i, p, left, flip: left + 14 + 260 > rect.width });
+    const tw = card ? Math.min(card, rect.width - 16) : 260;
+    setHover({ i, p, left, y: (e.clientY - rect.top), flip: left + 14 + tw > rect.width });
   }
 
   return (
@@ -245,7 +250,15 @@ export function MultiPanel({ dates, panels, tooltip, today, gap = 30 }: {
         <rect x={L} y={0} width={pw} height={lastBot} fill="transparent" style={{ touchAction: 'pan-y' }}
           onPointerMove={onMove} onPointerDown={(e) => { if (e.pointerType !== 'mouse') onMove(e); }} onPointerLeave={() => setHover(null)} />
       </svg>
-      {hover && (
+      {hover && card != null && (() => {
+        const boxW = ref.current?.clientWidth ?? W; const boxH = ref.current?.clientHeight ?? H;
+        const w = Math.min(card, boxW - 16);
+        const top = Math.max(0, Math.min(hover.y - 80, boxH - tipH));
+        // на узком экране — по центру, иначе справа от курсора (не помещается — слева)
+        const left = narrow ? (boxW - w) / 2 : hover.flip ? Math.max(0, hover.left - 14 - w) : hover.left + 14;
+        return <div ref={tipRef} className="absolute z-20 pointer-events-none" style={{ top, left, width: w }}>{tooltip(hover.i, hover.p)}</div>;
+      })()}
+      {hover && card == null && (
         <div className="absolute z-20 pointer-events-none bg-white border border-slate-200 rounded-lg shadow-lg px-3 py-2 text-xs font-mono leading-5 text-slate-700"
           style={{ top: Math.max(0, lay[hover.p].titleTop), left: hover.flip ? undefined : hover.left + 14, right: hover.flip ? `calc(100% - ${hover.left - 14}px)` : undefined, maxWidth: narrow ? 240 : 340, whiteSpace: narrow ? 'normal' : 'nowrap', fontSize: narrow ? 11 : 12 }}>
           {tooltip(hover.i, hover.p)}

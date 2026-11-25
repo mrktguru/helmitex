@@ -10,7 +10,8 @@ interface Day {
   date: string; orders: number; fbo: number; fbs: number; loc: number; local: number | null;
   views: number; toCart: number; adViews: number; adClicks: number; adCart: number; adOrders: number;
   orgViews: number; orgCart: number; spend: number; spendCpo: number; cpc: number | null; cpcBy: Record<string, number | null>;
-  spp: number | null; buyerPrice: number | null;
+  spp: number | null; buyerPrice: number | null; revenue: number;
+  by: Record<string, { spend: number; clicks: number; views: number; carts: number; orders: number }>;
 }
 interface Cluster {
   name: string; total: number; local: number; supplied: number; stockEst: number | null; stockNow: number | null;
@@ -90,28 +91,7 @@ function Dynamics({ d }: { d: Charts }) {
       lines: [{ values: s.map((x) => x.local), color: C.fbo }] },
   ];
 
-  const tip = (i: number) => {
-    const x = s[i];
-    return (
-      <>
-        {head(x.date)}
-        {x.date === d.today && <div className="text-amber-700 font-ui">день ещё не закончился</div>}
-        <div>Заказы без отмен: <b>{x.fbo + x.fbs}</b> · <span style={{ color: C.ad }}>реклама {x.adOrders}</span> · <span style={{ color: C.org }}>органика {orgOrd(x)}</span></div>
-        {x.adOrders > x.fbo + x.fbs && <div className="text-amber-700 font-ui">рекламных по атрибуции Ozon больше, чем всех заказов дня</div>}
-        {hasFbs && <div className="text-slate-500">FBO {x.fbo} · FBS {x.fbs}</div>}
-        <div className="text-slate-500">Заказано по аналитике Ozon: {x.orders}</div>
-        <div><span style={{ color: C.org }}>●</span> Органика: показы {fmt(x.orgViews)} · корзины {fmt(x.orgCart)}</div>
-        <div><span style={{ color: C.ad }}>●</span> Реклама: показы {fmt(x.adViews)} · клики {fmt(x.adClicks)} · корзины {fmt(x.adCart)} · заказы {fmt(x.adOrders)}</div>
-        <div>Цена клика: {x.cpc != null ? `${fmt(x.cpc, 1)} ₽` : '—'}</div>
-        <div>Расход на рекламу: <b>{fmt(x.spend + (x.spendCpo ?? 0))} ₽</b>{x.spendCpo > 0 && <> (за клики {fmt(x.spend)} · за заказы {fmt(x.spendCpo)})</>}</div>
-        {multi && camps.map((c, k) => x.cpcBy[c.id] != null && (
-          <div key={c.id} className="pl-3"><span style={{ color: CAMP_COLORS[k] }}>━</span> {c.title.slice(0, 28)}: {fmt(x.cpcBy[c.id], 1)} ₽</div>
-        ))}
-        <div>Локальные заказы (5 дн.): {x.local != null ? `${fmt(x.local)}%` : '—'}</div>
-        <div>СПП: {x.spp != null ? `${fmt(x.spp, 1)}%` : '—'} · цена для покупателя: {x.buyerPrice != null ? `${fmt(x.buyerPrice)} ₽` : '—'}</div>
-      </>
-    );
-  };
+  const tip = (i: number) => <DayCard x={s[i]} today={d.today} hasFbs={hasFbs} campaigns={d.campaigns} />;
 
   return (
     <section className="bg-white rounded-xl border border-slate-200 px-3 sm:px-4 py-4">
@@ -122,13 +102,106 @@ function Dynamics({ d }: { d: Charts }) {
           ...(multi ? camps.map((c, k) => ({ color: CAMP_COLORS[k], label: c.title, kind: 'dash' as const })) : []),
         ]} />
       </div>
-      <MultiPanel dates={dates} panels={panels} tooltip={tip} today={d.today} gap={36} />
+      <MultiPanel dates={dates} panels={panels} tooltip={tip} today={d.today} gap={36} card={340} />
       <p className="mt-1 text-[11px] text-slate-500 leading-4">
         Органика = всего − реклама (заказы: без отмен − рекламные по атрибуции Ozon; показы и корзины: аналитика Ozon − реклама) (может быть занижена: Ozon засчитывает рекламе заказы и корзины несколько дней после клика).
         СПП — скидка за счёт Ozon от цены продавца, по начислениям дня: FBO попадает в них после выкупа, пустые дни соединены пунктиром.
         {multi && ' Средняя цена клика взвешена по кликам: расход всех кампаний ÷ все клики.'} Расход — за клики и оплата за заказ (списания из начислений, по дате начисления).
       </p>
     </section>
+  );
+}
+
+// ───────────── Подсказка дня (вариант 1 «Секции») ─────────────
+
+const H4 = ({ children }: { children: React.ReactNode }) => <h4 className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[.06em] text-slate-400">{children}</h4>;
+const N = ({ children, className = '' }: { children: React.ReactNode; className?: string }) => <span className={`font-mono tabular-nums whitespace-nowrap ${className}`}>{children}</span>;
+const Dot = ({ color }: { color: string }) => <i className="inline-block w-2 h-2 rounded-full shrink-0" style={{ background: color }} />;
+
+function DayCard({ x, today, hasFbs, campaigns }: { x: Day; today: string; hasFbs: boolean; campaigns: Charts['campaigns'] }) {
+  const total = x.fbo + x.fbs;
+  const ad = Math.min(x.adOrders, total); const org = Math.max(0, total - x.adOrders);
+  const spendAll = x.spend + (x.spendCpo ?? 0);
+  const drr = x.revenue > 0 && spendAll > 0 ? spendAll / x.revenue * 100 : null;
+  // кампании дня: цвет — как у линии кампании на графике цены клика
+  const color = (id: string) => { const k = campaigns.findIndex((c) => c.id === id); return k >= 0 && k < CAMP_COLORS.length ? CAMP_COLORS[k] : '#94a3b8'; };
+  const title = (id: string) => campaigns.find((c) => c.id === id)?.title ?? `Кампания ${id}`;
+  const rows = Object.entries(x.by ?? {}).filter(([, v]) => v.spend > 0 || v.clicks > 0).sort((a, b) => b[1].spend - a[1].spend);
+  const share = (v: number) => (spendAll > 0 ? Math.round(v / spendAll * 100) : 0);
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl text-[13px] text-slate-800 shadow-[0_12px_32px_-8px_rgba(15,23,42,.18),0_2px_6px_rgba(15,23,42,.06)]">
+      <div className="flex items-center justify-between gap-2 px-3.5 pt-3 pb-2.5 border-b border-slate-100">
+        <b className="text-sm">{longDate(x.date)}, {weekday(x.date)}</b>
+        {x.date === today && <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 whitespace-nowrap">● день не закончился</span>}
+      </div>
+
+      <div className="px-3.5 py-2.5 border-b border-slate-100">
+        <H4>Заказы без отмен</H4>
+        <div className="flex items-baseline gap-2 mb-1.5">
+          <N className="text-[22px] font-semibold">{fmt(total)}</N>
+          <span className="text-xs text-slate-500">аналитика Ozon: {fmt(x.orders)}{x.fbs > 0 ? ` · FBO ${x.fbo} · FBS ${x.fbs}` : ''}</span>
+        </div>
+        {total > 0 && (
+          <>
+            <div className="flex h-1.5 gap-0.5 rounded-full overflow-hidden bg-slate-100">
+              {ad > 0 && <i style={{ width: `${ad / total * 100}%`, background: C.ad }} />}
+              {org > 0 && <i style={{ width: `${org / total * 100}%`, background: C.org }} />}
+            </div>
+            <div className="flex justify-between mt-1.5 text-xs">
+              <span className="flex items-center gap-1.5"><Dot color={C.ad} />реклама <N className="font-semibold">{fmt(x.adOrders)}</N></span>
+              <span className="flex items-center gap-1.5">органика <N className="font-semibold">{fmt(org)}</N><Dot color={C.org} /></span>
+            </div>
+            {x.adOrders > total && <div className="mt-1 text-[11px] text-amber-700">рекламных по атрибуции Ozon больше, чем всех заказов дня</div>}
+          </>
+        )}
+      </div>
+
+      <div className="px-3.5 py-2.5 border-b border-slate-100">
+        <H4>Трафик</H4>
+        <table className="w-full">
+          <thead><tr className="text-[11px] text-slate-400"><th /><th className="font-medium text-right pb-0.5">показы</th><th className="font-medium text-right pb-0.5">корзины</th></tr></thead>
+          <tbody>
+            <tr><td className="py-0.5"><span className="flex items-center gap-1.5"><Dot color={C.ad} />Реклама</span></td><td className="text-right"><N>{fmt(x.adViews)}</N></td><td className="text-right"><N>{fmt(x.adCart)}</N></td></tr>
+            <tr><td className="py-0.5"><span className="flex items-center gap-1.5"><Dot color={C.org} />Органика</span></td><td className="text-right"><N>{fmt(x.orgViews)}</N></td><td className="text-right"><N>{fmt(x.orgCart)}</N></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="px-3.5 py-2.5 border-b border-slate-100">
+        <H4>Расход на рекламу · <N className="text-slate-900 text-xs normal-case tracking-normal">{fmt(spendAll)} ₽</N>{drr != null && <> · ДРР {fmt(drr, 1)}%</>}</H4>
+        {rows.length === 0 && !(x.spendCpo > 0) ? <div className="text-xs text-slate-500">расхода не было</div> : (
+          <div className="divide-y divide-slate-100">
+            {rows.map(([id, v]) => (
+              <div key={id} className="flex gap-2 py-1.5 first:pt-0">
+                <span className="pt-1.5"><Dot color={color(id)} /></span>
+                <div className="min-w-0 flex-1">
+                  <div className="line-clamp-2 leading-[1.3]" title={title(id)}>{title(id)}</div>
+                  <N className="text-[11.5px] text-slate-500">{fmt(v.clicks)} кл. · {v.clicks ? fmt(v.spend / v.clicks, 1) : '—'} ₽ · {fmt(v.orders)} зак.</N>
+                </div>
+                <div className="text-right">
+                  <N className="font-semibold block">{fmt(v.spend)} ₽</N>
+                  <N className="text-[11.5px] text-slate-500">{share(v.spend)}%</N>
+                </div>
+              </div>
+            ))}
+            {x.spendCpo > 0 && (
+              <div className="flex gap-2 py-1.5">
+                <span className="pt-1.5"><Dot color="#94a3b8" /></span>
+                <div className="min-w-0 flex-1">Оплата за заказ<div className="text-[11.5px] text-slate-500">по начислениям дня</div></div>
+                <div className="text-right"><N className="font-semibold block">{fmt(x.spendCpo)} ₽</N><N className="text-[11.5px] text-slate-500">{share(x.spendCpo)}%</N></div>
+              </div>
+            )}
+          </div>
+        )}
+        {x.adClicks > 0 && <div className="mt-1 text-[11.5px] text-slate-500">Средняя цена клика <N>{fmt(x.cpc, 1)} ₽</N> · {fmt(x.adClicks)} кликов</div>}
+      </div>
+
+      <div className="px-3.5 py-2.5 grid grid-cols-[1fr_auto] gap-y-1">
+        <span className="text-slate-500">СПП</span><N>{x.spp != null ? `${fmt(x.spp, 1)}%` : '—'}</N>
+        <span className="text-slate-500">Цена для покупателя</span><N>{x.buyerPrice != null ? `${fmt(x.buyerPrice)} ₽` : '—'}</N>
+        <span className="text-slate-500">Локальные заказы (5 дн.)</span><N>{x.local != null ? `${fmt(x.local)}%` : '—'}</N>
+      </div>
+    </div>
   );
 }
 
