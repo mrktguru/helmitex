@@ -39,7 +39,9 @@ interface State {
   lastM?: number; lastHm?: number; // lastHm — множитель часов на прошлом запуске (смена часа — защитная правка) // фактическая ставка ÷ базовая после прошлого запуска — база выводится из ставки в Ozon, не копит расхождение
   floor?: { bid: number; at: string; tried: number }; // Ozon не принял ставку ниже — держим не ниже bid 3 дня
   day?: string; changes?: number;
-  pending?: { at: string; prevBid: number; prevBase: number; viewsBefore: number; shareBefore: number };
+  pending?: { at: string; prevBid: number; prevBase: number; viewsBefore: number; shareBefore: number; clicksBefore?: number; cartsBefore?: number; prevM?: number };
+  ceiling?: { bid: number; until: string; why: string }; // потолок ставки: повышения не дали прироста — выше не поднимаем до until
+  flatUps?: number; // повышений подряд без прироста кликов и корзин
   lastLogAt?: string; lastReason?: string;
   boost?: BoostState;
 }
@@ -246,8 +248,10 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
     : `набираю данные после изменения: ${since?.carts ?? 0} из ${L.minCarts} корзин или ${since?.clicks ?? 0} из ${L.minClicks} кликов`;
   const gated = coolLeft > 0 || !enough;
   if (adj !== 0 && !stopLoss && gated) { reasons.push(waitTxt); adj = 0; }
+  // ночью (до 7:00) данных мало — по цене корзины не решаем, только защитные правки
+  if (adj !== 0 && !stopLoss && hour < 7) { reasons.push('ночь: решения по цене корзины — с 7:00'); adj = 0; }
   let urgent = stopLoss; // защитные правки — без ожидания данных и лимита в сутки
-  let hourUp = false; let paceBrake = false;
+  let paceBrake = false; let revertTo: number | null = null; let revertM: number | null = null;
   let newBase = base * (1 + adj);
 
   // 4. Проверка отклика показов на прошлое повышение
@@ -256,11 +260,31 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
     const after = win((now.getTime() - pAt) / 3600_000);
     const hAt = new Date(pAt + MSK).getUTCHours() + new Date(pAt + MSK).getUTCMinutes() / 60;
     const shareAfter = demandShare(hAt, hAt + (now.getTime() - pAt) / 3600_000);
-    const rateBefore = p.viewsBefore / Math.max(p.shareBefore, 1e-6), rateAfter = after.views / Math.max(shareAfter, 1e-6);
-    const gain = rateBefore > 0 ? rateAfter / rateBefore - 1 : null;
-    metrics.elasticGain = gain != null ? round(gain, 3) : null;
-    if (gain != null && gain < 0.03) { newBase = p.prevBase; reasons.push(`после повышения ${fmt(p.prevBid)} → показы ${gain >= 0 ? '+' : ''}${fmt(gain * 100)}% (с поправкой на время суток) — возвращаю ставку`); urgent = true; }
-    else if (gain != null) reasons.push(`повышение дало показы +${fmt(gain * 100)}% — оставляю`);
+    const per = (v: number, sh: number) => v / Math.max(sh, 1e-6);
+    const g = (before: number | undefined, nowV: number) => (before != null && before > 0 ? per(nowV, shareAfter) / per(before, p.shareBefore) - 1 : null);
+    const gain = g(p.viewsBefore, after.views);
+    const gClicks = g(p.clicksBefore, after.clicks);
+    const gCarts = g(p.cartsBefore, after.carts);
+    Object.assign(metrics, { elasticGain: gain != null ? round(gain, 3) : null, clicksGain: gClicks != null ? round(gClicks, 3) : null, cartsGain: gCarts != null ? round(gCarts, 3) : null });
+    const pc = (x: number | null) => (x == null ? '—' : `${x >= 0 ? '+' : ''}${fmt(x * 100)}%`);
+    const until = new Date(now.getTime() + DAY).toISOString();
+    if (gain != null && gain < 0.03 && (gClicks == null || gClicks < 0.05)) {
+      // повышение не дало ни показов, ни кликов — возвращаем прежнюю ставку и не поднимаем выше неё сутки
+      revertTo = p.prevBid; revertM = p.prevM ?? null;
+      st.ceiling = { bid: p.prevBid, until, why: `повышение ${fmt(p.prevBid)} → выше не дало показов (${pc(gain)}) и кликов (${pc(gClicks)})` };
+      st.flatUps = 0;
+      reasons.push(`после повышения с ${fmt(p.prevBid)} ₽ показы ${pc(gain)}, клики ${pc(gClicks)} (с поправкой на время суток) — возвращаю ${fmt(p.prevBid)} ₽, выше не поднимаю сутки`);
+      urgent = true;
+    } else if (gain != null) {
+      const paid = (gClicks != null && gClicks >= 0.05) || (gCarts != null && gCarts >= 0.05);
+      st.flatUps = paid ? 0 : (st.flatUps ?? 0) + 1;
+      reasons.push(`повышение: показы ${pc(gain)}, клики ${pc(gClicks)}, корзины ${pc(gCarts)} — ${paid ? 'оставляю' : `прироста кликов и корзин нет (${st.flatUps} подряд)`}`);
+      if (!paid && (st.flatUps ?? 0) >= 2) {
+        st.ceiling = { bid: curBid, until, why: 'два повышения подряд без прироста кликов и корзин' };
+        st.flatUps = 0;
+        reasons.push(`потолок ${fmt(curBid)} ₽ на сутки: два повышения подряд без прироста`);
+      }
+    }
     st.pending = undefined;
   }
 
@@ -269,7 +293,6 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
   if (mods.hours) {
     const hm = hour < 7 ? 0.75 : hour >= 17 && hour < 23 ? 1.1 : 1;
     if (st.lastHm != null && st.lastHm !== hm) urgent = true; // смена часового режима
-    hourUp = st.lastHm != null && hm > st.lastHm;
     st.lastHm = hm;
     if (hm !== 1) { m *= hm; reasons.push(`часы: ×${hm.toLocaleString('ru-RU')}`); }
   }
@@ -315,16 +338,28 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
   const maxStep = curBid * L.maxStepPct / 100;
   target = Math.min(curBid + maxStep, Math.max(curBid - maxStep, target));
   target = roundBid(target);
-  // не идти против сигнала: корзина дороже цели или бюджет уходит быстрее плана — не повышаем
-  // (кроме конца ночного режима: возврат к дневной ставке)
-  if (adj < 0 && target >= curBid && !hourUp) {
+  // не идти против сигнала: корзина дороже цели или бюджет уходит быстрее плана — не повышаем (смена часового режима тоже)
+  if (adj < 0 && target >= curBid) {
     // база выше фактической ставки (её придерживали модификаторы) — снижаем от фактической и переносим базу
     target = roundBid(Math.max(L.minBid, curBid * (1 + adj)));
     newBase = target / m; st.baseBid = newBase;
     reasons.push(`снижаю от текущей ставки на ${fmt(-adj * 100)}%`);
-  } else if (target > curBid && !hourUp && ((r != null && r > 1) || paceBrake || stopLoss)) {
+  } else if (target > curBid && ((r != null && r > 1) || paceBrake || stopLoss)) {
     reasons.push(r != null && r > 1 ? 'корзина дороже цели — не повышаю' : 'бюджет тратится быстрее плана — не повышаю');
     target = curBid;
+  }
+  // откат повышения — сразу к прежней ставке (без ограничения шага)
+  if (revertTo != null) {
+    const rv = revertTo * (revertM ? m / revertM : 1); // с поправкой на смену модификаторов (часы, темп) с момента повышения
+    if (target > rv) { target = roundBid(Math.max(L.minBid, rv)); newBase = target / m; }
+  }
+  // потолок после повышений без отдачи
+  const ceil = st.ceiling && now.getTime() < new Date(st.ceiling.until).getTime() ? st.ceiling : null;
+  if (!ceil) st.ceiling = undefined;
+  metrics.ceiling = ceil?.bid ?? null;
+  if (ceil && target > curBid && target > ceil.bid) {
+    target = Math.max(curBid, ceil.bid);
+    reasons.push(`потолок ${fmt(ceil.bid)} ₽ до ${new Date(new Date(ceil.until).getTime() + MSK).toISOString().slice(11, 16)} (${ceil.why})`);
   }
   target = applyFloor(st, now, target, reasons);
   metrics.target = target;
@@ -364,7 +399,7 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
       st.lastChangeAt = now.toISOString(); st.changes = (st.changes ?? 0) + 1;
       if (up && mods.elastic) {
         const hb = win(2);
-        st.pending = { at: now.toISOString(), prevBid: curBid, prevBase: base, viewsBefore: hb.views, shareBefore: demandShare(hour - 2, hour) };
+        st.pending = { at: now.toISOString(), prevBid: curBid, prevBase: base, viewsBefore: hb.views, clicksBefore: hb.clicks, cartsBefore: hb.carts, prevM: m, shareBefore: demandShare(hour - 2, hour) };
       }
     }
     return done(up ? 'BID_UP' : 'BID_DOWN', { from: curBid, to: target, applied: !dry });
