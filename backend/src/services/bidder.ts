@@ -1,5 +1,6 @@
 import prisma from '../prisma/client';
 import { campaignMeta, increments, setBudget, setCpcBid, ymd } from './ads';
+import { activeExperiment, tickExperiments } from './adsExperiment';
 import { ozon, ozonConfigured } from './ozon';
 
 // Биддер кампании «оплата за клик».
@@ -170,6 +171,10 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
     }
     return d;
   };
+
+  // эксперимент «включено / выключено»: ставку не трогаем, иначе результат не сравнить
+  const exp = await activeExperiment(campaignId);
+  if (exp) { reasons.push(`эксперимент ${exp.title}: ставка заморожена${exp.bid != null ? ` на ${fmt(exp.bid)} ₽` : ''}, кампанию включает и выключает расписание`); return done('HOLD'); }
 
   const meta = await campaignMeta();
   const c = meta.cpcAll.find((x) => x.id === campaignId);
@@ -410,6 +415,8 @@ export async function runBidder(campaignId: string, { dry = false } = {}): Promi
 }
 
 export async function runAllBidders() {
+  // сначала расписание экспериментов (включить / выключить кампанию по блоку)
+  try { await tickExperiments(); } catch (e) { console.warn('[experiments]', (e as Error).message); }
   const list = await prisma.adBidder.findMany({ where: { enabled: true } });
   for (const b of list) {
     // Ozon не принял ставку — не повторять ту же попытку каждые 30 минут: пауза 6 часов (одна запись в журнал вместо сотни)

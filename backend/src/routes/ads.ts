@@ -10,6 +10,8 @@ import {
 } from '../services/ads';
 import { syncStatus } from '../services/syncStatus';
 import { getCharts, setStockAnchor } from '../services/adsCharts';
+import { getQueries } from '../services/adsQueries';
+import { createExperiment, listExperiments, makeSchedule, stopExperiment } from '../services/adsExperiment';
 import { getCartLag } from '../services/cartLag';
 import { DEFAULT_BOOST, DEFAULT_LIMITS, DEFAULT_MODS, getBidder, runBidder, saveBidder } from '../services/bidder';
 
@@ -47,7 +49,7 @@ router.get('/status', h(async (_req, res) => {
   res.json({ seller: ozonConfigured(), perf: perfConfigured(), lastDay: todayMsk() });
 }));
 
-const ADS_SOURCES = ['ads-data', 'ads-meta', 'ads-prices', 'ads-intraday', 'ads-postings', 'ads-supplies'];
+const ADS_SOURCES = ['ads-data', 'ads-meta', 'ads-prices', 'ads-intraday', 'ads-postings', 'ads-supplies', 'ads-queries'];
 router.get('/products', h(async (req, res) => {
   const p = period(req.query);
   if (p.refresh) refreshAdsMeta();
@@ -72,6 +74,34 @@ router.get('/charts/:sku', h(async (req, res) => {
   const p = period(req.query);
   res.json(await getCharts(req.params.sku, p.from, p.to, p.refresh));
 }));
+// Поисковые запросы товара: позиция, поиски, просмотры и заказы по дням
+router.get('/queries/:sku', h(async (req, res) => {
+  const p = period(req.query);
+  res.json(await getQueries(req.params.sku, p.from, p.to));
+}));
+
+// Эксперименты «включено / выключено»
+router.get('/experiments', h(async (req, res) => {
+  const sku = z.string().min(1).parse(req.query.sku);
+  res.json(await listExperiments(sku));
+}));
+router.get('/experiments/preview', h(async (req, res) => {
+  const q = z.object({ start: z.string().regex(ISO), blockDays: z.coerce.number().int().min(2).max(14), pairs: z.coerce.number().int().min(1).max(6) }).parse(req.query);
+  res.json(makeSchedule(q.start, q.blockDays, q.pairs));
+}));
+router.post('/experiments', h(async (req, res) => {
+  const d = z.object({
+    campaignId: z.string().min(1), sku: z.string().min(1), start: z.string().regex(ISO),
+    blockDays: z.number().int().min(2).max(14), pairs: z.number().int().min(1).max(6), skipDays: z.number().int().min(0).max(5),
+    endState: z.enum(['ON', 'OFF']), note: z.string().max(500).nullable().optional(), modes: z.array(z.enum(['ON', 'OFF'])).max(12).optional(),
+  }).parse(req.body);
+  res.json(await createExperiment(d, (await actor(req)).email));
+}));
+router.post('/experiments/:id/stop', h(async (req, res) => {
+  await stopExperiment(req.params.id, (await actor(req)).email);
+  res.json({ ok: true });
+}));
+
 // Точка отсчёта остатков FBO (день, когда сток был 0 во всех кластерах); null — определять автоматически
 router.put('/stock-anchor/:sku', h(async (req, res) => {
   const { date } = z.object({ date: z.string().regex(ISO).nullable() }).parse(req.body);

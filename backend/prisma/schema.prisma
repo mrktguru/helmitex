@@ -525,6 +525,45 @@ model OzonPosting {
   @@index([sku, orderDay])
 }
 
+// Поисковые запросы товара по дням (Seller API /v1/analytics/product-queries/details): позиция, поиски, просмотры, заказы.
+// Ozon отдаёт до 15 запросов на сортировку — собираем объединение нескольких сортировок (~45–50 запросов в день).
+model AdQueryDay {
+  date       DateTime @db.Date
+  sku        String
+  query      String
+  position   Float? // средняя позиция товара в выдаче по запросу
+  searches   Int      @default(0) // уникальных покупателей, искавших запрос
+  viewers    Int      @default(0) // уникальных покупателей, увидевших товар
+  orders     Int      @default(0)
+  gmv        Float    @default(0)
+  conversion Float? // конверсия из просмотра в заказ, %
+
+  @@id([date, sku, query])
+  @@index([sku, query])
+}
+
+// Эксперимент «включено / выключено»: кампания включается и выключается блоками по расписанию, ставка заморожена,
+// отчёт — добавочные заказы и добавочная цена заказа (все заказы товара, а не рекламные).
+model AdExperiment {
+  id         String    @id @default(uuid())
+  campaignId String
+  sku        String
+  title      String
+  status     String    @default("PLANNED") // PLANNED | RUNNING | DONE | STOPPED
+  blockDays  Int
+  skipDays   Int       @default(1) // первые дни блока не учитываются: отложенные заказы прошлого блока
+  blocks     Json // [{ from: 'YYYY-MM-DD', to: 'YYYY-MM-DD', mode: 'ON' | 'OFF' }]
+  bid        Float? // ставка, замороженная на время эксперимента
+  endState   String    @default("ON") // в каком состоянии оставить кампанию по окончании
+  note       String?
+  createdBy  String?
+  createdAt  DateTime  @default(now())
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  @@index([campaignId, status])
+}
+
 // Поставки FBO из Ozon (все, не только созданные порталом) — приход товара в кластер для оценки остатков
 model OzonSupply {
   supplyId       String    @id

@@ -13,6 +13,7 @@ export const SOURCES: Record<string, string> = {
   'ads-intraday': 'Снимок рекламы',
   'ads-postings': 'Отправления и кластеры',
   'ads-supplies': 'Поставки FBO',
+  'ads-queries': 'Поисковые запросы',
 };
 
 export interface SyncState { source: string; label: string; running: boolean; startedAt: string | null; at: string | null; ok: boolean | null; error: string | null }

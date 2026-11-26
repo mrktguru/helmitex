@@ -14,9 +14,11 @@ import { addDays } from './util';
 import SyncBar, { useSyncPoll } from '../stock/SyncBar';
 import { Icon } from './icons';
 import AdsCharts from './charts/AdsCharts';
+import QueriesTab from './QueriesTab';
+import ExperimentTab from './ExperimentTab';
 
-type Tab = 'table' | 'camps' | 'bidder' | 'price' | 'journal';
-const TABS: [Tab, string, string][] = [['table', 'Таблица', 'table'], ['camps', 'Кампании', 'target'], ['bidder', 'Биддер', 'bolt'], ['price', 'Цена', 'tag'], ['journal', 'Журнал', 'list']];
+type Tab = 'table' | 'queries' | 'camps' | 'bidder' | 'exp' | 'price' | 'journal';
+const TABS: [Tab, string, string][] = [['table', 'Таблица', 'table'], ['queries', 'Запросы', 'search'], ['camps', 'Кампании', 'target'], ['bidder', 'Биддер', 'bolt'], ['exp', 'Эксперимент', 'flask'], ['price', 'Цена', 'tag'], ['journal', 'Журнал', 'list']];
 const GRANS: [Gran, string][] = [['day', 'Дни'], ['week', 'Недели'], ['month', 'Месяцы']];
 // период по умолчанию под детализацию (Ozon и портал — не больше 92 дней)
 const SPAN: Record<Gran, number> = { day: 28, week: 91, month: 92 };
@@ -144,6 +146,8 @@ export default function AdsAnalytics() {
             </section>
           )}
           {tab === 'camps' && <CampaignsTab report={report} gran={gran} onChanged={changed} onBidder={(id) => { setBidderFocus(id); setParam({ tab: 'bidder' }); }} />}
+          {tab === 'queries' && sku && <QueriesTab sku={sku} from={from} to={to} />}
+          {tab === 'exp' && <ExperimentTab sku={report.product.sku} campaigns={report.sources.cpc.map((c: any) => ({ id: c.id, title: c.title, state: c.state, bid: c.bid }))} />}
           {tab === 'bidder' && <BidderTab report={report} onChanged={changed} focus={bidderFocus} />}
           {tab === 'price' && <div className="max-w-xl"><PriceCard report={report} onChanged={changed} /></div>}
           {tab === 'journal' && <div className="max-w-4xl"><Journal entries={report.journal} anomalies={report.anomalies} series={report.series} sku={report.product.sku} onChanged={changed} focus={null} /></div>}

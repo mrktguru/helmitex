@@ -25,6 +25,7 @@ import { syncAllShipments } from './services/fbo';
 import { ozonConfigured } from './services/ozon';
 import { startAdsSync } from './services/ads';
 import { startChartsSync } from './services/adsCharts';
+import { startQueriesSync } from './services/adsQueries';
 import { runAllBidders } from './services/bidder';
 import { errorHandler } from './middleware/errorHandler';
 
@@ -80,6 +81,7 @@ if (ozonConfigured()) {
   // после каждого снимка (раз в 30 мин) — решения биддера по кампаниям, где он включён
   startAdsSync(runAllBidders);
   startChartsSync();
+  startQueriesSync();
 }
 
 export default app;

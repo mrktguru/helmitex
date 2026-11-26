@@ -338,6 +338,11 @@ export const api = {
   adsCharts: (sku: string, from: string, to: string, refresh = false) =>
     request<any>(`/ads/charts/${sku}?${new URLSearchParams({ from, to, ...(refresh ? { refresh: '1' } : {}) })}`),
   adsCartLag: (sku: string, days: number) => request<any>(`/ads/cart-lag/${sku}?days=${days}`),
+  adsQueries: (sku: string, from: string, to: string) => request<any>(`/ads/queries/${sku}?${new URLSearchParams({ from, to })}`),
+  adsExperiments: (sku: string) => request<any[]>(`/ads/experiments?${new URLSearchParams({ sku })}`),
+  adsExperimentPreview: (start: string, blockDays: number, pairs: number) => request<{ from: string; to: string; mode: 'ON' | 'OFF' }[]>(`/ads/experiments/preview?${new URLSearchParams({ start, blockDays: String(blockDays), pairs: String(pairs) })}`),
+  adsExperimentCreate: (d: any) => request<any>('/ads/experiments', { method: 'POST', body: JSON.stringify(d) }),
+  adsExperimentStop: (id: string) => request<{ ok: true }>(`/ads/experiments/${id}/stop`, { method: 'POST', body: '{}' }),
   adsStockAnchor: (sku: string, date: string | null) => request<{ ok: true }>(`/ads/stock-anchor/${sku}`, { method: 'PUT', body: JSON.stringify({ date }) }),
   adsCampaignState: (id: string, on: boolean) => request<{ ok: true }>(`/ads/campaigns/${id}/state`, { method: 'POST', body: JSON.stringify({ on }) }),
   adsCampaignBid: (id: string, sku: string, bid: number) => request<{ ok: true }>(`/ads/campaigns/${id}/bid`, { method: 'PUT', body: JSON.stringify({ sku, bid }) }),
