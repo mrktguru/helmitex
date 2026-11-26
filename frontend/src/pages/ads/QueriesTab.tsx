@@ -20,6 +20,7 @@ interface Data {
 type SortK = 'searches' | 'position' | 'orders' | 'conv' | 'query';
 
 const dm = (s: string) => `${s.slice(8, 10)}.${s.slice(5, 7)}`;
+const rev = <T,>(a: T[]) => [...a].reverse(); // сегодня — первым, дальше дни по убыванию
 const posCls = (p: number | null) => (p == null ? 'text-slate-400' : p <= 3 ? 'text-emerald-700' : p <= 10 ? 'text-slate-800' : p <= 30 ? 'text-amber-700' : 'text-red-700');
 
 /** Позиция по дням: меньше — выше (ось перевёрнута); пропуски — товар не попал в снимок */
@@ -28,7 +29,7 @@ function PosSpark({ s, w = 120, h = 28 }: { s: Q['series']; w?: number; h?: numb
   if (pts.length < 2) return <span className="text-xs text-slate-400">—</span>;
   const max = Math.max(...pts.map((x) => x.p)); const min = Math.min(...pts.map((x) => x.p));
   const span = Math.max(1, max - min);
-  const X = (i: number) => (s.length <= 1 ? w / 2 : (i / (s.length - 1)) * (w - 4) + 2);
+  const X = (i: number) => (s.length <= 1 ? w / 2 : ((s.length - 1 - i) / (s.length - 1)) * (w - 4) + 2); // сегодня слева
   const Y = (p: number) => 3 + ((p - min) / span) * (h - 6); // верх — лучшая позиция
   let d = ''; let prev = -2;
   for (const x of pts) { d += `${x.i === prev + 1 ? 'L' : 'M'}${X(x.i).toFixed(1)},${Y(x.p).toFixed(1)}`; prev = x.i; }
@@ -128,7 +129,7 @@ export default function QueriesTab({ sku, from, to, campaignsOn }: { sku: string
                 {th('position', 'Позиция ср.')}
                 <th className="px-3 py-2 font-medium text-[11px] text-slate-500 text-right whitespace-nowrap">Последняя</th>
                 <th className="px-3 py-2 font-medium text-[11px] text-slate-500 text-right">Лучшая</th>
-                <th className="px-3 py-2 font-medium text-[11px] text-slate-500 text-left whitespace-nowrap">Позиция по дням</th>
+                <th className="px-3 py-2 font-medium text-[11px] text-slate-500 text-left whitespace-nowrap">Позиция по дням (сегодня слева)</th>
                 {th('orders', 'Заказы')}
                 {th('conv', 'Конв.')}
                 <th className="px-3 py-2 font-medium text-[11px] text-slate-500 text-right whitespace-nowrap">Дней в снимке</th>
@@ -155,11 +156,11 @@ export default function QueriesTab({ sku, from, to, campaignsOn }: { sku: string
                         <div className="overflow-x-auto">
                           <table className="text-xs">
                             <tbody>
-                              <tr><td className="pr-3 text-slate-500 whitespace-nowrap">День</td>{data.days.map((dd) => <td key={dd} className={clsx('px-1.5 text-center font-mono', campaignsOn && !campaignsOn(dd) && 'bg-slate-200/60')}>{dm(dd)}</td>)}</tr>
-                              <tr><td className="pr-3 text-slate-500 whitespace-nowrap">Позиция</td>{q.series.map((x, i) => <td key={i} className={clsx('px-1.5 text-center font-mono font-semibold', posCls(x?.position ?? null))}>{x?.position != null ? fmt(x.position, 0) : '·'}</td>)}</tr>
-                              <tr><td className="pr-3 text-slate-500 whitespace-nowrap">Поисков</td>{q.series.map((x, i) => <td key={i} className="px-1.5 text-center font-mono text-slate-600">{x ? fmt(x.searches) : '·'}</td>)}</tr>
-                              <tr><td className="pr-3 text-slate-500 whitespace-nowrap">Заказов</td>{q.series.map((x, i) => <td key={i} className="px-1.5 text-center font-mono text-slate-600">{x ? x.orders : '·'}</td>)}</tr>
-                              <tr><td className="pr-3 text-slate-500 whitespace-nowrap">Расход РК, ₽</td>{data.daily.map((x, i) => <td key={i} className="px-1.5 text-center font-mono text-slate-400">{x.adSpend ? fmt(x.adSpend / 1000, 1) + 'к' : '0'}</td>)}</tr>
+                              <tr><td className="pr-3 text-slate-500 whitespace-nowrap">День</td>{rev(data.days.map((dd) => <td key={dd} className={clsx('px-1.5 text-center font-mono', campaignsOn && !campaignsOn(dd) && 'bg-slate-200/60')}>{dm(dd)}</td>))}</tr>
+                              <tr><td className="pr-3 text-slate-500 whitespace-nowrap">Позиция</td>{rev(q.series.map((x, i) => <td key={i} className={clsx('px-1.5 text-center font-mono font-semibold', posCls(x?.position ?? null))}>{x?.position != null ? fmt(x.position, 0) : '·'}</td>))}</tr>
+                              <tr><td className="pr-3 text-slate-500 whitespace-nowrap">Поисков</td>{rev(q.series.map((x, i) => <td key={i} className="px-1.5 text-center font-mono text-slate-600">{x ? fmt(x.searches) : '·'}</td>))}</tr>
+                              <tr><td className="pr-3 text-slate-500 whitespace-nowrap">Заказов</td>{rev(q.series.map((x, i) => <td key={i} className="px-1.5 text-center font-mono text-slate-600">{x ? x.orders : '·'}</td>))}</tr>
+                              <tr><td className="pr-3 text-slate-500 whitespace-nowrap">Расход РК, ₽</td>{rev(data.daily.map((x, i) => <td key={i} className="px-1.5 text-center font-mono text-slate-400">{x.adSpend ? fmt(x.adSpend / 1000, 1) + 'к' : '0'}</td>))}</tr>
                             </tbody>
                           </table>
                         </div>

@@ -195,7 +195,7 @@ function Report({ e, onChanged }: { e: Exp; onChanged: () => void }) {
           <table className="text-xs w-full">
             <thead><tr className="text-[11px] text-slate-500"><th className="text-left font-medium pb-1">День</th><th className="font-medium pb-1" /><th className="text-right font-medium px-2 pb-1">заказы</th><th className="text-right font-medium px-2 pb-1">выручка</th><th className="text-right font-medium px-2 pb-1">расход</th><th className="text-right font-medium px-2 pb-1">рекл. зак.</th><th className="text-right font-medium px-2 pb-1">позиция</th></tr></thead>
             <tbody>
-              {e.rows.map((r) => (
+              {[...e.rows].reverse().map((r) => (
                 <tr key={r.date} className={clsx('border-t border-slate-100', !r.counted && 'text-slate-400')}>
                   <td className="py-1 pr-2 font-mono">{dm(r.date)}</td>
                   <td className="py-1"><span className={clsx('text-[10px] font-semibold px-1.5 py-0.5 rounded', r.mode === 'ON' ? 'bg-teal-100 text-teal-800' : 'bg-slate-200 text-slate-600')}>{r.mode === 'ON' ? 'ВКЛ' : 'ВЫКЛ'}</span>{!r.counted && <span className="ml-1 text-[10px]">не учт.</span>}</td>
