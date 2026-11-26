@@ -51,11 +51,12 @@ function CreateForm({ sku, campaigns, onCreated }: { sku: string; campaigns: { i
   const [pairs, setPairs] = useState(2);
   const [skipDays, setSkipDays] = useState(1);
   const [endState, setEndState] = useState<Mode>('ON');
+  const [first, setFirst] = useState<Mode | ''>('OFF');
   const [preview, setPreview] = useState<Block[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => { setPreview(null); api.adsExperimentPreview(start, blockDays, pairs).then(setPreview).catch(() => {}); }, [start, blockDays, pairs]);
+  useEffect(() => { setPreview(null); api.adsExperimentPreview(start, blockDays, pairs, first || null).then(setPreview).catch(() => {}); }, [start, blockDays, pairs, first]);
   const others = campaigns.filter((c) => c.id !== campaignId && c.state === 'CAMPAIGN_STATE_RUNNING');
   const end = preview?.[preview.length - 1]?.to;
 
@@ -75,7 +76,7 @@ function CreateForm({ sku, campaigns, onCreated }: { sku: string; campaigns: { i
         <h2 className="font-semibold">Новый эксперимент «включено / выключено»</h2>
         <p className="text-sm text-slate-500 mt-1 max-w-3xl">Кампания будет включаться и выключаться блоками по расписанию в случайном порядке. Ставку биддер на это время не трогает. В отчёте сравниваются все заказы товара в дни «включено» и «выключено» — так видно, сколько заказов реклама добавляет на самом деле, а сколько пришло бы и без неё.</p>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
         <label className="text-xs text-slate-500 col-span-2">Кампания
           <select value={campaignId} onChange={(e) => setCampaignId(e.target.value)} className={inp}>
             {campaigns.map((c) => <option key={c.id} value={c.id}>{c.title}{c.bid != null ? ` · ${fmt(c.bid)} ₽` : ''}{c.state !== 'CAMPAIGN_STATE_RUNNING' ? ' (выкл.)' : ''}</option>)}
@@ -90,15 +91,18 @@ function CreateForm({ sku, campaigns, onCreated }: { sku: string; campaigns: { i
         <label className="text-xs text-slate-500">Пар «вкл + выкл»
           <select value={pairs} onChange={(e) => setPairs(+e.target.value)} className={inp}>{[2, 3, 4].map((n) => <option key={n} value={n}>{n} ({n * 2} блока)</option>)}</select>
         </label>
-        <label className="text-xs text-slate-500">Не учитывать в начале блока
-          <select value={skipDays} onChange={(e) => setSkipDays(+e.target.value)} className={inp}>{[0, 1, 2].filter((n) => n < blockDays).map((n) => <option key={n} value={n}>{n} дн.</option>)}</select>
+        <label className="text-xs text-slate-500">Первый блок
+          <select value={first} onChange={(e) => setFirst(e.target.value as Mode | '')} className={inp}><option value="OFF">выключено</option><option value="ON">включено</option><option value="">случайно</option></select>
+        </label>
+        <label className="text-xs text-slate-500" title="Первые дни каждого блока не идут в отчёт: в них приходят отложенные заказы прошлого блока. Кампания в эти дни всё равно включена или выключена по расписанию.">Не учитывать в отчёте
+          <select value={skipDays} onChange={(e) => setSkipDays(+e.target.value)} className={inp}>{[0, 1, 2].filter((n) => n < blockDays).map((n) => <option key={n} value={n}>{n === 0 ? 'ничего' : `${n}-й день каждого блока`.replace('2-й день', 'первые 2 дня')}</option>)}</select>
         </label>
       </div>
       {preview && (
         <div>
           <div className="flex items-baseline justify-between mb-1.5 text-xs text-slate-500">
-            <span>Расписание: {dm(preview[0].from)} — {end && dm(end)}, {preview.length * blockDays} дней · светлая часть блока не учитывается</span>
-            <button onClick={() => api.adsExperimentPreview(start, blockDays, pairs).then(setPreview)} className="text-brand-700 hover:underline">другой порядок</button>
+            <span>Расписание: {dm(preview[0].from)} — {end && dm(end)}, {preview.length * blockDays} дней · с {dm(preview[0].from)} кампания будет {preview[0].mode === 'ON' ? 'включена' : 'выключена'} (переключение в первые 30 минут после полуночи по Москве) · светлая часть блока не идёт в отчёт</span>
+            <button onClick={() => api.adsExperimentPreview(start, blockDays, pairs, first || null).then(setPreview)} className="text-brand-700 hover:underline">другой порядок</button>
           </div>
           <Timeline blocks={preview} skipDays={skipDays} />
         </div>

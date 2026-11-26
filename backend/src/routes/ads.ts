@@ -86,8 +86,8 @@ router.get('/experiments', h(async (req, res) => {
   res.json(await listExperiments(sku));
 }));
 router.get('/experiments/preview', h(async (req, res) => {
-  const q = z.object({ start: z.string().regex(ISO), blockDays: z.coerce.number().int().min(2).max(14), pairs: z.coerce.number().int().min(1).max(6) }).parse(req.query);
-  res.json(makeSchedule(q.start, q.blockDays, q.pairs));
+  const q = z.object({ start: z.string().regex(ISO), blockDays: z.coerce.number().int().min(2).max(14), pairs: z.coerce.number().int().min(1).max(6), first: z.enum(['ON', 'OFF']).optional() }).parse(req.query);
+  res.json(makeSchedule(q.start, q.blockDays, q.pairs, q.first));
 }));
 router.post('/experiments', h(async (req, res) => {
   const d = z.object({

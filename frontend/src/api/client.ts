@@ -340,7 +340,7 @@ export const api = {
   adsCartLag: (sku: string, days: number) => request<any>(`/ads/cart-lag/${sku}?days=${days}`),
   adsQueries: (sku: string, from: string, to: string) => request<any>(`/ads/queries/${sku}?${new URLSearchParams({ from, to })}`),
   adsExperiments: (sku: string) => request<any[]>(`/ads/experiments?${new URLSearchParams({ sku })}`),
-  adsExperimentPreview: (start: string, blockDays: number, pairs: number) => request<{ from: string; to: string; mode: 'ON' | 'OFF' }[]>(`/ads/experiments/preview?${new URLSearchParams({ start, blockDays: String(blockDays), pairs: String(pairs) })}`),
+  adsExperimentPreview: (start: string, blockDays: number, pairs: number, first?: 'ON' | 'OFF' | null) => request<{ from: string; to: string; mode: 'ON' | 'OFF' }[]>(`/ads/experiments/preview?${new URLSearchParams({ start, blockDays: String(blockDays), pairs: String(pairs), ...(first ? { first } : {}) })}`),
   adsExperimentCreate: (d: any) => request<any>('/ads/experiments', { method: 'POST', body: JSON.stringify(d) }),
   adsExperimentStop: (id: string) => request<{ ok: true }>(`/ads/experiments/${id}/stop`, { method: 'POST', body: '{}' }),
   adsStockAnchor: (sku: string, date: string | null) => request<{ ok: true }>(`/ads/stock-anchor/${sku}`, { method: 'PUT', body: JSON.stringify({ date }) }),

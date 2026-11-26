@@ -16,14 +16,15 @@ export type Mode = 'ON' | 'OFF';
 export interface Block { from: string; to: string; mode: Mode }
 
 /** Случайный порядок: поровну ON и OFF, не больше двух одинаковых блоков подряд */
-export function makeSchedule(start: string, blockDays: number, pairs: number): Block[] {
-  for (let attempt = 0; attempt < 200; attempt++) {
+export function makeSchedule(start: string, blockDays: number, pairs: number, first?: Mode): Block[] {
+  for (let attempt = 0; attempt < 500; attempt++) {
     const modes: Mode[] = [...Array(pairs).fill('ON'), ...Array(pairs).fill('OFF')];
     for (let i = modes.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [modes[i], modes[j]] = [modes[j], modes[i]]; }
     if (modes.some((m, i) => i >= 2 && m === modes[i - 1] && m === modes[i - 2])) continue;
+    if (first && modes[0] !== first) continue; // первый блок задан (например, выключить кампанию с завтрашнего дня)
     return modes.map((mode, i) => ({ from: addDays(start, i * blockDays), to: addDays(start, (i + 1) * blockDays - 1), mode }));
   }
-  return Array.from({ length: pairs * 2 }, (_, i) => ({ from: addDays(start, i * blockDays), to: addDays(start, (i + 1) * blockDays - 1), mode: i % 2 ? 'OFF' : 'ON' }));
+  return Array.from({ length: pairs * 2 }, (_, i) => ({ from: addDays(start, i * blockDays), to: addDays(start, (i + 1) * blockDays - 1), mode: (i % 2 ? 'OFF' : 'ON') === 'ON' ? (first === 'OFF' ? 'OFF' : 'ON') : (first === 'OFF' ? 'ON' : 'OFF') }));
 }
 
 const ACTIVE = ['PLANNED', 'RUNNING'];
